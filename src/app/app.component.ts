@@ -8,15 +8,17 @@ import { JobsStore } from './core/stores/jobs.store';
 import { LibraryStore } from './core/stores/library.store';
 import { ModelsStore } from './core/stores/models.store';
 import { ProfileStore } from './core/stores/profile.store';
+import { FirstRunDialogComponent } from './features/onboarding/first-run-dialog.component';
 import { FirstRunService } from './features/onboarding/first-run.service';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, ZardSonnerComponent],
+  imports: [RouterOutlet, ZardSonnerComponent, FirstRunDialogComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <router-outlet />
     <z-sonner />
+    <app-first-run-dialog />
   `,
 })
 export class AppComponent implements OnInit {
