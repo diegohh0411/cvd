@@ -189,3 +189,27 @@ async fn file_db_uses_wal() {
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(mode, "wal");
 }
+
+#[tokio::test]
+async fn open_external_tolerates_newer_schema() {
+    let dir = std::env::temp_dir().join(format!("cvd-ext-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let url = format!("sqlite://{}", dir.join("t.db").display());
+    let app = Store::open(&url).await.unwrap();
+    // Simulate a migration from a newer app build that this binary doesn't know.
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+         VALUES (9999, 'future', 1, x'00', 0)",
+    )
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    let ext = Store::open_external(&url).await;
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(ext.is_ok(), "{:?}", ext.err());
+    assert_eq!(n, 3, "external open must not apply migrations to an existing DB");
+}

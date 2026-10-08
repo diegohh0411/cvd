@@ -130,9 +130,7 @@ fn cv_from_row(r: &SqliteRow) -> Cv {
 }
 
 impl Store {
-    /// Opens (creating if needed) the database at `url` and runs migrations.
-    /// In-memory URLs use a single connection so the database is shared.
-    pub async fn open(url: &str) -> Result<Store> {
+    async fn connect(url: &str) -> Result<SqlitePool> {
         let mut opts = SqliteConnectOptions::from_str(url)?
             .create_if_missing(true)
             .foreign_keys(true);
@@ -146,7 +144,30 @@ impl Store {
                 .busy_timeout(Duration::from_secs(5));
         }
         let pool = pool_opts.connect_with(opts).await?;
+        Ok(pool)
+    }
+
+    /// Opens (creating if needed) the database at `url` and runs migrations.
+    /// In-memory URLs use a single connection so the database is shared.
+    pub async fn open(url: &str) -> Result<Store> {
+        let pool = Self::connect(url).await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
+        Ok(Store { pool })
+    }
+
+    /// Opens the database for a process other than the app (the MCP server).
+    /// An existing database is used as-is, never migrated, so an older or
+    /// newer build of this binary can't conflict with the app's schema.
+    pub async fn open_external(url: &str) -> Result<Store> {
+        let pool = Self::connect(url).await?;
+        let migrated: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
+        )
+        .fetch_one(&pool)
+        .await?;
+        if !migrated {
+            sqlx::migrate!("./migrations").run(&pool).await?;
+        }
         Ok(Store { pool })
     }
 

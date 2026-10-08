@@ -20,7 +20,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(dir)?;
     }
     eprintln!("cvd-mcp: using {}", path.display());
-    let store = Store::open(&format!("sqlite://{}", path.display())).await?;
+    let store = Store::open_external(&format!("sqlite://{}", path.display())).await?;
     CvServer::new(store).serve(rmcp::transport::stdio()).await?.waiting().await?;
     Ok(())
 }
