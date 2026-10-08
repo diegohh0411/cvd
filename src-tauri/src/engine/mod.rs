@@ -1,4 +1,5 @@
 mod fake;
+mod sidecar;
 mod types;
 mod wire;
 
@@ -7,6 +8,8 @@ use std::collections::BTreeMap;
 
 #[allow(unused_imports)]
 pub use fake::FakeDecisionEngine;
+#[allow(unused_imports)]
+pub use sidecar::{LlamaSidecar, TauriLauncher};
 pub use types::{Answer, EngineError, Question};
 #[allow(unused_imports)]
 pub use wire::{parse_wire_response, wire_request};

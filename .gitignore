@@ -47,3 +47,6 @@ Thumbs.db
 
 # Brainstorming companion mockups
 .superpowers/
+
+# llama-server sidecar (src-tauri/scripts/fetch-llama-server.sh)
+src-tauri/binaries/

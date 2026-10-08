@@ -15,7 +15,22 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![greet])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                shutdown_sidecar(app);
+            }
+        });
+}
+
+/// Kills the llama-server sidecar on exit. Task 9 manages an
+/// `Arc<engine::LlamaSidecar>` (inside AppState); until then nothing is managed.
+fn shutdown_sidecar(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(sidecar) = app.try_state::<std::sync::Arc<engine::LlamaSidecar>>() {
+        sidecar.shutdown();
+    }
 }
