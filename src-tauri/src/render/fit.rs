@@ -44,6 +44,8 @@ pub struct FitResult {
 }
 
 const MAX_STEP: u8 = 2;
+/// Below this last-page fill, below-floor entries are added as filler.
+const MIN_FILL: f32 = 0.75;
 const SKILL_MIN_PROB: f64 = 0.5;
 
 /// Selects the entries and bullets that fit in `budget` pages. See spec §5.
@@ -252,6 +254,34 @@ pub(crate) fn fit_with<'c>(
         }
     }
 
+    // Filler: if the last page is under MIN_FILL, add below-floor entries
+    // (volunteering first, then by score) at the current style, never adding a
+    // page. Each tries its top 2 bullets, then its top 1.
+    if compiled.fill < MIN_FILL {
+        let pages = compiled.pages;
+        let mut fillers: Vec<usize> = (0..eligible.len())
+            .filter(|&i| !eligible[i].is_empty() && !picks.iter().any(|p| p.idx == i))
+            .collect();
+        // `ranked.entries` is already score-desc, so a stable sort keeps that order.
+        fillers.sort_by_key(|&i| ranked.entries[i].entry.kind != EntryKind::Volunteer);
+        for idx in fillers {
+            if compiled.fill >= MIN_FILL {
+                break;
+            }
+            let top: Vec<i64> = eligible[idx].iter().take(2).map(|b| b.0).collect();
+            for n in (1..=top.len()).rev() {
+                let mut next = picks.clone();
+                next.push(Pick { idx, bullets: top[..n].to_vec(), pinned: false });
+                let c = f.compile_at(&next)?;
+                if c.pages <= pages {
+                    picks = next;
+                    compiled = c;
+                    break;
+                }
+            }
+        }
+    }
+
     let result =
         FitResult { selection: f.selection(&picks), style: f.style, compiled, overflow: false };
     Ok((result, f.compiles))
@@ -274,6 +304,13 @@ impl Fitter<'_, '_> {
             last = Some(c);
         }
         Ok(Err(last.expect("at least one step is tried")))
+    }
+
+    /// Compiles `picks` at the current step without tightening.
+    fn compile_at(&mut self, picks: &[Pick]) -> Result<Compiled, RenderError> {
+        let doc = self.doc(picks, self.style);
+        self.compiles += 1;
+        (self.compile)(&doc)
     }
 
     fn entry(&self, p: &Pick) -> &Entry {
