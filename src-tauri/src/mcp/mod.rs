@@ -17,6 +17,15 @@ use crate::store::{Store, StoreError};
 
 pub use validate::normalize_entry;
 
+/// Tauri's bundle identifier; `app_data_dir()` is `<data_dir>/<identifier>`.
+const APP_IDENTIFIER: &str = "com.diego.cv-decisions";
+
+/// Resolves the app database: `override_path` (from `CVD_DB_PATH`) or the
+/// same `cv.db` the desktop app opens.
+pub fn db_path_from(override_path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    override_path.or_else(|| dirs::data_dir().map(|d| d.join(APP_IDENTIFIER).join("cv.db")))
+}
+
 const INSTRUCTIONS: &str = "Stores the user's CV profile: experience, projects, education and volunteer entries. \
 Typical workflow: read the source (e.g. Notion pages), call list_entries and list_skills first, \
 then call upsert_entry once per entry, reusing existing skill names. Dates are YYYY-MM; \

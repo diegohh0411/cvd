@@ -92,3 +92,13 @@ async fn update_unknown_id_is_invalid_params() {
     e.id = Some(999);
     assert!(srv.upsert_entry(e, false).await.is_err());
 }
+
+#[test]
+fn db_path_prefers_env_override() {
+    assert_eq!(
+        super::db_path_from(Some("/tmp/x.db".into())),
+        Some(std::path::PathBuf::from("/tmp/x.db"))
+    );
+    let default = super::db_path_from(None).unwrap();
+    assert!(default.ends_with("com.diego.cv-decisions/cv.db"), "{}", default.display());
+}
