@@ -430,6 +430,58 @@ impl Store {
         Ok(rows.iter().map(skill_from_row).collect())
     }
 
+    /// Renames and recategorizes a skill. Renaming onto another skill's name
+    /// (case-insensitive) merges into it: entries move over and `id` is
+    /// deleted. Returns the surviving skill, or None when `id` does not exist.
+    pub async fn update_skill(&self, id: i64, name: &str, category: &str) -> Result<Option<Skill>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(StoreError::Invalid("skill name must not be empty".into()));
+        }
+        let mut tx = self.pool.begin().await?;
+        if sqlx::query("SELECT 1 FROM skill WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.is_none() {
+            return Ok(None);
+        }
+        let other: Option<i64> = sqlx::query_scalar("SELECT id FROM skill WHERE name = ? AND id != ?")
+            .bind(name)
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let target = match other {
+            Some(target) => {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO entry_skill (entry_id, skill_id)
+                     SELECT entry_id, ? FROM entry_skill WHERE skill_id = ?",
+                )
+                .bind(target)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&mut *tx).await?;
+                target
+            }
+            None => id,
+        };
+        sqlx::query("UPDATE skill SET name = ?, category = ? WHERE id = ?")
+            .bind(name)
+            .bind(category.trim())
+            .bind(target)
+            .execute(&mut *tx)
+            .await?;
+        let row = sqlx::query("SELECT id, name, category FROM skill WHERE id = ?")
+            .bind(target)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Some(skill_from_row(&row)))
+    }
+
+    /// Deletes a skill and unlinks it from every entry. Returns false when it does not exist.
+    pub async fn delete_skill(&self, id: i64) -> Result<bool> {
+        let done = sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&self.pool).await?;
+        Ok(done.rows_affected() > 0)
+    }
+
     // ---- job descriptions ----
 
     /// Inserts a job. `status_id: None` picks the first status (e.g. Bookmarked).

@@ -161,3 +161,53 @@ async fn upsert_job_status_creates_and_renames() {
         .unwrap();
     assert_eq!((renamed.name.as_str(), renamed.color), ("Declined", StatusColor::Gray));
 }
+
+#[tokio::test]
+async fn update_skill_renames_and_sets_category() {
+    let s = server().await;
+    s.upsert_entry(entry("2022-01", None), false).await.unwrap();
+    let id = s.store.list_skills().await.unwrap()[0].id;
+    let sk = s
+        .update_skill(super::UpdateSkillArgs { id, name: " Rust (lang) ".into(), category: "Languages".into() })
+        .await
+        .unwrap();
+    assert_eq!((sk.id, sk.name.as_str(), sk.category.as_str()), (id, "Rust (lang)", "Languages"));
+}
+
+#[tokio::test]
+async fn update_skill_onto_existing_name_merges() {
+    let s = server().await;
+    let mut a = entry("2022-01", None);
+    a.skills = vec!["Rust".into(), "Backend".into()];
+    s.upsert_entry(a, false).await.unwrap();
+    let mut b = entry("2023-01", None);
+    b.skills = vec!["Backend".into()];
+    s.upsert_entry(b, false).await.unwrap();
+    let skills = s.store.list_skills().await.unwrap();
+    let backend = skills.iter().find(|k| k.name == "Backend").unwrap().id;
+    let rust = skills.iter().find(|k| k.name == "Rust").unwrap().id;
+    let merged = s
+        .update_skill(super::UpdateSkillArgs { id: backend, name: "rust".into(), category: String::new() })
+        .await
+        .unwrap();
+    assert_eq!(merged.id, rust);
+    assert_eq!(s.store.list_skills().await.unwrap().len(), 1);
+    for e in s.list_entries(true).await.unwrap() {
+        let names: Vec<_> = e.skills.iter().map(|k| k.name.as_str()).collect();
+        assert_eq!(names, vec!["rust"]);
+    }
+}
+
+#[tokio::test]
+async fn delete_skill_unlinks_and_rejects_unknown() {
+    let s = server().await;
+    s.upsert_entry(entry("2022-01", None), false).await.unwrap();
+    let id = s.store.list_skills().await.unwrap()[0].id;
+    s.delete_skill(id).await.unwrap();
+    assert!(s.list_entries(true).await.unwrap()[0].skills.is_empty());
+    assert!(s.delete_skill(id).await.is_err());
+    assert!(s
+        .update_skill(super::UpdateSkillArgs { id, name: "X".into(), category: String::new() })
+        .await
+        .is_err());
+}

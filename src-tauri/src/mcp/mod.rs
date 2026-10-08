@@ -30,6 +30,7 @@ const INSTRUCTIONS: &str = "Stores the user's CV profile: experience, projects, 
 Typical workflow: read the source (e.g. Notion pages), call list_entries and list_skills first, \
 then call upsert_entry once per entry, reusing existing skill names. Dates are YYYY-MM; \
 omit end_date for ongoing roles. To change an existing entry pass its id. Use dry_run to preview. \
+update_skill renames, recategorizes or merges skills; delete_skill removes one from every entry. \
 It also tracks job applications: list_jobs shows saved postings with their status and URL; \
 upsert_job saves a new posting or moves an existing one to another status (names from list_job_statuses); \
 upsert_job_status adds or edits the status labels themselves.";
@@ -71,6 +72,23 @@ pub struct EntryList {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SkillList {
     pub skills: Vec<Skill>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UpdateSkillArgs {
+    /// Skill id from list_skills.
+    pub id: i64,
+    /// New name. Using another skill's name merges this skill into it.
+    pub name: String,
+    /// Group shown on the CV (e.g. "Languages", "Frameworks"); "" for none.
+    #[serde(default)]
+    pub category: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DeleteSkillArgs {
+    /// Skill id from list_skills.
+    pub id: i64,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -186,6 +204,21 @@ impl CvServer {
         }
         let id = self.store.upsert_entry(&entry).await.map_err(internal)?;
         Ok(UpsertEntryResult { id: Some(id), entry })
+    }
+
+    pub async fn update_skill(&self, a: UpdateSkillArgs) -> Result<Skill, ErrorData> {
+        self.store
+            .update_skill(a.id, &a.name, &a.category)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| ErrorData::invalid_params(format!("no skill with id {}", a.id), None))
+    }
+
+    pub async fn delete_skill(&self, id: i64) -> Result<(), ErrorData> {
+        if !self.store.delete_skill(id).await.map_err(internal)? {
+            return Err(ErrorData::invalid_params(format!("no skill with id {id}"), None));
+        }
+        Ok(())
     }
 
     pub async fn list_jobs(&self) -> Result<Vec<JobSummary>, ErrorData> {
@@ -305,6 +338,20 @@ impl CvServer {
     #[tool(name = "list_skills")]
     async fn tool_list_skills(&self) -> Result<Json<SkillList>, ErrorData> {
         Ok(Json(SkillList { skills: self.store.list_skills().await.map_err(internal)? }))
+    }
+
+    /// Rename a skill and/or set its category. Renaming onto an existing skill's
+    /// name merges the two: entries move to that skill and this one is deleted.
+    #[tool(name = "update_skill")]
+    async fn tool_update_skill(&self, Parameters(a): Parameters<UpdateSkillArgs>) -> Result<Json<Skill>, ErrorData> {
+        Ok(Json(self.update_skill(a).await?))
+    }
+
+    /// Delete a skill and remove it from every entry.
+    #[tool(name = "delete_skill")]
+    async fn tool_delete_skill(&self, Parameters(a): Parameters<DeleteSkillArgs>) -> Result<String, ErrorData> {
+        self.delete_skill(a.id).await?;
+        Ok("ok".into())
     }
 
     /// Get the profile header (name, headline, contact, summary).
