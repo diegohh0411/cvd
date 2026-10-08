@@ -2,7 +2,7 @@
 
 use std::sync::OnceLock;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use typst::foundations::{Dict, IntoValue};
 use typst::layout::{Frame, FrameItem};
 use typst_layout::PagedDocument;
@@ -11,6 +11,10 @@ use typst_pdf::PdfOptions;
 
 use crate::store::types::Profile;
 
+pub mod fit;
+
+#[cfg(test)]
+mod fit_tests;
 #[cfg(test)]
 mod tests;
 
@@ -22,7 +26,7 @@ pub enum SectionHeading {
     Skills,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StyleStep(pub u8);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -48,7 +52,7 @@ pub struct CvDoc {
     pub style: StyleStep,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Compiled {
     pub pages: usize,
     pub fill: f32,
