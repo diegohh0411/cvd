@@ -15,7 +15,7 @@
 #show link: set text(fill: rgb("#1f4e9c"))
 
 // Section heading: bold, slightly larger, with a full-width rule underneath.
-#show heading: it => block(above: st.section_gap * 1pt, below: st.gap * 1.2pt, sticky: true, {
+#show heading: it => block(above: st.section_gap * 1pt + 0.6em, below: st.gap * 1.2pt, sticky: true, {
   stack(spacing: 3pt,
     text(size: st.font_size * 1.2pt, weight: "bold", tracking: 0.04em, it.body),
     line(length: 100%, stroke: 0.6pt + ink))
@@ -52,7 +52,9 @@
 // Falls back to a single line when there is no org.
 #for section in d.sections {
   heading(level: 1, section.heading)
-  for item in section.items {
+  for (i, item) in section.items.enumerate() {
+    // Breathing gap between entries (not between heading and first entry).
+    if i > 0 { v(0.6em) }
     block(above: st.gap * 1.8pt, below: st.gap * 1pt, breakable: true, {
       if item.org != "" {
         text(weight: "bold", item.org)
