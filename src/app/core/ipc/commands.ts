@@ -11,10 +11,13 @@ import type {
   FitOutput,
   JobDescription,
   JobStatus,
+  KeyStatus,
   MatchRun,
   ModelInfo,
   Override,
   Profile,
+  ProviderId,
+  ProviderModels,
   Ranked,
   ScoreRow,
   Selection,
@@ -79,3 +82,9 @@ export const downloadModel = (id: string) => call<void>('download_model', { id }
 export const cancelDownload = (id: string) => call<void>('cancel_download', { id });
 export const setActiveModel = (id: string) => call<void>('set_active_model', { id });
 export const engineStatus = () => call<EngineStatus>('engine_status');
+
+// ---- online providers ----
+export const setProviderKey = (provider: ProviderId, key: string) => call<KeyStatus>('set_provider_key', { provider, key });
+export const deleteProviderKey = (provider: ProviderId) => call<void>('delete_provider_key', { provider });
+export const providerKeyStatus = (provider: ProviderId) => call<KeyStatus>('provider_key_status', { provider });
+export const listRemoteModels = (refresh: boolean) => call<ProviderModels[]>('list_remote_models', { refresh });

@@ -173,7 +173,38 @@ export interface EngineStatus {
   error: string | null;
 }
 
-export type AppErrorKind = 'NotFound' | 'ModelMissing' | 'EngineUnavailable' | 'ContextOverflow' | 'Render' | 'Io';
+export type AppErrorKind =
+  | 'NotFound'
+  | 'ModelMissing'
+  | 'EngineUnavailable'
+  | 'ContextOverflow'
+  | 'Render'
+  | 'Io'
+  | 'ProviderAuth'
+  | 'ProviderCredits'
+  | 'ProviderUnavailable';
+
+export type ProviderId = 'openrouter';
+
+export interface KeyStatus {
+  has_key: boolean;
+  last4: string | null;
+}
+
+export interface RemoteModel {
+  provider: string;
+  id: string;
+  display_name: string;
+  context_length: number | null;
+  /** USD per million input tokens. */
+  price_per_mtok_in: number | null;
+}
+
+export interface ProviderModels {
+  provider: string;
+  models: RemoteModel[];
+  error: string | null;
+}
 
 export interface AppError {
   kind: AppErrorKind;

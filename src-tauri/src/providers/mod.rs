@@ -31,6 +31,7 @@ impl ModelRef {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn encode(&self) -> String {
         if self.provider == LOCAL {
             self.id.clone()
