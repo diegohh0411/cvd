@@ -39,9 +39,9 @@ export function formatDuration(ms: number | null): string {
   imports: [...ZardCardImports, FillMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="grid auto-rows-min gap-4 md:grid-cols-3">
+    <div class="grid auto-rows-min gap-4 md:grid-cols-2 xl:grid-cols-3">
       <z-card class="gap-3 py-4">
-        <z-card-header><z-card-title class="text-sm">Role signals</z-card-title></z-card-header>
+        <z-card-header><z-card-title class="text-sm" zTitle="Role signals" /></z-card-header>
         <z-card-content class="flex flex-col gap-2 text-sm">
           <div class="flex flex-wrap gap-1.5">
             @if (signals().seniority; as s) {
@@ -66,7 +66,7 @@ export function formatDuration(ms: number | null): string {
       </z-card>
 
       <z-card class="gap-3 py-4">
-        <z-card-header><z-card-title class="text-sm">Match summary</z-card-title></z-card-header>
+        <z-card-header><z-card-title class="text-sm" zTitle="Match summary" /></z-card-header>
         <z-card-content class="grid grid-cols-2 gap-y-2 text-sm">
           @if (ws.counts(); as c) {
             <span class="text-muted-foreground">Entries</span><span class="tabular-nums">{{ c.entries }} / {{ c.totalEntries }}</span>
@@ -77,8 +77,8 @@ export function formatDuration(ms: number | null): string {
         </z-card-content>
       </z-card>
 
-      <z-card class="gap-3 py-4">
-        <z-card-header><z-card-title class="text-sm">Page fit</z-card-title></z-card-header>
+      <z-card class="gap-3 py-4 md:col-span-2 xl:col-span-1">
+        <z-card-header><z-card-title class="text-sm" zTitle="Page fit" /></z-card-header>
         <z-card-content class="flex flex-col gap-3 text-sm">
           <app-fill-meter [pages]="ws.fit()?.pages ?? null" [fill]="ws.fit()?.fill ?? 0" [overflow]="ws.fit()?.overflow ?? false" [busy]="ws.fitting()" />
           <div class="grid grid-cols-2 gap-2">

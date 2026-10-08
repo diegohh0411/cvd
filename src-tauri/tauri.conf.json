@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "cv-decisions",
-        "width": 800,
-        "height": 600
+        "title": "CV Decisions",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600
       }
     ],
     "security": {

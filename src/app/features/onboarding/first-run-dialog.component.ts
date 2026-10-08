@@ -23,19 +23,19 @@ export const FIRST_RUN_STEPS = ['Profile', 'Model', 'First entry'] as const;
   imports: [...ZardDialogImports, ZardButtonComponent, ProfileFormComponent, ModelCardsComponent, EntryFormComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <z-dialog [zVisible]="firstRun.visible()" (zVisibleChange)="!$event && firstRun.close()" zWidth="min(680px, 96vw)" [zMaskClosable]="false">
+    <z-dialog [zVisible]="firstRun.visible()" (zVisibleChange)="!$event && firstRun.close()" class="sm:max-w-2xl" [zMaskClosable]="false">
       <z-dialog-header>
         <z-dialog-title>Welcome to CV Decisions</z-dialog-title>
         <z-dialog-description>
           Step {{ step() + 1 }} of {{ steps.length }} · {{ steps[step()] }}
         </z-dialog-description>
       </z-dialog-header>
-      <ol class="flex gap-2 px-6" aria-hidden="true">
+      <ol class="flex gap-2" aria-hidden="true">
         @for (s of steps; track s; let i = $index) {
           <li class="h-1 flex-1 rounded-full" [class]="i <= step() ? 'bg-primary' : 'bg-muted'"></li>
         }
       </ol>
-      <div class="max-h-[60vh] overflow-y-auto px-6 py-4" data-testid="first-run-body">
+      <div class="-mx-1 max-h-[60vh] overflow-y-auto px-1 py-2" data-testid="first-run-body">
         @switch (step()) {
           @case (0) {
             <p class="text-muted-foreground mb-3 text-sm">This goes in your CV header. Everything stays on this computer.</p>

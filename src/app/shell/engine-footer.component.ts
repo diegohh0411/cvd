@@ -30,7 +30,9 @@ import { EngineStore } from '../core/stores/engine.store';
 })
 export class EngineFooterComponent {
   private readonly engine = inject(EngineStore);
-  protected readonly text = computed(() => `${this.engine.modelLabel()} · ${this.engine.stateLabel()}`);
+  protected readonly text = computed(() =>
+    this.engine.status().state === 'none' ? 'No model active' : `${this.engine.modelLabel()} · ${this.engine.stateLabel()}`,
+  );
   protected readonly dot = computed(() => {
     switch (this.engine.status().state) {
       case 'idle':
