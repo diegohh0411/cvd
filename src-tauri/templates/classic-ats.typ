@@ -31,16 +31,18 @@
 
 // Header
 #align(center, {
-  text(size: st.font_size * 2.1pt, weight: "bold", tracking: 0.02em, p.name)
+  // Extra room under the name so it doesn't crowd the contact line.
+  block(below: st.gap * 1pt + 0.6em,
+    text(size: st.font_size * 2.1pt, weight: "bold", tracking: 0.02em, p.name))
+  let lines = ()
   if p.headline != "" {
-    linebreak()
-    text(size: st.font_size * 1.1pt, fill: muted, p.headline)
+    lines.push(text(size: st.font_size * 1.1pt, fill: muted, p.headline))
   }
   let contact = (p.email, p.phone, p.location).filter(s => s != "") + p.links
   if contact.len() > 0 {
-    linebreak()
-    contact.map(contact-entry).join(text(fill: muted, "  |  "))
+    lines.push(contact.map(contact-entry).join(text(fill: muted, "  |  ")))
   }
+  lines.join(linebreak())
 })
 
 #if p.summary != "" {
