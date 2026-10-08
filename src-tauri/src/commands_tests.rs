@@ -226,3 +226,34 @@ async fn cancel_download_unknown_is_not_found() {
     st.finish_download("clef-flash");
     assert!(st.register_download("clef-flash").is_some());
 }
+
+#[tokio::test]
+async fn missing_key_status() {
+    let (st, _) = state().await;
+    st.reload_providers().await.unwrap();
+    st.store.set_setting(ACTIVE_MODEL_KEY, "openrouter:typesafe/jev-1.13").await.unwrap();
+    let s = engine_status(&st).await.unwrap();
+    assert_eq!(s.state, "error");
+    assert!(s.error.unwrap().contains("OpenRouter key"));
+    st.store.upsert_entry(&entry("Engineer")).await.unwrap();
+    let jd = st.store.create_jd("Rust role", "Acme", "We need Rust", "", None).await.unwrap();
+    let err = start_match(&st, jd).await.unwrap_err();
+    assert!(err.to_string().contains("OpenRouter key"), "{err}");
+    assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_err());
+}
+
+#[tokio::test]
+async fn bare_local_id_still_local() {
+    let store = Store::open("sqlite::memory:").await.unwrap();
+    let st = AppState::new(
+        store,
+        std::env::temp_dir().join("cvd-test-models-empty"),
+        EngineSource::Fixed(Arc::new(fake())),
+        Arc::new(|_: &str, _| {}),
+    );
+    st.reload_providers().await.unwrap();
+    // Local refs keep the Fixed short-circuit; remote refs never do.
+    assert!(st.engine_for("clef-flash").is_ok());
+    assert!(st.engine_for("openrouter:x").is_err());
+    assert_eq!(st.installed_path("clef-flash").unwrap_err().kind(), "ModelMissing");
+}

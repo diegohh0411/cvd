@@ -78,6 +78,15 @@ impl From<EngineError> for AppError {
     }
 }
 
+impl From<crate::providers::ProviderError> for AppError {
+    fn from(e: crate::providers::ProviderError) -> Self {
+        match e {
+            crate::providers::ProviderError::Missing(m) => Self::ModelMissing(m),
+            _ => Self::EngineUnavailable(e.to_string()),
+        }
+    }
+}
+
 impl From<MatchError> for AppError {
     fn from(e: MatchError) -> Self {
         match e {

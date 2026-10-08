@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::AppError;
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
 use crate::models::{self, REGISTRY};
+use crate::providers::{ModelRef, ProviderRegistry, OPENROUTER_BASE};
 use crate::store::Store;
 
 /// Settings key holding the active model id.
@@ -42,6 +43,9 @@ pub struct AppState {
     /// Last engine failure, shown in the UI until the engine is reset or a run succeeds.
     engine_error: Arc<Mutex<Option<String>>>,
     emit: Emitter,
+    /// Remote providers with keys; rebuilt by `reload_providers`.
+    providers: RwLock<Arc<ProviderRegistry>>,
+    pub openrouter_base: String,
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -69,7 +73,26 @@ impl AppState {
             downloads: Mutex::default(),
             engine_error: Arc::default(),
             emit,
+            providers: RwLock::default(),
+            openrouter_base: OPENROUTER_BASE.into(),
         }
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_openrouter_base(mut self, base: String) -> Self {
+        self.openrouter_base = base;
+        self
+    }
+
+    /// Rebuilds the provider registry from the stored keys.
+    pub async fn reload_providers(&self) -> Result<(), AppError> {
+        let reg = ProviderRegistry::load(&self.store, &self.openrouter_base).await?;
+        *self.providers.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(reg);
+        Ok(())
+    }
+
+    pub fn providers(&self) -> Arc<ProviderRegistry> {
+        self.providers.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn emitter(&self) -> Emitter {
@@ -91,7 +114,11 @@ impl AppState {
         if let Some(b) = slot.as_ref().filter(|b| b.model_id == model_id) {
             return Ok(b.engine.clone());
         }
+        let r = ModelRef::parse(model_id);
         let built = match &self.source {
+            _ if !r.is_local() => {
+                Built { model_id: model_id.into(), engine: self.providers().engine(&r)?, sidecar: None }
+            }
             EngineSource::Fixed(e) => Built { model_id: model_id.into(), engine: e.clone(), sidecar: None },
             EngineSource::Sidecar(app) => {
                 let path = self.installed_path(model_id)?;
@@ -119,10 +146,22 @@ impl AppState {
     pub async fn engine_status(&self) -> Result<EngineStatus, AppError> {
         let model_id = self.store.get_setting(ACTIVE_MODEL_KEY).await?;
         let error = lock(&self.engine_error).clone();
+        let remote_problem = model_id
+            .as_deref()
+            .map(ModelRef::parse)
+            .filter(|r| !r.is_local())
+            .and_then(|r| self.providers().check(&r).err());
+        let error = error.or(remote_problem.map(|e| e.to_string()));
         let state = match &model_id {
             None => "none",
             Some(_) if error.is_some() => "error",
-            Some(id) if self.installed_path(id).is_err() && matches!(self.source, EngineSource::Sidecar(_)) => "missing",
+            Some(id)
+                if ModelRef::parse(id).is_local()
+                    && self.installed_path(id).is_err()
+                    && matches!(self.source, EngineSource::Sidecar(_)) =>
+            {
+                "missing"
+            }
             Some(id) => {
                 let slot = lock(&self.engine);
                 let running = slot

@@ -42,6 +42,7 @@ pub fn run() {
                     let _ = emit_handle.emit(event, payload);
                 }),
             );
+            tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
             Ok(())
         })

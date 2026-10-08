@@ -1,6 +1,7 @@
 //! Inference providers: where a decision model runs. Local models keep going
 //! through `AppState`'s sidecar path; remote providers implement `Provider`.
 mod openrouter;
+mod registry;
 
 use std::sync::Arc;
 
@@ -8,7 +9,8 @@ use async_trait::async_trait;
 
 use crate::engine::DecisionEngine;
 
-pub use openrouter::{OpenRouterProvider, OPENROUTER_BASE};
+pub use openrouter::{OpenRouterProvider, OPENROUTER, OPENROUTER_BASE};
+pub use registry::{ProviderModels, ProviderRegistry};
 
 pub const LOCAL: &str = "local";
 
