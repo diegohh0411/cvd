@@ -6,6 +6,7 @@ mod engine;
 mod matcher;
 #[allow(dead_code)]
 mod models;
+mod providers;
 #[allow(dead_code)]
 mod render;
 mod state;
