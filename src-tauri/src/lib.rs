@@ -6,6 +6,8 @@ mod models;
 mod engine;
 #[allow(dead_code)]
 mod matcher;
+#[allow(dead_code)]
+mod render;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
