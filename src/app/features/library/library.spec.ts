@@ -106,3 +106,14 @@ describe('LibraryPageComponent', () => {
     expect(el.textContent).not.toContain('Old job');
   });
 });
+
+describe('month field conversion', () => {
+  it('round-trips YYYY-MM through a local Date', async () => {
+    const { monthToDate, dateToMonth } = await import('./month-field.component');
+    const d = monthToDate('2023-03')!;
+    expect([d.getFullYear(), d.getMonth(), d.getDate()]).toEqual([2023, 2, 1]);
+    expect(dateToMonth(new Date(2024, 10, 17))).toBe('2024-11');
+    expect(monthToDate('')).toBeNull();
+    expect(monthToDate(null)).toBeNull();
+  });
+});

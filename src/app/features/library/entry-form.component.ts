@@ -7,6 +7,7 @@ import { KIND_LABELS } from '../../core/format';
 import { ENTRY_KINDS, type EntryInput } from '../../core/ipc/types';
 import { LibraryStore } from '../../core/stores/library.store';
 import { BulletListEditorComponent } from './bullet-list-editor.component';
+import { MonthFieldComponent } from './month-field.component';
 import { SkillInputComponent } from './skill-input.component';
 
 /** Problems that block saving; empty when the draft is valid. */
@@ -32,7 +33,7 @@ export function cleanInput(e: EntryInput): EntryInput {
 
 @Component({
   selector: 'app-entry-form',
-  imports: [FormsModule, ZardInputComponent, ZardSwitchComponent, BulletListEditorComponent, SkillInputComponent],
+  imports: [FormsModule, ZardInputComponent, ZardSwitchComponent, BulletListEditorComponent, SkillInputComponent, MonthFieldComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="grid gap-4">
@@ -66,17 +67,16 @@ export function cleanInput(e: EntryInput): EntryInput {
       <div class="grid grid-cols-2 gap-3">
         <div class="grid gap-1.5">
           <label class="text-sm font-medium" for="e-start">Start</label>
-          <input z-input id="e-start" type="month" [ngModel]="draft().start_date" (ngModelChange)="patch({ start_date: $event })" />
+          <app-month-field fieldId="e-start" [value]="draft().start_date || null" (valueChange)="patch({ start_date: $event ?? '' })" />
         </div>
         <div class="grid gap-1.5">
           <label class="text-sm font-medium" for="e-end">End</label>
-          <input
-            z-input
-            id="e-end"
-            type="month"
+          <app-month-field
+            fieldId="e-end"
+            [value]="draft().end_date"
+            (valueChange)="patch({ end_date: $event })"
             [disabled]="current()"
-            [ngModel]="draft().end_date ?? ''"
-            (ngModelChange)="patch({ end_date: $event || null })"
+            [placeholder]="current() ? 'Present' : 'Pick a month'"
           />
           <label class="text-muted-foreground flex items-center gap-2 text-xs">
             <input type="checkbox" [checked]="current()" (change)="setCurrent($any($event.target).checked)" /> Present
