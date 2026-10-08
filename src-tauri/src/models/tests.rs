@@ -46,3 +46,12 @@ fn installed_requires_size_match() {
     assert!(model_path(spec, dir.path()).is_some());
     assert!(installed(dir.path()).is_empty());
 }
+
+#[test]
+fn registry_includes_d1_3b_and_ids_are_unique() {
+    assert!(REGISTRY.iter().any(|s| s.id == "d1-3b"));
+    let mut ids: Vec<_> = REGISTRY.iter().map(|s| s.id).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), REGISTRY.len());
+}

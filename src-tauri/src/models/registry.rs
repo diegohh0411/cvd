@@ -40,4 +40,14 @@ pub const KEV_4B: ModelSpec = ModelSpec {
     min_ram_gb: 6,
 };
 
-pub static REGISTRY: &[ModelSpec] = &[CLEF_FLASH, CLEF_27B, KEV_4B];
+pub const D1_3B: ModelSpec = ModelSpec {
+    id: "d1-3b",
+    label: "Liquid d1-3B (small)",
+    hf_repo: "LiquidAI/d1-3B-GGUF",
+    hf_file: "d1-3B-Q4_K_M.gguf",
+    sha256: "16aff27ea2eefdc32b9897f43854a5d3170c1dc8dccb9c756905af30a4e22402",
+    size_bytes: 1_674_456_672,
+    min_ram_gb: 4,
+};
+
+pub static REGISTRY: &[ModelSpec] = &[CLEF_FLASH, CLEF_27B, KEV_4B, D1_3B];
