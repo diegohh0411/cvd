@@ -165,3 +165,27 @@ async fn list_runs_newest_first_per_job() {
     let ids: Vec<i64> = s.list_runs(jd).await.unwrap().iter().map(|r| r.id).collect();
     assert_eq!(ids, vec![b, a]);
 }
+
+#[tokio::test]
+async fn find_entry_by_key_matches_case_insensitively() {
+    let s = store().await;
+    let id = s.upsert_entry(&input("Engineer", &[], &[])).await.unwrap();
+    assert_eq!(
+        s.find_entry_by_key(EntryKind::Experience, "engineer", "ACME", "2022-01").await.unwrap(),
+        Some(id)
+    );
+    assert_eq!(
+        s.find_entry_by_key(EntryKind::Project, "Engineer", "Acme", "2022-01").await.unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn file_db_uses_wal() {
+    let dir = std::env::temp_dir().join(format!("cvd-wal-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let s = Store::open(&format!("sqlite://{}", dir.join("t.db").display())).await.unwrap();
+    let mode: String = sqlx::query_scalar("PRAGMA journal_mode").fetch_one(&s.pool).await.unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(mode, "wal");
+}
