@@ -38,7 +38,20 @@ pub struct AppState {
     source: EngineSource,
     engine: Mutex<Option<Built>>,
     runs: Arc<Mutex<HashMap<i64, CancellationToken>>>,
+    downloads: Mutex<HashMap<String, CancellationToken>>,
+    /// Last engine failure, shown in the UI until the engine is reset or a run succeeds.
+    engine_error: Arc<Mutex<Option<String>>>,
     emit: Emitter,
+}
+
+/// What the sidebar footer shows about the decision engine.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct EngineStatus {
+    pub model_id: Option<String>,
+    /// `none` (no active model), `missing` (active model not installed),
+    /// `idle` (starts on the next match), `ready` (server running) or `error`.
+    pub state: &'static str,
+    pub error: Option<String>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -53,6 +66,8 @@ impl AppState {
             source,
             engine: Mutex::new(None),
             runs: Arc::default(),
+            downloads: Mutex::default(),
+            engine_error: Arc::default(),
             emit,
         }
     }
@@ -101,8 +116,56 @@ impl AppState {
         models::model_path(spec, &self.models_dir).ok_or_else(missing)
     }
 
+    pub async fn engine_status(&self) -> Result<EngineStatus, AppError> {
+        let model_id = self.store.get_setting(ACTIVE_MODEL_KEY).await?;
+        let error = lock(&self.engine_error).clone();
+        let state = match &model_id {
+            None => "none",
+            Some(_) if error.is_some() => "error",
+            Some(id) if self.installed_path(id).is_err() && matches!(self.source, EngineSource::Sidecar(_)) => "missing",
+            Some(id) => {
+                let slot = lock(&self.engine);
+                let running = slot
+                    .as_ref()
+                    .filter(|b| &b.model_id == id)
+                    .and_then(|b| b.sidecar.as_ref())
+                    .is_some_and(|s| s.is_running());
+                if running || matches!(self.source, EngineSource::Fixed(_)) && slot.is_some() {
+                    "ready"
+                } else {
+                    "idle"
+                }
+            }
+        };
+        Ok(EngineStatus { model_id, state, error })
+    }
+
+    pub fn engine_error_slot(&self) -> Arc<Mutex<Option<String>>> {
+        self.engine_error.clone()
+    }
+
+    /// Registers a cancellable download; `None` if `id` is already downloading.
+    pub fn register_download(&self, id: &str) -> Option<CancellationToken> {
+        let mut d = lock(&self.downloads);
+        if d.contains_key(id) {
+            return None;
+        }
+        let token = CancellationToken::new();
+        d.insert(id.to_string(), token.clone());
+        Some(token)
+    }
+
+    pub fn finish_download(&self, id: &str) {
+        lock(&self.downloads).remove(id);
+    }
+
+    pub fn cancel_download(&self, id: &str) -> bool {
+        lock(&self.downloads).get(id).map(|t| t.cancel()).is_some()
+    }
+
     /// Drops the cached engine (and kills its sidecar).
     pub fn reset_engine(&self) {
+        *lock(&self.engine_error) = None;
         if let Some(s) = lock(&self.engine).take().and_then(|b| b.sidecar) {
             s.shutdown();
         }
@@ -139,6 +202,10 @@ impl AppState {
     pub fn is_running(&self, run_id: i64) -> bool {
         lock(&self.runs).contains_key(&run_id)
     }
+}
+
+pub fn set_engine_error(slot: &Mutex<Option<String>>, error: Option<String>) {
+    *lock(slot) = error;
 }
 
 pub fn remove_run(runs: &Mutex<HashMap<i64, CancellationToken>>, run_id: i64) {

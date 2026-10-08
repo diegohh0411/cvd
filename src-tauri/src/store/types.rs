@@ -97,6 +97,7 @@ pub struct MatchRun {
     pub jd_id: i64,
     pub model_id: String,
     pub status: RunStatus,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

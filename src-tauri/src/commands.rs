@@ -18,8 +18,12 @@ use crate::store::StoreError;
 
 pub const MATCH_EVENT: &str = "match://progress";
 pub const DOWNLOAD_EVENT: &str = "model://download";
+pub const ENGINE_EVENT: &str = "engine://status";
+/// Settings keys the webview may read and write (UI preferences only).
+const UI_SETTING_PREFIX: &str = "ui.";
 const TEMPLATE: &str = "Classic ATS";
 const DOWNLOAD_ATTEMPTS: usize = 4;
+pub const DOWNLOAD_PAUSED: &str = "Download paused.";
 const EMPTY_LIBRARY: &str = "Add at least one entry to your library first.";
 
 /// Serialized as `{ kind, message }`.
@@ -189,6 +193,7 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
         .register_run(run_id)
         .ok_or_else(|| AppError::Io(format!("Match run {run_id} is already running.")))?;
     let (store, emit, runs) = (st.store.clone(), st.emitter(), st.runs());
+    let engine_error = st.engine_error_slot();
     tokio::spawn(async move {
         let progress_emit = emit.clone();
         let outcome = matcher::resume_match(
@@ -200,6 +205,13 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
             move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p })),
         )
         .await;
+        match &outcome {
+            Ok(_) => crate::state::set_engine_error(&engine_error, None),
+            Err(MatchError::Engine(e)) if !matches!(e, EngineError::ContextOverflow) => {
+                crate::state::set_engine_error(&engine_error, Some(e.to_string()))
+            }
+            _ => {}
+        }
         match outcome {
             Ok(_) => {}
             Err(MatchError::Cancelled { .. }) => {
@@ -211,8 +223,20 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
             ),
         }
         crate::state::remove_run(&runs, run_id);
+        emit(ENGINE_EVENT, json!({}));
     });
     Ok(())
+}
+
+pub async fn list_runs(st: &AppState, jd_id: i64) -> Res<Vec<MatchRun>> {
+    Ok(st.store.list_runs(jd_id).await?)
+}
+
+/// Every persisted score of a run, with raw probabilities (rubric breakdown,
+/// role signals); the UI filters by target.
+pub async fn get_scores(st: &AppState, run_id: i64) -> Res<Vec<ScoreRow>> {
+    st.store.get_run(run_id).await?;
+    Ok(st.store.scores_for_run(run_id).await?)
 }
 
 pub async fn get_ranked(st: &AppState, run_id: i64) -> Res<Ranked> {
@@ -303,7 +327,43 @@ pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: S
         .await?)
 }
 
+pub async fn list_cvs(st: &AppState, jd_id: i64) -> Res<Vec<Cv>> {
+    Ok(st.store.list_cvs(jd_id).await?)
+}
+
+// ---- settings ----
+
+fn ui_key(key: &str) -> Res<()> {
+    if key.starts_with(UI_SETTING_PREFIX) {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("Unknown setting {key}.")))
+    }
+}
+
+pub async fn get_ui_setting(st: &AppState, key: &str) -> Res<Option<String>> {
+    ui_key(key)?;
+    Ok(st.store.get_setting(key).await?)
+}
+
+pub async fn set_ui_setting(st: &AppState, key: &str, value: &str) -> Res<()> {
+    ui_key(key)?;
+    Ok(st.store.set_setting(key, value).await?)
+}
+
 // ---- models ----
+
+pub async fn engine_status(st: &AppState) -> Res<crate::state::EngineStatus> {
+    st.engine_status().await
+}
+
+pub fn cancel_download(st: &AppState, id: &str) -> Res<()> {
+    if st.cancel_download(id) {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("Model {id} is not downloading.")))
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct ModelInfo {
@@ -329,6 +389,18 @@ pub async fn download_model(st: &AppState, id: &str) -> Res<()> {
     if models::installed(&st.models_dir).contains(&spec) {
         return Ok(());
     }
+    let token = st
+        .register_download(spec.id)
+        .ok_or_else(|| AppError::Io(format!("Model {id} is already downloading.")))?;
+    let out = tokio::select! {
+        r = download_attempts(st, spec) => r,
+        _ = token.cancelled() => Err(AppError::Io(DOWNLOAD_PAUSED.into())),
+    };
+    st.finish_download(spec.id);
+    out
+}
+
+async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
     let mut last = None;
     for _ in 0..DOWNLOAD_ATTEMPTS {
         let emit = st.emitter();
@@ -348,6 +420,7 @@ pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     st.installed_path(id)?;
     st.store.set_setting(crate::state::ACTIVE_MODEL_KEY, id).await?;
     st.reset_engine();
+    (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
 }
 
@@ -406,6 +479,34 @@ pub mod ipc {
     #[tauri::command]
     pub async fn resume_match(st: S<'_>, run_id: i64) -> Res<()> {
         super::resume_match(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn list_runs(st: S<'_>, jd_id: i64) -> Res<Vec<MatchRun>> {
+        super::list_runs(&st, jd_id).await
+    }
+    #[tauri::command]
+    pub async fn get_scores(st: S<'_>, run_id: i64) -> Res<Vec<ScoreRow>> {
+        super::get_scores(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn list_cvs(st: S<'_>, jd_id: i64) -> Res<Vec<Cv>> {
+        super::list_cvs(&st, jd_id).await
+    }
+    #[tauri::command]
+    pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {
+        super::get_ui_setting(&st, &key).await
+    }
+    #[tauri::command]
+    pub async fn set_ui_setting(st: S<'_>, key: String, value: String) -> Res<()> {
+        super::set_ui_setting(&st, &key, &value).await
+    }
+    #[tauri::command]
+    pub async fn engine_status(st: S<'_>) -> Res<crate::state::EngineStatus> {
+        super::engine_status(&st).await
+    }
+    #[tauri::command]
+    pub fn cancel_download(st: S<'_>, id: String) -> Res<()> {
+        super::cancel_download(&st, &id)
     }
     #[tauri::command]
     pub async fn get_ranked(st: S<'_>, run_id: i64) -> Res<Ranked> {

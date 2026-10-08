@@ -1,0 +1,45 @@
+import type { ZardDayOfWeek } from '@/shared/core/i18n';
+
+export type CalendarMode = 'single' | 'multiple' | 'range';
+export type CalendarValue = Date | Date[] | null;
+
+/**
+ * How the month/year caption is rendered:
+ *
+ * - `label` — a single `"{Month} {Year}"` text
+ * - `dropdown` — a month select plus a year select
+ * - `dropdown-months` — a month select, year as text
+ * - `dropdown-years` — month as text, a year select
+ */
+export type ZardCalendarCaptionLayout = 'label' | 'dropdown' | 'dropdown-months' | 'dropdown-years';
+
+export interface CalendarDay {
+  date: Date;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  isSelected: boolean;
+  isDisabled: boolean;
+  isRangeStart?: boolean;
+  isRangeEnd?: boolean;
+  isInRange?: boolean;
+  id?: string;
+}
+
+/** Context handed to a `zDayTemplate`: the day is the implicit value (`let-day`). */
+export interface CalendarDayTemplateContext {
+  $implicit: CalendarDay;
+}
+
+export interface CalendarDayConfig {
+  year: number;
+  month: number;
+  mode: CalendarMode;
+  selectedDates: Date[];
+  minDate: Date | null;
+  maxDate: Date | null;
+  disabled: boolean;
+  /** Individual days that cannot be selected, on top of the min/max range. */
+  disabledDates?: Date[];
+  /** Day of week the calendar starts on (0 = Sunday, 1 = Monday, ..., 6 = Saturday). Defaults to 0. */
+  weekStartsOn?: ZardDayOfWeek;
+}

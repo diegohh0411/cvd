@@ -105,8 +105,8 @@ async fn match_then_fit_then_export() {
 
     let run_id = start_match(&st, jd).await.unwrap();
     assert_eq!(wait_done(&st, run_id).await, RunStatus::Done);
-    let evs = events.lock().unwrap().clone();
-    assert!(evs.iter().all(|(n, v)| n == MATCH_EVENT && v["run_id"] == run_id));
+    let evs: Vec<_> = events.lock().unwrap().iter().filter(|(n, _)| n == MATCH_EVENT).cloned().collect();
+    assert!(evs.iter().all(|(_, v)| v["run_id"] == run_id));
     assert_eq!(evs.last().unwrap().1["event"]["stage"], "done");
 
     let ranked = get_ranked(&st, run_id).await.unwrap();
@@ -164,4 +164,65 @@ async fn fit_rejects_budget_outside_one_two() {
         assert_eq!(e.kind(), "Render");
         assert!(e.to_string().contains("1 or 2"));
     }
+}
+
+#[tokio::test]
+async fn runs_scores_and_cvs_are_listed_per_job() {
+    let (st, events) = state().await;
+    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+    save_entry(&st, entry("Engineer")).await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer").await.unwrap();
+    assert!(list_runs(&st, jd).await.unwrap().is_empty());
+    let run = start_match(&st, jd).await.unwrap();
+    assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+
+    let runs = list_runs(&st, jd).await.unwrap();
+    assert_eq!(runs.iter().map(|r| r.id).collect::<Vec<_>>(), vec![run]);
+
+    let scores = get_scores(&st, run).await.unwrap();
+    assert!(scores.iter().any(|s| s.question == "seniority"));
+    assert!(scores.iter().any(|s| s.question == "role_family"));
+    assert!(scores.iter().all(|s| s.run_id == run));
+    assert_eq!(get_scores(&st, 999).await.unwrap_err().kind(), "NotFound");
+
+    assert!(list_cvs(&st, jd).await.unwrap().is_empty());
+    assert!(events.lock().unwrap().iter().any(|(n, _)| n == ENGINE_EVENT));
+}
+
+#[tokio::test]
+async fn engine_status_reflects_active_model_and_errors() {
+    let (st, _) = state().await;
+    assert_eq!(engine_status(&st).await.unwrap().state, "none");
+    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+    let s = engine_status(&st).await.unwrap();
+    assert_eq!((s.model_id.as_deref(), s.state), (Some("clef-flash"), "idle"));
+    st.engine_for("clef-flash").unwrap();
+    assert_eq!(engine_status(&st).await.unwrap().state, "ready");
+    crate::state::set_engine_error(&st.engine_error_slot(), Some("boom".into()));
+    let s = engine_status(&st).await.unwrap();
+    assert_eq!((s.state, s.error.as_deref()), ("error", Some("boom")));
+    st.reset_engine();
+    assert_eq!(engine_status(&st).await.unwrap().state, "idle");
+}
+
+#[tokio::test]
+async fn ui_settings_are_namespaced() {
+    let (st, _) = state().await;
+    assert_eq!(get_ui_setting(&st, "ui.page_budget").await.unwrap(), None);
+    set_ui_setting(&st, "ui.page_budget", "2").await.unwrap();
+    assert_eq!(get_ui_setting(&st, "ui.page_budget").await.unwrap().as_deref(), Some("2"));
+    assert_eq!(set_ui_setting(&st, ACTIVE_MODEL_KEY, "x").await.unwrap_err().kind(), "NotFound");
+    assert_eq!(get_ui_setting(&st, ACTIVE_MODEL_KEY).await.unwrap_err().kind(), "NotFound");
+}
+
+#[tokio::test]
+async fn cancel_download_unknown_is_not_found() {
+    let (st, _) = state().await;
+    assert_eq!(cancel_download(&st, "clef-flash").unwrap_err().kind(), "NotFound");
+    let token = st.register_download("clef-flash").unwrap();
+    assert!(st.register_download("clef-flash").is_none());
+    cancel_download(&st, "clef-flash").unwrap();
+    assert!(token.is_cancelled());
+    st.finish_download("clef-flash");
+    assert!(st.register_download("clef-flash").is_some());
 }
