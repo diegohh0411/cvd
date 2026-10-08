@@ -6,3 +6,7 @@
 
 Errors: `{"error":{"message":..,"code":N}}`. Unknown model → 400 `"Model nope/nope does not exist"`. Bad key → 401 `"User not found."`.
 Key validation: `GET /api/v1/key` → 200 valid / 401 invalid.
+
+## Smoke (Task 7)
+
+Live `live_openrouter_smoke` (ignored test) through `OpenRouterProvider` + `HttpSystemOneEngine`: key validated; Jev 1.13, GPT-6 Luna Decisions and Mercury Decide (free) listed and answered (p≈0.99). Found and fixed: reqwest had no TLS backend (`rustls` feature added). GUI click-through not run.

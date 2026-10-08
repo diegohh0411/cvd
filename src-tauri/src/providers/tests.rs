@@ -89,3 +89,25 @@ async fn remote_models_cached() {
     reg.remote_models(true).await;
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
+
+/// Live smoke test: `OPENROUTER_API_KEY=... cargo test --lib live_openrouter -- --ignored`.
+#[tokio::test]
+#[ignore]
+async fn live_openrouter_smoke() {
+    use crate::engine::{decide_checked, Question};
+    let key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY");
+    let p = OpenRouterProvider::new(OPENROUTER_BASE.into(), key);
+    p.validate_key().await.unwrap();
+    let ids: Vec<String> = p.list_models().await.unwrap().into_iter().map(|m| m.id).collect();
+    let qs = std::collections::BTreeMap::from([(
+        "rust".to_string(),
+        Question::Noul { instructions: "Does this CV entry mention Rust?".into() },
+    )]);
+    for id in ["typesafe/jev-1.13", "openai/gpt-6-luna-decisions", "inception/mercury-decide:free"] {
+        assert!(ids.iter().any(|m| m == id), "{id} not listed");
+        let r = ModelRef::parse(&format!("openrouter:{id}"));
+        let engine = p.engine(&r.id).unwrap();
+        let answers = decide_checked(&*engine, "Rewrote the ledger in Rust.", &qs).await.unwrap();
+        println!("{id}: {:?}", answers["rust"]);
+    }
+}
