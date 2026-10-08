@@ -26,7 +26,7 @@ describe('ipc commands', () => {
     await api.getScores(3);
     expect(t.calls.map((c) => [c.cmd, Object.keys(c.args).sort()])).toEqual([
       ['list_entries', ['includeArchived']],
-      ['create_job', ['company', 'rawText', 'title']],
+      ['create_job', ['company', 'rawText', 'statusId', 'title', 'url']],
       ['start_match', ['jdId']],
       ['fit_cv', ['budget', 'overrides', 'runId']],
       ['export_cv', ['path', 'runId', 'selection']],

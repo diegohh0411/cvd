@@ -73,7 +73,7 @@ describe('NewJobComponent', () => {
     text.dispatchEvent(new Event('input'));
     await flush();
     await (f.componentInstance as unknown as { match(): Promise<void> }).match();
-    expect(t.callsTo('create_job')).toEqual([{ title: '', company: '', rawText: 'We need Rust' }]);
+    expect(t.callsTo('create_job')).toEqual([{ title: '', company: '', rawText: 'We need Rust', url: '', statusId: null }]);
     expect(nav).toHaveBeenCalledWith(['/jobs', 42], { queryParams: { start: 1 } });
   });
 });

@@ -10,6 +10,7 @@ import type {
   EngineStatus,
   FitOutput,
   JobDescription,
+  JobStatus,
   MatchRun,
   ModelInfo,
   Override,
@@ -18,6 +19,7 @@ import type {
   ScoreRow,
   Selection,
   Skill,
+  StatusColor,
 } from './types';
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -37,8 +39,10 @@ export const deleteEntry = (id: number) => call<void>('delete_entry', { id });
 export const listSkills = () => call<Skill[]>('list_skills');
 
 // ---- jobs & matching ----
-export const createJob = (title: string, company: string, rawText: string) =>
-  call<number>('create_job', { title, company, rawText });
+export const createJob = (title: string, company: string, rawText: string, url = '', statusId: number | null = null) =>
+  call<number>('create_job', { title, company, rawText, url, statusId });
+export const updateJobTracking = (id: number, statusId: number | null, url: string) =>
+  call<void>('update_job_tracking', { id, statusId, url });
 export const listJobs = () => call<JobDescription[]>('list_jobs');
 export const getJob = (id: number) => call<JobDescription>('get_job', { id });
 export const startMatch = (jdId: number) => call<number>('start_match', { jdId });
@@ -47,6 +51,15 @@ export const resumeMatch = (runId: number) => call<void>('resume_match', { runId
 export const listRuns = (jdId: number) => call<MatchRun[]>('list_runs', { jdId });
 export const getScores = (runId: number) => call<ScoreRow[]>('get_scores', { runId });
 export const getRanked = (runId: number) => call<Ranked>('get_ranked', { runId });
+
+// ---- job statuses ----
+export const listJobStatuses = () => call<JobStatus[]>('list_job_statuses');
+export const createJobStatus = (name: string, color: StatusColor) =>
+  call<JobStatus>('create_job_status', { name, color });
+export const updateJobStatus = (id: number, name: string, color: StatusColor) =>
+  call<JobStatus>('update_job_status', { id, name, color });
+export const deleteJobStatus = (id: number) => call<void>('delete_job_status', { id });
+export const reorderJobStatuses = (ids: number[]) => call<void>('reorder_job_statuses', { ids });
 
 // ---- CV ----
 export const fitCv = (runId: number, budget: number, overrides: Override[]) =>

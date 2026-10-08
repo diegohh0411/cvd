@@ -102,3 +102,62 @@ fn db_path_prefers_env_override() {
     let default = super::db_path_from(None).unwrap();
     assert!(default.ends_with("com.diego.cv-decisions/cv.db"), "{}", default.display());
 }
+
+fn job_args() -> super::UpsertJobArgs {
+    super::UpsertJobArgs { id: None, title: None, company: None, description: None, url: None, status: None }
+}
+
+#[tokio::test]
+async fn upsert_job_creates_with_default_status_then_moves_it() {
+    let s = server().await;
+    let job = s
+        .upsert_job(super::UpsertJobArgs {
+            title: Some("Dev".into()),
+            company: Some("Acme".into()),
+            description: Some("Rust".into()),
+            url: Some(" https://acme.dev/jobs/1 ".into()),
+            ..job_args()
+        })
+        .await
+        .unwrap();
+    assert_eq!(job.status.as_deref(), Some("Bookmarked"));
+    assert_eq!(job.url, "https://acme.dev/jobs/1");
+    let moved = s
+        .upsert_job(super::UpsertJobArgs { id: Some(job.id), status: Some("applied".into()), ..job_args() })
+        .await
+        .unwrap();
+    assert_eq!(moved.status.as_deref(), Some("Applied"));
+    assert_eq!(moved.url, "https://acme.dev/jobs/1");
+    assert_eq!(s.list_jobs().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn upsert_job_rejects_unknown_status() {
+    let s = server().await;
+    let err = s
+        .upsert_job(super::UpsertJobArgs {
+            title: Some("Dev".into()),
+            description: Some("Rust".into()),
+            status: Some("Ghosted".into()),
+            ..job_args()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("Bookmarked"));
+}
+
+#[tokio::test]
+async fn upsert_job_status_creates_and_renames() {
+    use crate::store::types::StatusColor;
+    let s = server().await;
+    let st = s
+        .upsert_job_status(super::UpsertJobStatusArgs { id: None, name: "Rejected".into(), color: StatusColor::Red })
+        .await
+        .unwrap();
+    assert_eq!(st.position, 4);
+    let renamed = s
+        .upsert_job_status(super::UpsertJobStatusArgs { id: Some(st.id), name: "Declined".into(), color: StatusColor::Gray })
+        .await
+        .unwrap();
+    assert_eq!((renamed.name.as_str(), renamed.color), ("Declined", StatusColor::Gray));
+}

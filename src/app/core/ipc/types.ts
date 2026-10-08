@@ -65,6 +65,19 @@ export interface JobDescription {
   company: string;
   raw_text: string;
   created_at: string;
+  /** Link to the original posting; '' when unknown. */
+  url: string;
+  status_id: number | null;
+}
+
+export const STATUS_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'] as const;
+export type StatusColor = (typeof STATUS_COLORS)[number];
+
+export interface JobStatus {
+  id: number;
+  name: string;
+  color: StatusColor;
+  position: number;
 }
 
 export type RunStatus = 'running' | 'done' | 'cancelled' | 'failed';

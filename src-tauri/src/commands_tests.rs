@@ -75,7 +75,7 @@ async fn wait_done(st: &AppState, run_id: i64) -> RunStatus {
 async fn start_match_without_model_errors() {
     let (st, _) = state().await;
     save_entry(&st, entry("Engineer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer").await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
     let err = start_match(&st, jd).await.unwrap_err();
     assert_eq!(err.kind(), "ModelMissing");
     let json = serde_json::to_value(&err).unwrap();
@@ -87,7 +87,7 @@ async fn start_match_without_model_errors() {
 async fn empty_library_rejected() {
     let (st, _) = state().await;
     st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer").await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
     let err = start_match(&st, jd).await.unwrap_err();
     assert_eq!(
         err,
@@ -101,7 +101,7 @@ async fn match_then_fit_then_export() {
     st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
     save_entry(&st, entry("Engineer")).await.unwrap();
     save_entry(&st, entry("Developer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer").await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
 
     let run_id = start_match(&st, jd).await.unwrap();
     assert_eq!(wait_done(&st, run_id).await, RunStatus::Done);
@@ -171,7 +171,7 @@ async fn runs_scores_and_cvs_are_listed_per_job() {
     let (st, events) = state().await;
     st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
     save_entry(&st, entry("Engineer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer").await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
     assert!(list_runs(&st, jd).await.unwrap().is_empty());
     let run = start_match(&st, jd).await.unwrap();
     assert_eq!(wait_done(&st, run).await, RunStatus::Done);

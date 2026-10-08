@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, type OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -6,9 +6,12 @@ import { ZardButtonComponent } from '@/shared/components/button/button.component
 import { ZardInputComponent } from '@/shared/components/input/input.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { toAppError } from '../../core/ipc/errors';
+import { JobStatusesStore } from '../../core/stores/job-statuses.store';
 import { JobsStore } from '../../core/stores/jobs.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BlockerAlertComponent } from './blocker-alert.component';
+import { normalizeUrl } from './job-url';
+import { StatusPickerComponent } from './status-picker.component';
 import { MatchReadiness } from './match-readiness';
 
 export function wordCount(text: string): number {
@@ -17,7 +20,7 @@ export function wordCount(text: string): number {
 
 @Component({
   selector: 'app-new-job',
-  imports: [PageHeaderComponent, FormsModule, ZardButtonComponent, ZardInputComponent, BlockerAlertComponent],
+  imports: [PageHeaderComponent, FormsModule, ZardButtonComponent, ZardInputComponent, BlockerAlertComponent, StatusPickerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Jobs', link: '/jobs' }, { label: 'New job' }]" />
@@ -33,6 +36,16 @@ export function wordCount(text: string): number {
         <div class="grid gap-1.5">
           <label class="text-sm font-medium" for="jd-title">Role title</label>
           <input z-input id="jd-title" name="title" [(ngModel)]="title" placeholder="Senior Backend Engineer" />
+        </div>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div class="grid gap-1.5">
+          <label class="text-sm font-medium" for="jd-url">Posting URL</label>
+          <input z-input id="jd-url" name="url" type="url" [(ngModel)]="url" placeholder="https://acme.com/careers/123" />
+        </div>
+        <div class="grid gap-1.5">
+          <span class="text-sm font-medium" id="jd-status">Status</span>
+          <app-status-picker aria-labelledby="jd-status" [value]="statusId()" (valueChange)="statusId.set($event)" />
         </div>
       </div>
       <div class="flex flex-1 flex-col gap-1.5">
@@ -54,25 +67,41 @@ export function wordCount(text: string): number {
     </form>
   `,
 })
-export class NewJobComponent {
+export class NewJobComponent implements OnInit {
   private readonly jobs = inject(JobsStore);
   private readonly router = inject(Router);
   private readonly toast = inject(ZardSonnerService);
   protected readonly readiness = inject(MatchReadiness);
+  private readonly statuses = inject(JobStatusesStore);
 
   protected readonly company = signal('');
   protected readonly title = signal('');
   protected readonly text = signal('');
+  protected readonly url = signal('');
+  protected readonly statusId = signal<number | null>(null);
   protected readonly busy = signal(false);
   protected readonly words = computed(() => wordCount(this.text()));
   protected readonly canMatch = computed(() => !this.busy() && !this.readiness.blocker() && this.words() > 0);
+
+  ngOnInit(): void {
+    // Preselect the first status (e.g. Bookmarked), as the backend would.
+    void this.statuses.ensureLoaded().then(() => {
+      if (this.statusId() === null) this.statusId.set(this.statuses.statuses()[0]?.id ?? null);
+    });
+  }
 
   async match(): Promise<void> {
     if (!this.canMatch()) return;
     this.busy.set(true);
     let jobId: number | null = null;
     try {
-      jobId = await this.jobs.create(this.title().trim(), this.company().trim(), this.text());
+      jobId = await this.jobs.create(
+        this.title().trim(),
+        this.company().trim(),
+        this.text(),
+        normalizeUrl(this.url()),
+        this.statusId(),
+      );
       // The workspace subscribes to progress before starting the run.
       await this.router.navigate(['/jobs', jobId], { queryParams: { start: 1 } });
     } catch (e) {
