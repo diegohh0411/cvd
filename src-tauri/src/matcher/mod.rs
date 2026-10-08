@@ -283,14 +283,14 @@ async fn execute(
         on_progress(Progress::ScoringEntries { done, total });
     }
 
-    // 3. Bullets for the top-K entries at or above the floor.
+    // 3. Bullets for the top-K entries; the score floor belongs to page-fit.
     let scores = store.scores_for_run(run_id).await?;
     let ranked = rank(&scores, &entries, &[]);
     let picked: Vec<&RankedEntry> = ranked
         .entries
         .iter()
         .take(cfg.top_k)
-        .filter(|r| r.score >= cfg.score_floor && !r.entry.bullets.is_empty())
+        .filter(|r| !r.entry.bullets.is_empty())
         .collect();
     let total = picked.len();
     on_progress(Progress::PickingBullets { done: 0, total });

@@ -1,6 +1,20 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+#[tokio::test]
+async fn low_scoring_top_k_entry_still_gets_bullets() {
+    // Both entries score 0.5 (below the 1.5 floor) but are within top_k.
+    let (s, jd) = setup(2, 1, 0).await;
+    let e = Recorder::new(|_| 0.5);
+    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
+        .await
+        .unwrap();
+    assert_eq!(e.count(is_bullet_call), 2);
+    let rows = s.scores_for_run(run).await.unwrap();
+    let bullets = rows.iter().filter(|r| r.target_type == TargetType::Bullet).count();
+    assert_eq!(bullets, 2);
+}
+
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
