@@ -1,5 +1,5 @@
 /// A downloadable decision model. Values come from the 2026-10-08 spike.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ModelSpec {
     pub id: &'static str,
     pub label: &'static str,

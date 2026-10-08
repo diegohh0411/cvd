@@ -7,16 +7,6 @@
   ],
   "permissions": [
     "core:default",
-    "opener:default",
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "name": "binaries/llama-server",
-          "sidecar": true,
-          "args": true
-        }
-      ]
-    }
+    "opener:default"
   ]
 }

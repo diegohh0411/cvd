@@ -33,6 +33,20 @@
     ],
     "externalBin": [
       "binaries/llama-server"
-    ]
+    ],
+    "macOS": {
+      "files": {
+        "MacOS/libggml-base.0.dylib": "binaries/libggml-base.0.dylib",
+        "MacOS/libggml-blas.0.dylib": "binaries/libggml-blas.0.dylib",
+        "MacOS/libggml-cpu.0.dylib": "binaries/libggml-cpu.0.dylib",
+        "MacOS/libggml-metal.0.dylib": "binaries/libggml-metal.0.dylib",
+        "MacOS/libggml-rpc.0.dylib": "binaries/libggml-rpc.0.dylib",
+        "MacOS/libggml.0.dylib": "binaries/libggml.0.dylib",
+        "MacOS/libllama-common.0.dylib": "binaries/libllama-common.0.dylib",
+        "MacOS/libllama-server-impl.dylib": "binaries/libllama-server-impl.dylib",
+        "MacOS/libllama.0.dylib": "binaries/libllama.0.dylib",
+        "MacOS/libmtmd.0.dylib": "binaries/libmtmd.0.dylib"
+      }
+    }
   }
 }

@@ -57,6 +57,42 @@ pub fn fit(
     fit_with(ranked, profile, budget, floor, overrides, &mut super::compile).map(|r| r.0)
 }
 
+/// Builds the document for a saved `selection` (render order kept; entries
+/// missing from `entries` are skipped). Used to export exactly what was chosen.
+pub fn selection_doc(
+    entries: &[Entry],
+    profile: &Profile,
+    selection: &Selection,
+    style: StyleStep,
+) -> CvDoc {
+    let mut sections: Vec<CvSection> = Vec::new();
+    for heading in [SectionHeading::Experience, SectionHeading::Projects, SectionHeading::Education]
+    {
+        let items: Vec<CvItem> = selection
+            .entries
+            .iter()
+            .filter_map(|s| entries.iter().find(|e| e.id == s.entry_id).map(|e| (s, e)))
+            .filter(|(_, e)| section_of(e.kind) == heading)
+            .map(|(s, e)| CvItem {
+                title: e.title.clone(),
+                org: e.org.clone(),
+                location: e.location.clone(),
+                dates: dates(e),
+                bullets: s
+                    .bullet_ids
+                    .iter()
+                    .filter_map(|id| e.bullets.iter().find(|b| b.id == *id))
+                    .map(|b| b.text.clone())
+                    .collect(),
+            })
+            .collect();
+        if !items.is_empty() {
+            sections.push(CvSection { heading, items });
+        }
+    }
+    CvDoc { profile: profile.clone(), sections, skills: selection.skills.clone(), style }
+}
+
 /// One entry in the working selection (`idx` into `Ranked.entries`).
 #[derive(Clone)]
 struct Pick {

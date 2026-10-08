@@ -23,7 +23,8 @@ impl Default for MatchConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
     ReadingJd,
     ScoringEntries { done: usize, total: usize },
@@ -43,14 +44,14 @@ pub enum MatchError {
     Cancelled { run_id: i64 },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RankedEntry {
     pub entry: Entry,
     pub score: f64,
     pub bullets: Vec<(Bullet, f64)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Ranked {
     pub entries: Vec<RankedEntry>,
     pub skills: Vec<(Skill, f64)>,

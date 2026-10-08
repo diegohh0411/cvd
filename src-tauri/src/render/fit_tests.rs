@@ -66,6 +66,29 @@ fn all_bullets(sel: &Selection) -> Vec<i64> {
 }
 
 #[test]
+fn selection_doc_keeps_chosen_bullets_in_selection_order() {
+    let a = entry(1, 3.0, "2023-01", 3).entry;
+    let b = entry(2, 3.0, "2020-01", 2).entry;
+    let sel = Selection {
+        entries: vec![
+            SelectedEntry { entry_id: 2, bullet_ids: vec![200], pinned: false },
+            SelectedEntry { entry_id: 1, bullet_ids: vec![100, 102], pinned: true },
+            SelectedEntry { entry_id: 99, bullet_ids: vec![1], pinned: false },
+        ],
+        skills: vec!["Rust".into()],
+    };
+    let doc = selection_doc(&[a.clone(), b.clone()], &profile(), &sel, StyleStep(1));
+    assert_eq!(doc.style, StyleStep(1));
+    assert_eq!(doc.skills, vec!["Rust".to_string()]);
+    assert_eq!(doc.sections.len(), 1);
+    let items = &doc.sections[0].items;
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].title, b.title);
+    assert_eq!(items[0].bullets, vec![b.bullets[0].text.clone()]);
+    assert_eq!(items[1].bullets, vec![a.bullets[0].text.clone(), a.bullets[2].text.clone()]);
+}
+
+#[test]
 fn never_exceeds_budget() {
     let r = ranked((0..25).map(|i| entry(i + 1, 4.0 - i as f64 * 0.1, &format!("20{:02}-01", i), 5)).collect());
     let out = fit(&r, &profile(), 1, 0.0, &[]).unwrap();

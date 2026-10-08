@@ -36,6 +36,7 @@ typst-as-lib = "0.17"
 typst-pdf = "0.15"
 typst = "0.15"
 typst-layout = "0.15"
+base64 = "0.22"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

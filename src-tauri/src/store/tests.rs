@@ -136,3 +136,12 @@ async fn delete_entry_cascades() {
         assert_eq!(n, 0, "{table} rows should cascade");
     }
 }
+
+#[tokio::test]
+async fn settings_roundtrip() {
+    let s = store().await;
+    assert_eq!(s.get_setting("k").await.unwrap(), None);
+    s.set_setting("k", "a").await.unwrap();
+    s.set_setting("k", "b").await.unwrap();
+    assert_eq!(s.get_setting("k").await.unwrap().as_deref(), Some("b"));
+}

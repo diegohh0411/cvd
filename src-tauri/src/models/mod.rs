@@ -45,7 +45,7 @@ pub fn recommended(total_ram_gb: u32) -> &'static ModelSpec {
 }
 
 /// Where hf-hub places (and finds) a spec's file under `dir`.
-fn model_path(spec: &ModelSpec, dir: &Path) -> Option<PathBuf> {
+pub fn model_path(spec: &ModelSpec, dir: &Path) -> Option<PathBuf> {
     Cache::new(dir.to_path_buf())
         .model(spec.hf_repo.to_string())
         .get(spec.hf_file)
