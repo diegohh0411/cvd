@@ -8,17 +8,19 @@ import { EngineStore } from '../../core/stores/engine.store';
 import { ModelsStore } from '../../core/stores/models.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { ModelCardsComponent } from './model-cards.component';
+import { RemoteModelsComponent } from './remote-models.component';
 
-type Tab = 'installed' | 'download' | 'engine';
+type Tab = 'installed' | 'download' | 'online' | 'engine';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'installed', label: 'Installed' },
   { id: 'download', label: 'Download' },
+  { id: 'online', label: 'Online' },
   { id: 'engine', label: 'Engine' },
 ];
 
 @Component({
   selector: 'app-models-page',
-  imports: [PageHeaderComponent, ModelCardsComponent, ZardButtonComponent],
+  imports: [PageHeaderComponent, ModelCardsComponent, RemoteModelsComponent, ZardButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Models' }, { label: current().label }]" />
@@ -58,12 +60,16 @@ const TABS: { id: Tab; label: string }[] = [
           </p>
           <app-model-cards />
         }
+        @case ('online') {
+          <app-remote-models />
+        }
         @case ('engine') {
           <div class="grid gap-3 rounded-lg border p-4 text-sm">
             <div class="grid grid-cols-[8rem_1fr] gap-y-2">
               <span class="text-muted-foreground">Model</span><span>{{ engine.modelLabel() }}</span>
               <span class="text-muted-foreground">Status</span><span>{{ engine.stateLabel() }}</span>
-              <span class="text-muted-foreground">Runtime</span><span>llama.cpp server on 127.0.0.1, started on the first match</span>
+              <span class="text-muted-foreground">Runtime</span>
+              <span>{{ engine.remote() ? 'OpenRouter (online)' : 'llama.cpp server on 127.0.0.1, started on the first match' }}</span>
             </div>
             @if (engine.status().error; as log) {
               <pre class="bg-muted max-h-60 overflow-auto rounded p-2 text-xs" role="alert">{{ log }}</pre>

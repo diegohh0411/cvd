@@ -5,6 +5,7 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::models::{self, ModelError, ModelSpec, REGISTRY};
@@ -42,6 +43,12 @@ pub enum AppError {
     Render(String),
     #[error("{0}")]
     Io(String),
+    #[error("{0}")]
+    ProviderAuth(String),
+    #[error("{0}")]
+    ProviderCredits(String),
+    #[error("{0}")]
+    ProviderUnavailable(String),
 }
 
 impl AppError {
@@ -54,6 +61,9 @@ impl AppError {
             Self::ContextOverflow(_) => "ContextOverflow",
             Self::Render(_) => "Render",
             Self::Io(_) => "Io",
+            Self::ProviderAuth(_) => "ProviderAuth",
+            Self::ProviderCredits(_) => "ProviderCredits",
+            Self::ProviderUnavailable(_) => "ProviderUnavailable",
         }
     }
 }
@@ -73,6 +83,22 @@ impl From<EngineError> for AppError {
     fn from(e: EngineError) -> Self {
         match e {
             EngineError::ContextOverflow => Self::ContextOverflow(e.to_string()),
+            EngineError::Unauthorized => Self::ProviderAuth(e.to_string()),
+            EngineError::InsufficientCredits => Self::ProviderCredits(e.to_string()),
+            EngineError::RateLimited | EngineError::Network(_) | EngineError::ModelUnavailable(_) => {
+                Self::ProviderUnavailable(e.to_string())
+            }
+            _ => Self::EngineUnavailable(e.to_string()),
+        }
+    }
+}
+
+impl From<crate::providers::ProviderError> for AppError {
+    fn from(e: crate::providers::ProviderError) -> Self {
+        match e {
+            crate::providers::ProviderError::Missing(m) => Self::ModelMissing(m),
+            crate::providers::ProviderError::Unauthorized => Self::ProviderAuth(e.to_string()),
+            crate::providers::ProviderError::Network(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
     }
@@ -467,11 +493,70 @@ async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
 }
 
 pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
-    st.installed_path(id)?;
+    let r = ModelRef::parse(id);
+    if r.is_local() {
+        st.installed_path(id)?;
+    } else {
+        st.providers().check(&r)?;
+    }
     st.store.set_setting(crate::state::ACTIVE_MODEL_KEY, id).await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
+}
+
+// ---- providers ----
+
+/// What the UI may know about a stored key.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KeyStatus {
+    pub has_key: bool,
+    pub last4: Option<String>,
+}
+
+fn known_provider(provider: &str) -> Res<()> {
+    if provider == OPENROUTER {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("Unknown provider {provider}.")))
+    }
+}
+
+fn key_status(key: Option<&str>) -> KeyStatus {
+    KeyStatus {
+        has_key: key.is_some(),
+        last4: key.map(|k| k.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect()),
+    }
+}
+
+/// Validates, stores and activates a provider key. Leading/trailing whitespace is dropped.
+pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
+    known_provider(provider)?;
+    let key = key.trim();
+    OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
+    st.store.set_secret(provider, key).await?;
+    st.reload_providers().await?;
+    st.reset_engine();
+    (st.emitter())(ENGINE_EVENT, json!({}));
+    Ok(key_status(Some(key)))
+}
+
+pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
+    known_provider(provider)?;
+    st.store.delete_secret(provider).await?;
+    st.reload_providers().await?;
+    st.reset_engine();
+    (st.emitter())(ENGINE_EVENT, json!({}));
+    Ok(())
+}
+
+pub async fn provider_key_status(st: &AppState, provider: &str) -> Res<KeyStatus> {
+    known_provider(provider)?;
+    Ok(key_status(st.store.get_secret(provider).await?.as_deref()))
+}
+
+pub async fn list_remote_models(st: &AppState, refresh: bool) -> Res<Vec<ProviderModels>> {
+    Ok(st.providers().remote_models(refresh).await)
 }
 
 pub mod ipc {
@@ -572,6 +657,22 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_cvs(st: S<'_>, jd_id: i64) -> Res<Vec<Cv>> {
         super::list_cvs(&st, jd_id).await
+    }
+    #[tauri::command]
+    pub async fn set_provider_key(st: S<'_>, provider: String, key: String) -> Res<KeyStatus> {
+        super::set_provider_key(&st, &provider, &key).await
+    }
+    #[tauri::command]
+    pub async fn delete_provider_key(st: S<'_>, provider: String) -> Res<()> {
+        super::delete_provider_key(&st, &provider).await
+    }
+    #[tauri::command]
+    pub async fn provider_key_status(st: S<'_>, provider: String) -> Res<KeyStatus> {
+        super::provider_key_status(&st, &provider).await
+    }
+    #[tauri::command]
+    pub async fn list_remote_models(st: S<'_>, refresh: bool) -> Res<Vec<ProviderModels>> {
+        super::list_remote_models(&st, refresh).await
     }
     #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {

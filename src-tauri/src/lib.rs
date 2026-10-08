@@ -6,6 +6,7 @@ mod engine;
 mod matcher;
 #[allow(dead_code)]
 mod models;
+mod providers;
 #[allow(dead_code)]
 mod render;
 mod state;
@@ -41,6 +42,7 @@ pub fn run() {
                     let _ = emit_handle.emit(event, payload);
                 }),
             );
+            tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
             Ok(())
         })
@@ -77,6 +79,10 @@ pub fn run() {
             ipc::list_models,
             ipc::download_model,
             ipc::set_active_model,
+            ipc::set_provider_key,
+            ipc::delete_provider_key,
+            ipc::provider_key_status,
+            ipc::list_remote_models,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

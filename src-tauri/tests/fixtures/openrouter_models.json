@@ -1,0 +1,89 @@
+{
+ "data": [
+  {
+   "id": "openai/gpt-6-luna-decisions",
+   "name": "OpenAI: GPT-6 Luna Decisions",
+   "context_length": 1050000,
+   "architecture": {
+    "modality": "text+image->decisions",
+    "input_modalities": [
+     "text",
+     "image"
+    ],
+    "output_modalities": [
+     "decisions"
+    ],
+    "tokenizer": "GPT",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.0000001",
+    "completion": "0",
+    "web_search": "0.01",
+    "input_cache_read": "0",
+    "input_cache_write": "0"
+   }
+  },
+  {
+   "id": "liquid/d1",
+   "name": "LiquidAI: d1",
+   "context_length": 65536,
+   "architecture": {
+    "modality": "text->decisions",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "decisions"
+    ],
+    "tokenizer": "Other",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.00000004",
+    "completion": "0",
+    "input_cache_read": "0.00000004"
+   }
+  },
+  {
+   "id": "inception/mercury-decide:free",
+   "name": "Inception: Mercury Decide (free)",
+   "context_length": 65536,
+   "architecture": {
+    "modality": "text->decisions",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "decisions"
+    ],
+    "tokenizer": "Other",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   }
+  },
+  {
+   "id": "typesafe/jev-1.13",
+   "name": "TypeSafe: Jev 1.13",
+   "context_length": 64000,
+   "architecture": {
+    "modality": "text->decisions",
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "decisions"
+    ],
+    "tokenizer": "Other",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000000042",
+    "completion": "0"
+   }
+  }
+ ]
+}

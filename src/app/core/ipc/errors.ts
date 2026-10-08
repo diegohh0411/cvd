@@ -1,6 +1,16 @@
 import { AppError, AppErrorKind } from './types';
 
-const KINDS: readonly AppErrorKind[] = ['NotFound', 'ModelMissing', 'EngineUnavailable', 'ContextOverflow', 'Render', 'Io'];
+const KINDS: readonly AppErrorKind[] = [
+  'NotFound',
+  'ModelMissing',
+  'EngineUnavailable',
+  'ContextOverflow',
+  'Render',
+  'Io',
+  'ProviderAuth',
+  'ProviderCredits',
+  'ProviderUnavailable',
+];
 
 export function isAppError(e: unknown): e is AppError {
   return (

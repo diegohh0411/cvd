@@ -1,0 +1,46 @@
+{
+ "model": "typesafe/jev-1.13-20260917",
+ "answers": {
+  "q_noul": {
+   "type": "noul",
+   "noul": 0.98
+  },
+  "q_choice": {
+   "type": "choice",
+   "choice": "backend",
+   "probabilities": {
+    "backend": 1,
+    "frontend": 0,
+    "data_ml": 0,
+    "other": 0
+   },
+   "confidence": 1
+  },
+  "q_score": {
+   "type": "score",
+   "score": 4,
+   "legend": {
+    "0": "irrelevant to this role",
+    "1": "weakly related",
+    "2": "somewhat relevant",
+    "3": "clearly relevant",
+    "4": "highly relevant, a core match"
+   },
+   "probabilities": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 1
+   },
+   "confidence": 1
+  }
+ },
+ "usage": {
+  "input_tokens": 550,
+  "output_tokens": 80,
+  "cost": 2.31e-05
+ },
+ "id": "gen-dec-1791501457-lKtGOE2djGcTkc76cXNi",
+ "provider": "TypeSafe"
+}

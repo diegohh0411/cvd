@@ -244,3 +244,15 @@ async fn job_tracking_defaults_and_status_delete_clears() {
     assert_eq!(s.get_jd(jd).await.unwrap().unwrap().status_id, None);
     assert!(!s.update_jd_tracking(9999, None, "").await.unwrap());
 }
+
+#[tokio::test]
+async fn secret_roundtrip() {
+    let s = store().await;
+    assert_eq!(s.get_secret("openrouter").await.unwrap(), None);
+    s.set_secret("openrouter", "sk-or-1").await.unwrap();
+    assert_eq!(s.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-1"));
+    s.set_secret("openrouter", "sk-or-2").await.unwrap();
+    assert_eq!(s.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-2"));
+    s.delete_secret("openrouter").await.unwrap();
+    assert_eq!(s.get_secret("openrouter").await.unwrap(), None);
+}

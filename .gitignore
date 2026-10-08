@@ -49,4 +49,4 @@ Thumbs.db
 .superpowers/
 
 # llama-server sidecar (src-tauri/scripts/fetch-llama-server.sh)
-src-tauri/binaries/
+src-tauri/binaries

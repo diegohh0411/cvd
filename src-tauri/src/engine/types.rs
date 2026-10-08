@@ -24,4 +24,14 @@ pub enum EngineError {
     BadResponse(String),
     #[error("too many questions in one request (max 128)")]
     TooManyQuestions,
+    #[error("Check your OpenRouter key")]
+    Unauthorized,
+    #[error("Out of OpenRouter credits")]
+    InsufficientCredits,
+    #[error("Rate limited by the provider; try again shortly")]
+    RateLimited,
+    #[error("Network error: {0}")]
+    Network(String),
+    #[error("Model no longer available: {0}")]
+    ModelUnavailable(String),
 }

@@ -1,4 +1,5 @@
 mod fake;
+mod http;
 mod sidecar;
 mod types;
 mod wire;
@@ -8,6 +9,8 @@ use std::collections::BTreeMap;
 
 #[allow(unused_imports)]
 pub use fake::FakeDecisionEngine;
+#[allow(unused_imports)]
+pub use http::HttpSystemOneEngine;
 #[allow(unused_imports)]
 pub use sidecar::{LlamaSidecar, TauriLauncher};
 pub use types::{Answer, EngineError, Question};

@@ -9,11 +9,12 @@ import type { Profile } from '../../core/ipc/types';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BUDGET_SETTING } from '../workspace/workspace.store';
+import { ProviderKeyComponent } from './provider-key.component';
 import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-form.component';
 
 @Component({
   selector: 'app-settings-page',
-  imports: [PageHeaderComponent, ProfileFormComponent, ZardButtonComponent],
+  imports: [PageHeaderComponent, ProfileFormComponent, ProviderKeyComponent, ZardButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Settings' }]" />
@@ -28,6 +29,14 @@ import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-for
           <p class="text-destructive text-sm" role="alert">{{ errors().join(' ') }}</p>
         }
         <div><button z-button (click)="saveProfile()" [zLoading]="saving()">Save profile</button></div>
+      </section>
+
+      <section class="grid gap-3">
+        <div>
+          <h2 class="font-semibold">Providers</h2>
+          <p class="text-muted-foreground text-sm">API keys for online decision models.</p>
+        </div>
+        <app-provider-key />
       </section>
 
       <section class="grid gap-3">

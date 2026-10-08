@@ -59,6 +59,31 @@ describe('ipc commands', () => {
     expect(isAppError(err)).toBe(true);
   });
 
+  it('wraps provider commands with the IPC names and args', async () => {
+    const t = mockTauri({
+      set_provider_key: { has_key: true, last4: '1234' },
+      delete_provider_key: null,
+      provider_key_status: { has_key: false, last4: null },
+      list_remote_models: [],
+    });
+    expect(await api.setProviderKey('openrouter', 'k')).toEqual({ has_key: true, last4: '1234' });
+    await api.deleteProviderKey('openrouter');
+    await api.providerKeyStatus('openrouter');
+    await api.listRemoteModels(true);
+    expect(t.calls.map((c) => [c.cmd, c.args])).toEqual([
+      ['set_provider_key', { provider: 'openrouter', key: 'k' }],
+      ['delete_provider_key', { provider: 'openrouter' }],
+      ['provider_key_status', { provider: 'openrouter' }],
+      ['list_remote_models', { refresh: true }],
+    ]);
+  });
+
+  it('recognizes provider error kinds', () => {
+    for (const kind of ['ProviderAuth', 'ProviderCredits', 'ProviderUnavailable']) {
+      expect(isAppError({ kind, message: 'x' })).toBe(true);
+    }
+  });
+
   it('filters match progress by run id', async () => {
     const t = mockTauri();
     const seen: MatchStage[] = [];
