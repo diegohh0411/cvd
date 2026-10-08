@@ -112,9 +112,17 @@ async fn get_run_reflects_status() {
     let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
     let run = s.create_run(jd, "clef-flash").await.unwrap();
     s.set_run_status(run, RunStatus::Cancelled).await.unwrap();
+    let got = s.get_run(run).await.unwrap();
+    assert!(!got.created_at.is_empty());
     assert_eq!(
-        s.get_run(run).await.unwrap(),
-        MatchRun { id: run, jd_id: jd, model_id: "clef-flash".into(), status: RunStatus::Cancelled }
+        got,
+        MatchRun {
+            id: run,
+            jd_id: jd,
+            model_id: "clef-flash".into(),
+            status: RunStatus::Cancelled,
+            created_at: got.created_at.clone(),
+        }
     );
     assert!(s.get_run(run + 99).await.is_err());
 }
@@ -144,4 +152,16 @@ async fn settings_roundtrip() {
     s.set_setting("k", "a").await.unwrap();
     s.set_setting("k", "b").await.unwrap();
     assert_eq!(s.get_setting("k").await.unwrap().as_deref(), Some("b"));
+}
+
+#[tokio::test]
+async fn list_runs_newest_first_per_job() {
+    let s = store().await;
+    let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
+    let other = s.create_jd("Ops", "Acme", "text").await.unwrap();
+    let a = s.create_run(jd, "clef-flash").await.unwrap();
+    let b = s.create_run(jd, "clef-flash").await.unwrap();
+    s.create_run(other, "clef-flash").await.unwrap();
+    let ids: Vec<i64> = s.list_runs(jd).await.unwrap().iter().map(|r| r.id).collect();
+    assert_eq!(ids, vec![b, a]);
 }

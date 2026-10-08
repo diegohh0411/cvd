@@ -110,6 +110,11 @@ impl LlamaSidecar {
         }
     }
 
+    /// True while a started server process is alive.
+    pub fn is_running(&self) -> bool {
+        self.child_alive()
+    }
+
     fn child_alive(&self) -> bool {
         self.child
             .lock()

@@ -24,6 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -55,6 +56,13 @@ pub fn run() {
             ipc::start_match,
             ipc::cancel_match,
             ipc::resume_match,
+            ipc::list_runs,
+            ipc::get_scores,
+            ipc::list_cvs,
+            ipc::get_ui_setting,
+            ipc::set_ui_setting,
+            ipc::engine_status,
+            ipc::cancel_download,
             ipc::get_ranked,
             ipc::fit_cv,
             ipc::export_cv,

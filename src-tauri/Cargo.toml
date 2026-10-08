@@ -30,6 +30,7 @@ sysinfo = "0.39.6"
 hf-hub = { version = "0.4", features = ["tokio"] }
 async-trait = "0.1.92"
 tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tokio-util = "0.7.19"
 typst-as-lib = "0.17"

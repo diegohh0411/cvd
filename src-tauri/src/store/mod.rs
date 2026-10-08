@@ -105,6 +105,16 @@ fn jd_from_row(r: &SqliteRow) -> JobDescription {
     }
 }
 
+fn run_from_row(r: &SqliteRow) -> Result<MatchRun> {
+    Ok(MatchRun {
+        id: r.get("id"),
+        jd_id: r.get("jd_id"),
+        model_id: r.get("model_id"),
+        status: parse_status(r.get("status"))?,
+        created_at: r.get("created_at"),
+    })
+}
+
 fn cv_from_row(r: &SqliteRow) -> Cv {
     Cv {
         id: r.get("id"),
@@ -366,16 +376,20 @@ impl Store {
 
     /// Fetches a run; errors with `RowNotFound` if it does not exist.
     pub async fn get_run(&self, run_id: i64) -> Result<MatchRun> {
-        let r = sqlx::query("SELECT id, jd_id, model_id, status FROM match_run WHERE id = ?")
+        let r = sqlx::query("SELECT * FROM match_run WHERE id = ?")
             .bind(run_id)
             .fetch_one(&self.pool)
             .await?;
-        Ok(MatchRun {
-            id: r.get("id"),
-            jd_id: r.get("jd_id"),
-            model_id: r.get("model_id"),
-            status: parse_status(r.get("status"))?,
-        })
+        run_from_row(&r)
+    }
+
+    /// Runs for a job, newest first.
+    pub async fn list_runs(&self, jd_id: i64) -> Result<Vec<MatchRun>> {
+        let rows = sqlx::query("SELECT * FROM match_run WHERE jd_id = ? ORDER BY id DESC")
+            .bind(jd_id)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(run_from_row).collect()
     }
 
     #[cfg(test)]
