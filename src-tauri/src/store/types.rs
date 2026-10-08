@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Profile {
     pub name: String,
     pub headline: String,
@@ -13,7 +13,7 @@ pub struct Profile {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     Experience,
@@ -22,7 +22,7 @@ pub enum EntryKind {
     Volunteer,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Bullet {
     pub id: i64,
     pub entry_id: i64,
@@ -30,14 +30,14 @@ pub struct Bullet {
     pub position: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Skill {
     pub id: i64,
     pub name: String,
     pub category: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Entry {
     pub id: i64,
     pub kind: EntryKind,
@@ -55,7 +55,7 @@ pub struct Entry {
 }
 
 /// Writable fields of an entry. `id: Some(_)` updates, `None` inserts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EntryInput {
     pub id: Option<i64>,
     pub kind: EntryKind,

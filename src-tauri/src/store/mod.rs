@@ -5,8 +5,9 @@ mod tests;
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use std::time::Duration;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use types::*;
@@ -129,18 +130,44 @@ fn cv_from_row(r: &SqliteRow) -> Cv {
 }
 
 impl Store {
-    /// Opens (creating if needed) the database at `url` and runs migrations.
-    /// In-memory URLs use a single connection so the database is shared.
-    pub async fn open(url: &str) -> Result<Store> {
-        let opts = SqliteConnectOptions::from_str(url)?
+    async fn connect(url: &str) -> Result<SqlitePool> {
+        let mut opts = SqliteConnectOptions::from_str(url)?
             .create_if_missing(true)
             .foreign_keys(true);
         let mut pool_opts = SqlitePoolOptions::new();
         if url.contains(":memory:") {
             pool_opts = pool_opts.max_connections(1);
+        } else {
+            // WAL + busy timeout let the app and the MCP server write concurrently.
+            opts = opts
+                .journal_mode(SqliteJournalMode::Wal)
+                .busy_timeout(Duration::from_secs(5));
         }
         let pool = pool_opts.connect_with(opts).await?;
+        Ok(pool)
+    }
+
+    /// Opens (creating if needed) the database at `url` and runs migrations.
+    /// In-memory URLs use a single connection so the database is shared.
+    pub async fn open(url: &str) -> Result<Store> {
+        let pool = Self::connect(url).await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
+        Ok(Store { pool })
+    }
+
+    /// Opens the database for a process other than the app (the MCP server).
+    /// An existing database is used as-is, never migrated, so an older or
+    /// newer build of this binary can't conflict with the app's schema.
+    pub async fn open_external(url: &str) -> Result<Store> {
+        let pool = Self::connect(url).await?;
+        let migrated: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
+        )
+        .fetch_one(&pool)
+        .await?;
+        if !migrated {
+            sqlx::migrate!("./migrations").run(&pool).await?;
+        }
         Ok(Store { pool })
     }
 
@@ -315,6 +342,27 @@ impl Store {
             .await?;
         }
         tx.commit().await?;
+        Ok(id)
+    }
+
+    /// Finds an entry by its natural key; title and org match case-insensitively.
+    pub async fn find_entry_by_key(
+        &self,
+        kind: EntryKind,
+        title: &str,
+        org: &str,
+        start_date: &str,
+    ) -> Result<Option<i64>> {
+        let id = sqlx::query_scalar(
+            "SELECT id FROM entry WHERE kind = ? AND title = ? COLLATE NOCASE
+               AND org = ? COLLATE NOCASE AND start_date = ? LIMIT 1",
+        )
+        .bind(kind_str(kind))
+        .bind(title)
+        .bind(org)
+        .bind(start_date)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(id)
     }
 

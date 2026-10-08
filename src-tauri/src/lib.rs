@@ -10,7 +10,8 @@ mod models;
 mod render;
 mod state;
 #[allow(dead_code)]
-mod store;
+pub mod store;
+pub mod mcp;
 
 use std::sync::Arc;
 
