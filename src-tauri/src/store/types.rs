@@ -73,13 +73,41 @@ pub struct EntryInput {
     pub skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct JobDescription {
     pub id: i64,
     pub title: String,
     pub company: String,
     pub raw_text: String,
     pub created_at: String,
+    /// Link to the original posting; empty when unknown.
+    pub url: String,
+    /// Application status (see `JobStatus`); null when unset.
+    pub status_id: Option<i64>,
+}
+
+/// Notion's label palette; the UI maps each to light/dark styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusColor {
+    Gray,
+    Brown,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
+    Pink,
+    Red,
+}
+
+/// A user-editable application status label (Bookmarked, Applied, ...).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct JobStatus {
+    pub id: i64,
+    pub name: String,
+    pub color: StatusColor,
+    pub position: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

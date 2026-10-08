@@ -10,7 +10,9 @@ This template should help get you started developing with Tauri and Angular.
 
 `cvd-mcp` is a stdio MCP server that lets local agents read and add CV entries in the app's database (`~/Library/Application Support/com.diego.cv-decisions/cv.db` on macOS; override with `CVD_DB_PATH`). It's safe to run while the app is open, but reopen a screen to see new entries.
 
-Tools: `list_entries`, `list_skills`, `get_profile`, `upsert_profile`, `upsert_entry` (supports `dry_run`). There is no delete tool.
+Tools: `list_entries`, `list_skills`, `get_profile`, `upsert_profile`, `upsert_entry` (supports `dry_run`), plus application tracking: `list_jobs`, `list_job_statuses`, `upsert_job` (save a posting, or change a job's `status`/`url` by id) and `upsert_job_status` (add, rename or recolor a label). There is no delete tool.
+
+The MCP server never migrates an existing database, so open the updated desktop app once before using the job tools.
 
 ```bash
 cargo build --release --manifest-path src-tauri/Cargo.toml --bin cvd-mcp

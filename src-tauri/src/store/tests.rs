@@ -82,7 +82,7 @@ async fn archived_hidden() {
 #[tokio::test]
 async fn scores_roundtrip() {
     let s = store().await;
-    let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
+    let jd = s.create_jd("Dev", "Acme", "text", "", None).await.unwrap();
     let run = s.create_run(jd, "clef-flash").await.unwrap();
     let rows = vec![
         ScoreRow {
@@ -109,7 +109,7 @@ async fn scores_roundtrip() {
 #[tokio::test]
 async fn get_run_reflects_status() {
     let s = store().await;
-    let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
+    let jd = s.create_jd("Dev", "Acme", "text", "", None).await.unwrap();
     let run = s.create_run(jd, "clef-flash").await.unwrap();
     s.set_run_status(run, RunStatus::Cancelled).await.unwrap();
     let got = s.get_run(run).await.unwrap();
@@ -157,8 +157,8 @@ async fn settings_roundtrip() {
 #[tokio::test]
 async fn list_runs_newest_first_per_job() {
     let s = store().await;
-    let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
-    let other = s.create_jd("Ops", "Acme", "text").await.unwrap();
+    let jd = s.create_jd("Dev", "Acme", "text", "", None).await.unwrap();
+    let other = s.create_jd("Ops", "Acme", "text", "", None).await.unwrap();
     let a = s.create_run(jd, "clef-flash").await.unwrap();
     let b = s.create_run(jd, "clef-flash").await.unwrap();
     s.create_run(other, "clef-flash").await.unwrap();
@@ -196,6 +196,7 @@ async fn open_external_tolerates_newer_schema() {
     std::fs::create_dir_all(&dir).unwrap();
     let url = format!("sqlite://{}", dir.join("t.db").display());
     let app = Store::open(&url).await.unwrap();
+    let known = sqlx::migrate!("./migrations").iter().count() as i64;
     // Simulate a migration from a newer app build that this binary doesn't know.
     sqlx::query(
         "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
@@ -211,5 +212,35 @@ async fn open_external_tolerates_newer_schema() {
         .unwrap();
     std::fs::remove_dir_all(&dir).ok();
     assert!(ext.is_ok(), "{:?}", ext.err());
-    assert_eq!(n, 3, "external open must not apply migrations to an existing DB");
+    assert_eq!(n, known + 1, "external open must not apply migrations to an existing DB");
+}
+
+#[tokio::test]
+async fn job_statuses_seeded_and_editable() {
+    let s = store().await;
+    let names: Vec<_> = s.list_job_statuses().await.unwrap().into_iter().map(|x| x.name).collect();
+    assert_eq!(names, ["Bookmarked", "Applied", "Interviewing", "Offer"]);
+
+    let id = s.create_job_status("Rejected", StatusColor::Red).await.unwrap();
+    assert!(s.create_job_status("rejected", StatusColor::Gray).await.is_err(), "names are case-insensitive unique");
+    assert!(s.create_job_status("  ", StatusColor::Gray).await.is_err());
+    assert!(s.update_job_status(id, "Declined", StatusColor::Pink).await.unwrap());
+
+    let mut ids: Vec<_> = s.list_job_statuses().await.unwrap().into_iter().map(|x| x.id).collect();
+    ids.reverse();
+    s.reorder_job_statuses(&ids).await.unwrap();
+    assert_eq!(s.list_job_statuses().await.unwrap()[0].name, "Declined");
+}
+
+#[tokio::test]
+async fn job_tracking_defaults_and_status_delete_clears() {
+    let s = store().await;
+    let first = s.list_job_statuses().await.unwrap()[0].id;
+    let jd = s.create_jd("Dev", "Acme", "text", "https://x.dev", None).await.unwrap();
+    let job = s.get_jd(jd).await.unwrap().unwrap();
+    assert_eq!((job.status_id, job.url.as_str()), (Some(first), "https://x.dev"));
+
+    s.delete_job_status(first).await.unwrap();
+    assert_eq!(s.get_jd(jd).await.unwrap().unwrap().status_id, None);
+    assert!(!s.update_jd_tracking(9999, None, "").await.unwrap());
 }

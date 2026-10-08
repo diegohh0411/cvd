@@ -32,10 +32,21 @@ export class JobsStore {
     }
   }
 
-  async create(title: string, company: string, rawText: string): Promise<number> {
-    const id = await api.createJob(title, company, rawText);
+  async create(title: string, company: string, rawText: string, url = '', statusId: number | null = null): Promise<number> {
+    const id = await api.createJob(title, company, rawText, url, statusId);
     await this.load();
     return id;
+  }
+
+  /** Saves status/URL and patches the cached job so lists update at once. */
+  async setTracking(id: number, statusId: number | null, url: string): Promise<void> {
+    await api.updateJobTracking(id, statusId, url);
+    this.jobs.update((js) => js.map((j) => (j.id === id ? { ...j, status_id: statusId, url: url.trim() } : j)));
+  }
+
+  /** A status was deleted server-side (ON DELETE SET NULL); mirror it. */
+  clearStatus(statusId: number): void {
+    this.jobs.update((js) => js.map((j) => (j.status_id === statusId ? { ...j, status_id: null } : j)));
   }
 
   setLatestRun(run: MatchRun): void {

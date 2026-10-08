@@ -63,6 +63,7 @@ impl From<StoreError> for AppError {
         match &e {
             StoreError::Db(sqlx::Error::RowNotFound) => Self::NotFound("Not found.".into()),
             StoreError::Invalid(m) if m.starts_with("no ") => Self::NotFound(m.clone()),
+            StoreError::Invalid(m) => Self::Io(m.clone()),
             _ => Self::Io(e.to_string()),
         }
     }
@@ -140,8 +141,57 @@ pub async fn list_skills(st: &AppState) -> Res<Vec<Skill>> {
 
 // ---- jobs ----
 
-pub async fn create_job(st: &AppState, title: &str, company: &str, raw_text: &str) -> Res<i64> {
-    Ok(st.store.create_jd(title, company, raw_text).await?)
+pub async fn create_job(
+    st: &AppState,
+    title: &str,
+    company: &str,
+    raw_text: &str,
+    url: &str,
+    status_id: Option<i64>,
+) -> Res<i64> {
+    Ok(st.store.create_jd(title, company, raw_text, url, status_id).await?)
+}
+
+pub async fn update_job_tracking(st: &AppState, id: i64, status_id: Option<i64>, url: &str) -> Res<()> {
+    if !st.store.update_jd_tracking(id, status_id, url).await? {
+        return Err(AppError::NotFound(format!("Job description {id} not found.")));
+    }
+    Ok(())
+}
+
+// ---- job statuses ----
+
+pub async fn list_job_statuses(st: &AppState) -> Res<Vec<JobStatus>> {
+    Ok(st.store.list_job_statuses().await?)
+}
+
+pub async fn create_job_status(st: &AppState, name: &str, color: StatusColor) -> Res<JobStatus> {
+    let id = st.store.create_job_status(name, color).await?;
+    status_by_id(st, id).await
+}
+
+pub async fn update_job_status(st: &AppState, id: i64, name: &str, color: StatusColor) -> Res<JobStatus> {
+    if !st.store.update_job_status(id, name, color).await? {
+        return Err(AppError::NotFound(format!("Status {id} not found.")));
+    }
+    status_by_id(st, id).await
+}
+
+pub async fn delete_job_status(st: &AppState, id: i64) -> Res<()> {
+    Ok(st.store.delete_job_status(id).await?)
+}
+
+pub async fn reorder_job_statuses(st: &AppState, ids: Vec<i64>) -> Res<()> {
+    Ok(st.store.reorder_job_statuses(&ids).await?)
+}
+
+async fn status_by_id(st: &AppState, id: i64) -> Res<JobStatus> {
+    st.store
+        .list_job_statuses()
+        .await?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| AppError::NotFound(format!("Status {id} not found.")))
 }
 
 pub async fn list_jobs(st: &AppState) -> Res<Vec<JobDescription>> {
@@ -457,8 +507,39 @@ pub mod ipc {
         super::list_skills(&st).await
     }
     #[tauri::command]
-    pub async fn create_job(st: S<'_>, title: String, company: String, raw_text: String) -> Res<i64> {
-        super::create_job(&st, &title, &company, &raw_text).await
+    pub async fn create_job(
+        st: S<'_>,
+        title: String,
+        company: String,
+        raw_text: String,
+        url: String,
+        status_id: Option<i64>,
+    ) -> Res<i64> {
+        super::create_job(&st, &title, &company, &raw_text, &url, status_id).await
+    }
+    #[tauri::command]
+    pub async fn update_job_tracking(st: S<'_>, id: i64, status_id: Option<i64>, url: String) -> Res<()> {
+        super::update_job_tracking(&st, id, status_id, &url).await
+    }
+    #[tauri::command]
+    pub async fn list_job_statuses(st: S<'_>) -> Res<Vec<JobStatus>> {
+        super::list_job_statuses(&st).await
+    }
+    #[tauri::command]
+    pub async fn create_job_status(st: S<'_>, name: String, color: StatusColor) -> Res<JobStatus> {
+        super::create_job_status(&st, &name, color).await
+    }
+    #[tauri::command]
+    pub async fn update_job_status(st: S<'_>, id: i64, name: String, color: StatusColor) -> Res<JobStatus> {
+        super::update_job_status(&st, id, &name, color).await
+    }
+    #[tauri::command]
+    pub async fn delete_job_status(st: S<'_>, id: i64) -> Res<()> {
+        super::delete_job_status(&st, id).await
+    }
+    #[tauri::command]
+    pub async fn reorder_job_statuses(st: S<'_>, ids: Vec<i64>) -> Res<()> {
+        super::reorder_job_statuses(&st, ids).await
     }
     #[tauri::command]
     pub async fn list_jobs(st: S<'_>) -> Res<Vec<JobDescription>> {

@@ -13,6 +13,7 @@ import { jobLabel } from '../../core/stores/jobs.store';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BlockerAlertComponent } from '../jobs/blocker-alert.component';
+import { JobPropertiesComponent } from '../jobs/job-properties.component';
 import { MatchReadiness } from '../jobs/match-readiness';
 import { WorkspaceCardsComponent } from './cards.component';
 import { defaultFileName, ExportService } from './export.service';
@@ -57,6 +58,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
     PdfPreviewComponent,
     ExportsTabComponent,
     BlockerAlertComponent,
+    JobPropertiesComponent,
   ],
   providers: [WorkspaceStore],
   viewProviders: [provideIcons({ lucideDownload, lucideRefreshCw })],
@@ -85,10 +87,13 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
           {{ e.message }} <a routerLink="/jobs" class="underline">Back to jobs</a>
         </div>
       } @else {
+        @if (ws.phase() === 'loading') {
+          <z-skeleton class="h-40 w-full" />
+        }
+        @if (ws.job(); as job) {
+          <app-job-properties [job]="job" (changed)="ws.job.set($event)" />
+        }
         @switch (ws.phase()) {
-          @case ('loading') {
-            <z-skeleton class="h-40 w-full" />
-          }
           @case ('new') {
             <div class="mx-auto flex w-full max-w-md flex-col gap-4 rounded-xl border p-6">
               <h2 class="font-semibold">Ready to match</h2>

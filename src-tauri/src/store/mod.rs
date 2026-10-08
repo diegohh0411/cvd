@@ -88,6 +88,53 @@ fn parse_target(s: &str) -> Result<TargetType> {
     })
 }
 
+fn color_str(c: StatusColor) -> &'static str {
+    match c {
+        StatusColor::Gray => "gray",
+        StatusColor::Brown => "brown",
+        StatusColor::Orange => "orange",
+        StatusColor::Yellow => "yellow",
+        StatusColor::Green => "green",
+        StatusColor::Blue => "blue",
+        StatusColor::Purple => "purple",
+        StatusColor::Pink => "pink",
+        StatusColor::Red => "red",
+    }
+}
+
+fn parse_color(s: &str) -> Result<StatusColor> {
+    serde_json::from_value(serde_json::Value::String(s.into()))
+        .map_err(|_| StoreError::Invalid(format!("status color {s}")))
+}
+
+fn job_status_from_row(r: &SqliteRow) -> Result<JobStatus> {
+    Ok(JobStatus {
+        id: r.get("id"),
+        name: r.get("name"),
+        color: parse_color(r.get("color"))?,
+        position: r.get("position"),
+    })
+}
+
+/// Trims a status name, rejecting blanks.
+fn status_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(StoreError::Invalid("status name must not be empty".into()));
+    }
+    Ok(name)
+}
+
+/// Turns a UNIQUE violation on `job_status.name` into a readable error.
+fn dup_status(e: sqlx::Error, name: &str) -> StoreError {
+    match &e {
+        sqlx::Error::Database(d) if d.is_unique_violation() => {
+            StoreError::Invalid(format!("a status named \"{name}\" already exists"))
+        }
+        _ => StoreError::Db(e),
+    }
+}
+
 fn skill_from_row(r: &SqliteRow) -> Skill {
     Skill {
         id: r.get("id"),
@@ -103,6 +150,8 @@ fn jd_from_row(r: &SqliteRow) -> JobDescription {
         company: r.get("company"),
         raw_text: r.get("raw_text"),
         created_at: r.get("created_at"),
+        url: r.get("url"),
+        status_id: r.get("status_id"),
     }
 }
 
@@ -383,14 +432,110 @@ impl Store {
 
     // ---- job descriptions ----
 
-    pub async fn create_jd(&self, title: &str, company: &str, raw_text: &str) -> Result<i64> {
-        Ok(sqlx::query("INSERT INTO job_description (title, company, raw_text) VALUES (?, ?, ?)")
-            .bind(title)
-            .bind(company)
-            .bind(raw_text)
+    /// Inserts a job. `status_id: None` picks the first status (e.g. Bookmarked).
+    pub async fn create_jd(
+        &self,
+        title: &str,
+        company: &str,
+        raw_text: &str,
+        url: &str,
+        status_id: Option<i64>,
+    ) -> Result<i64> {
+        let status_id = match status_id {
+            Some(id) => Some(id),
+            None => sqlx::query_scalar("SELECT id FROM job_status ORDER BY position, id LIMIT 1")
+                .fetch_optional(&self.pool)
+                .await?,
+        };
+        Ok(sqlx::query(
+            "INSERT INTO job_description (title, company, raw_text, url, status_id) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(title)
+        .bind(company)
+        .bind(raw_text)
+        .bind(url.trim())
+        .bind(status_id)
+        .execute(&self.pool)
+        .await?
+        .last_insert_rowid())
+    }
+
+    /// Sets a job's tracking fields; `status_id: None` clears the status.
+    /// Returns false when the job does not exist.
+    pub async fn update_jd_tracking(&self, id: i64, status_id: Option<i64>, url: &str) -> Result<bool> {
+        let done = sqlx::query("UPDATE job_description SET status_id = ?, url = ? WHERE id = ?")
+            .bind(status_id)
+            .bind(url.trim())
+            .bind(id)
             .execute(&self.pool)
-            .await?
-            .last_insert_rowid())
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    // ---- job statuses ----
+
+    pub async fn list_job_statuses(&self) -> Result<Vec<JobStatus>> {
+        let rows = sqlx::query("SELECT * FROM job_status ORDER BY position, id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(job_status_from_row).collect()
+    }
+
+    /// Case-insensitive lookup by name.
+    pub async fn find_job_status(&self, name: &str) -> Result<Option<JobStatus>> {
+        let row = sqlx::query("SELECT * FROM job_status WHERE name = ?")
+            .bind(name.trim())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(job_status_from_row).transpose()
+    }
+
+    /// Appends a status at the end of the list.
+    pub async fn create_job_status(&self, name: &str, color: StatusColor) -> Result<i64> {
+        let name = status_name(name)?;
+        Ok(sqlx::query(
+            "INSERT INTO job_status (name, color, position)
+             VALUES (?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM job_status))",
+        )
+        .bind(name)
+        .bind(color_str(color))
+        .execute(&self.pool)
+        .await
+        .map_err(|e| dup_status(e, name))?
+        .last_insert_rowid())
+    }
+
+    /// Renames/recolors a status. Returns false when it does not exist.
+    pub async fn update_job_status(&self, id: i64, name: &str, color: StatusColor) -> Result<bool> {
+        let name = status_name(name)?;
+        let done = sqlx::query("UPDATE job_status SET name = ?, color = ? WHERE id = ?")
+            .bind(name)
+            .bind(color_str(color))
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| dup_status(e, name))?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Deletes a status; jobs using it lose their status.
+    pub async fn delete_job_status(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM job_status WHERE id = ?").bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Sets positions to the order of `ids`; ids not listed keep theirs.
+    pub async fn reorder_job_statuses(&self, ids: &[i64]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for (pos, id) in ids.iter().enumerate() {
+            sqlx::query("UPDATE job_status SET position = ? WHERE id = ?")
+                .bind(pos as i64)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn get_jd(&self, id: i64) -> Result<Option<JobDescription>> {

@@ -121,7 +121,7 @@ async fn setup(entries: usize, bullets: usize, skills: usize) -> (Store, i64) {
             .unwrap();
     }
     let jd = s
-        .create_jd("Backend Dev", "Acme", "We want Rust.")
+        .create_jd("Backend Dev", "Acme", "We want Rust.", "", None)
         .await
         .unwrap();
     (s, jd)
