@@ -714,6 +714,34 @@ impl Store {
         Ok(())
     }
 
+    // ---- secrets ----
+
+    pub async fn get_secret(&self, provider: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT api_key FROM secrets WHERE provider = ?")
+            .bind(provider)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get("api_key")))
+    }
+
+    pub async fn set_secret(&self, provider: &str, api_key: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO secrets (provider, api_key, updated_at)
+             VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+             ON CONFLICT(provider) DO UPDATE SET api_key = excluded.api_key, updated_at = excluded.updated_at",
+        )
+        .bind(provider)
+        .bind(api_key)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_secret(&self, provider: &str) -> Result<()> {
+        sqlx::query("DELETE FROM secrets WHERE provider = ?").bind(provider).execute(&self.pool).await?;
+        Ok(())
+    }
+
     // ---- cvs ----
 
     pub async fn save_cv(&self, cv: &CvInput) -> Result<i64> {
