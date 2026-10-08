@@ -58,6 +58,16 @@ fn status_str(s: RunStatus) -> &'static str {
     }
 }
 
+fn parse_status(s: &str) -> Result<RunStatus> {
+    Ok(match s {
+        "running" => RunStatus::Running,
+        "done" => RunStatus::Done,
+        "cancelled" => RunStatus::Cancelled,
+        "failed" => RunStatus::Failed,
+        other => return Err(StoreError::Invalid(format!("run status {other}"))),
+    })
+}
+
 fn target_str(t: TargetType) -> &'static str {
     match t {
         TargetType::Entry => "entry",
@@ -352,6 +362,20 @@ impl Store {
                 .await?
                 .last_insert_rowid(),
         )
+    }
+
+    /// Fetches a run; errors with `RowNotFound` if it does not exist.
+    pub async fn get_run(&self, run_id: i64) -> Result<MatchRun> {
+        let r = sqlx::query("SELECT id, jd_id, model_id, status FROM match_run WHERE id = ?")
+            .bind(run_id)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(MatchRun {
+            id: r.get("id"),
+            jd_id: r.get("jd_id"),
+            model_id: r.get("model_id"),
+            status: parse_status(r.get("status"))?,
+        })
     }
 
     pub async fn set_run_status(&self, run_id: i64, status: RunStatus) -> Result<()> {

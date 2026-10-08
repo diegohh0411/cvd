@@ -107,6 +107,19 @@ async fn scores_roundtrip() {
 }
 
 #[tokio::test]
+async fn get_run_reflects_status() {
+    let s = store().await;
+    let jd = s.create_jd("Dev", "Acme", "text").await.unwrap();
+    let run = s.create_run(jd, "clef-flash").await.unwrap();
+    s.set_run_status(run, RunStatus::Cancelled).await.unwrap();
+    assert_eq!(
+        s.get_run(run).await.unwrap(),
+        MatchRun { id: run, jd_id: jd, model_id: "clef-flash".into(), status: RunStatus::Cancelled }
+    );
+    assert!(s.get_run(run + 99).await.is_err());
+}
+
+#[tokio::test]
 async fn delete_entry_cascades() {
     let s = store().await;
     let id = s

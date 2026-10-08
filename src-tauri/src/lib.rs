@@ -4,6 +4,8 @@ mod store;
 mod models;
 #[allow(dead_code)]
 mod engine;
+#[allow(dead_code)]
+mod matcher;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
