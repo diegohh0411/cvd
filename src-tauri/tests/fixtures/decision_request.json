@@ -1,0 +1,8 @@
+{
+ "state": "{\"job_description\": \"Senior Backend Engineer (Rust). We build a high-throughput payments ledger. You will design and operate Rust services on Kubernetes, own PostgreSQL schemas and migrations, improve p99 latency, and mentor engineers. Requirements: 5+ years backend experience, strong Rust or systems language skills, distributed systems, observability (Prometheus, tracing), CI/CD.\", \"cv_entry\": \"Backend Engineer, FinCore (2021-2024). Rewrote the transaction ledger in Rust, cutting p99 latency from 180ms to 35ms. Designed PostgreSQL schemas and zero-downtime migrations. Added tracing and Prometheus metrics; deployed on Kubernetes.\"}",
+ "questions": {
+  "q_noul": {"type": "noul", "instructions": "Does this role require or value Rust?"},
+  "q_choice": {"type": "choice", "instructions": "Which area best describes this CV entry?", "criteria": {"backend": null, "frontend": null, "data_ml": null, "other": null}},
+  "q_score": {"type": "score", "instructions": "How relevant is this CV entry to the job description above?", "criteria": ["irrelevant to this role", "weakly related", "somewhat relevant", "clearly relevant", "highly relevant, a core match"]}
+ }
+}

@@ -28,6 +28,7 @@ thiserror = "2"
 sha2 = "0.11.0"
 sysinfo = "0.39.6"
 hf-hub = { version = "0.4", features = ["tokio"] }
+async-trait = "0.1.92"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
