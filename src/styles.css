@@ -2,6 +2,7 @@
 
 @import 'tailwindcss';
 @import '@angular/cdk/overlay-prebuilt.css';
+@import '@angular/cdk/a11y-prebuilt.css';
 @plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
