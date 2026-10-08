@@ -144,3 +144,24 @@ async fn shutdown_without_engine_is_noop() {
     let (st, _) = state().await;
     st.shutdown();
 }
+
+#[tokio::test]
+async fn export_rejects_unsafe_paths() {
+    let (st, _) = state().await;
+    let sel = Selection { entries: vec![], skills: vec![] };
+    for p in ["cv.pdf", "/tmp/cv.txt", "/tmp/cv", "../cv.pdf"] {
+        let e = export_cv(&st, 1, sel.clone(), p.into()).await.unwrap_err();
+        assert_eq!(e.kind(), "Io", "{p}");
+    }
+    assert!(validate_export_path("/tmp/CV.PDF").is_ok());
+}
+
+#[tokio::test]
+async fn fit_rejects_budget_outside_one_two() {
+    let (st, _) = state().await;
+    for b in [0u8, 3, 255] {
+        let e = fit_cv(&st, 1, b, vec![]).await.unwrap_err();
+        assert_eq!(e.kind(), "Render");
+        assert!(e.to_string().contains("1 or 2"));
+    }
+}

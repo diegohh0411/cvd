@@ -81,6 +81,7 @@ impl LlamaSidecar {
             model_path,
             http: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
+                .no_proxy()
                 .build()
                 .expect("reqwest client"),
             port: tokio::sync::Mutex::new(None),

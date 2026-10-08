@@ -342,3 +342,14 @@ async fn engine_failure_later_keeps_entry_scores() {
         6
     );
 }
+
+#[tokio::test]
+async fn failed_status_save_keeps_original_error() {
+    let (s, _) = setup(1, 1, 0).await;
+    s.close().await;
+    let err = finish(&s, 1, Err(MatchError::Engine(EngineError::Unavailable("down".into()))))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MatchError::Engine(_)), "{err:?}");
+    assert!(matches!(finish(&s, 1, Ok(())).await, Err(MatchError::Store(_))));
+}

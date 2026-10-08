@@ -235,6 +235,9 @@ pub struct FitOutput {
 }
 
 pub async fn fit_cv(st: &AppState, run_id: i64, budget: u8, overrides: Vec<Override>) -> Res<FitOutput> {
+    if !(1..=2).contains(&budget) {
+        return Err(AppError::Render(format!("page budget must be 1 or 2, got {budget}")));
+    }
     let ranked = get_ranked(st, run_id).await?;
     let profile = get_profile(st).await?;
     let floor = MatchConfig::default().score_floor;
@@ -250,9 +253,22 @@ pub async fn fit_cv(st: &AppState, run_id: i64, budget: u8, overrides: Vec<Overr
     })
 }
 
+/// The webview supplies the path, so only absolute `.pdf` targets are allowed.
+fn validate_export_path(path: &str) -> Res<()> {
+    let p = std::path::Path::new(path);
+    let pdf = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+    if !p.is_absolute() || !pdf {
+        return Err(AppError::Io(format!(
+            "export path must be an absolute path ending in .pdf: {path}"
+        )));
+    }
+    Ok(())
+}
+
 /// Compiles `selection` at the loosest style that needs no more pages than
 /// the tightest one, writes the PDF to `path` and records the CV.
 pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: String) -> Res<i64> {
+    validate_export_path(&path)?;
     let run = st.store.get_run(run_id).await?;
     let entries = st.store.list_entries(true).await?;
     let profile = get_profile(st).await?;

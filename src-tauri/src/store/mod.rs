@@ -378,6 +378,11 @@ impl Store {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) async fn close(&self) {
+        self.pool.close().await;
+    }
+
     pub async fn set_run_status(&self, run_id: i64, status: RunStatus) -> Result<()> {
         sqlx::query("UPDATE match_run SET status = ? WHERE id = ?")
             .bind(status_str(status))

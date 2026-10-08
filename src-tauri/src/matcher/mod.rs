@@ -110,8 +110,12 @@ async fn finish(
         Err(MatchError::Cancelled { .. }) => RunStatus::Cancelled,
         Err(_) => RunStatus::Failed,
     };
-    store.set_run_status(run_id, status).await?;
-    outcome.map(|()| run_id)
+    let saved = store.set_run_status(run_id, status).await;
+    // A failed status save must not mask the original engine/cancel error.
+    match outcome {
+        Ok(()) => saved.map(|()| run_id).map_err(MatchError::from),
+        Err(e) => Err(e),
+    }
 }
 
 fn check_cancel(cancel: &CancellationToken, run_id: i64) -> Result<(), MatchError> {
