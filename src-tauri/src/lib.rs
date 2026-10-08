@@ -1,14 +1,76 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
+mod commands;
+// Some items in these modules are only used by tests or by later plans.
+#[allow(dead_code)]
+mod engine;
+#[allow(dead_code)]
+mod matcher;
+#[allow(dead_code)]
+mod models;
+#[allow(dead_code)]
+mod render;
+mod state;
+#[allow(dead_code)]
+mod store;
+
+use std::sync::Arc;
+
+use tauri::{Emitter as _, Manager};
+
+use commands::ipc;
+use state::{AppState, EngineSource};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let url = format!("sqlite://{}", dir.join("cv.db").display());
+            let store = tauri::async_runtime::block_on(store::Store::open(&url))?;
+            let handle = app.handle().clone();
+            let emit_handle = handle.clone();
+            let state = AppState::new(
+                store,
+                dir.join("models"),
+                EngineSource::Sidecar(handle),
+                Arc::new(move |event: &str, payload: serde_json::Value| {
+                    let _ = emit_handle.emit(event, payload);
+                }),
+            );
+            app.manage(state);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            ipc::get_profile,
+            ipc::save_profile,
+            ipc::list_entries,
+            ipc::save_entry,
+            ipc::delete_entry,
+            ipc::list_skills,
+            ipc::create_job,
+            ipc::list_jobs,
+            ipc::get_job,
+            ipc::start_match,
+            ipc::cancel_match,
+            ipc::resume_match,
+            ipc::get_ranked,
+            ipc::fit_cv,
+            ipc::export_cv,
+            ipc::system_ram_gb,
+            ipc::list_models,
+            ipc::download_model,
+            ipc::set_active_model,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Kills the llama-server sidecar; a no-op if it was never built.
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.shutdown();
+                }
+            }
+        });
 }

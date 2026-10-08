@@ -22,6 +22,21 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+thiserror = "2"
+sha2 = "0.11.0"
+sysinfo = "0.39.6"
+hf-hub = { version = "0.4", features = ["tokio"] }
+async-trait = "0.1.92"
+tauri-plugin-shell = "2"
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+tokio-util = "0.7.19"
+typst-as-lib = "0.17"
+typst-pdf = "0.15"
+typst = "0.15"
+typst-layout = "0.15"
+base64 = "0.22"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -31,3 +46,11 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[features]
+# Opt-in test against the real llama-server: needs CVD_TEST_MODEL and binaries/.
+it-sidecar = []
+
+[dev-dependencies]
+pdf-extract = "0.12.1"
+tempfile = "3.27.0"

@@ -1,0 +1,9 @@
+{
+ "model": "Clef-Flash-Q4_K_M.gguf",
+ "answers": {
+  "route": {"type": "choice", "choice": "billing", "probabilities": {"billing": 0.71, "sales": 0.12, "support": 0.17}, "confidence": 0.54},
+  "angry": {"type": "noul", "noul": 0.8208},
+  "urgency": {"type": "score", "score": 2.2821, "legend": {"0": "none", "1": "low", "2": "medium", "3": "high", "4": "critical"}, "probabilities": {"0": 0.05, "1": 0.2, "2": 0.4, "3": 0.25, "4": 0.1}, "confidence": 0.4}
+ },
+ "usage": {"input_tokens": 120, "output_tokens": 0}
+}
