@@ -198,3 +198,10 @@ fn override_exclude_wins() {
     let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
     assert_eq!(ids, vec![2]);
 }
+
+#[test]
+fn month_year_formats() {
+    assert_eq!(super::fit::month_year("2026-08"), "Aug 2026");
+    assert_eq!(super::fit::month_year("2023-01-15"), "Jan 2023");
+    assert_eq!(super::fit::month_year("Summer 2025"), "Summer 2025");
+}

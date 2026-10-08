@@ -364,5 +364,17 @@ fn section_of(kind: EntryKind) -> SectionHeading {
 }
 
 fn dates(e: &Entry) -> String {
-    format!("{} – {}", e.start_date, e.end_date.as_deref().unwrap_or("Present"))
+    let end = e.end_date.as_deref().map_or("Present".into(), month_year);
+    format!("{} – {}", month_year(&e.start_date), end)
+}
+
+/// `2026-08` (or `2026-08-15`) → `Aug 2026`; anything else passes through.
+pub(crate) fn month_year(d: &str) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let mut parts = d.splitn(3, '-');
+    match (parts.next(), parts.next().and_then(|m| m.parse::<usize>().ok())) {
+        (Some(y), Some(m @ 1..=12)) if y.len() == 4 => format!("{} {y}", MONTHS[m - 1]),
+        _ => d.to_string(),
+    }
 }
