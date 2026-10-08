@@ -257,3 +257,80 @@ async fn bare_local_id_still_local() {
     assert!(st.engine_for("openrouter:x").is_err());
     assert_eq!(st.installed_path("clef-flash").unwrap_err().kind(), "ModelMissing");
 }
+
+mod provider_keys {
+    use super::*;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn keyed_state(server: &MockServer) -> AppState {
+        let (st, _) = state().await;
+        st.with_openrouter_base(server.uri())
+    }
+
+    async fn key_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/key"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {}})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/key"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({"error": {"message": "User not found."}})))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn set_key_trims_and_validates() {
+        let server = key_server("sk-or-abcd1234").await;
+        let st = keyed_state(&server).await;
+        let status = set_provider_key(&st, "openrouter", "  sk-or-abcd1234 \n").await.unwrap();
+        assert_eq!(status, KeyStatus { has_key: true, last4: Some("1234".into()) });
+        assert_eq!(st.store.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-abcd1234"));
+        assert_eq!(provider_key_status(&st, "openrouter").await.unwrap(), status);
+    }
+
+    #[tokio::test]
+    async fn set_key_rejects_invalid() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        let err = set_provider_key(&st, "openrouter", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert_eq!(st.store.get_secret("openrouter").await.unwrap(), None);
+        assert_eq!(set_provider_key(&st, "nope", "x").await.unwrap_err().kind(), "NotFound");
+    }
+
+    #[tokio::test]
+    async fn delete_key_unregisters() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        set_provider_key(&st, "openrouter", "good").await.unwrap();
+        assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_ok());
+        delete_provider_key(&st, "openrouter").await.unwrap();
+        assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_err());
+        assert_eq!(provider_key_status(&st, "openrouter").await.unwrap(), KeyStatus { has_key: false, last4: None });
+    }
+
+    #[tokio::test]
+    async fn set_active_remote_requires_key() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        assert_eq!(set_active_model(&st, "openrouter:typesafe/jev-1.13").await.unwrap_err().kind(), "ModelMissing");
+        set_provider_key(&st, "openrouter", "good").await.unwrap();
+        set_active_model(&st, "openrouter:typesafe/jev-1.13").await.unwrap();
+        assert_eq!(st.active_model().await.unwrap(), "openrouter:typesafe/jev-1.13");
+    }
+
+    #[test]
+    fn engine_errors_map_to_provider_kinds() {
+        assert_eq!(AppError::from(EngineError::Unauthorized).kind(), "ProviderAuth");
+        assert_eq!(AppError::from(EngineError::InsufficientCredits).kind(), "ProviderCredits");
+        assert_eq!(AppError::from(EngineError::RateLimited).kind(), "ProviderUnavailable");
+        assert_eq!(AppError::from(EngineError::Network("x".into())).kind(), "ProviderUnavailable");
+        assert_eq!(AppError::from(EngineError::ModelUnavailable("m".into())).kind(), "ProviderUnavailable");
+    }
+}

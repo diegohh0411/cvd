@@ -79,6 +79,10 @@ pub fn run() {
             ipc::list_models,
             ipc::download_model,
             ipc::set_active_model,
+            ipc::set_provider_key,
+            ipc::delete_provider_key,
+            ipc::provider_key_status,
+            ipc::list_remote_models,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
