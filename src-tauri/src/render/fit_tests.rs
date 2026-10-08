@@ -136,10 +136,50 @@ fn min_one_bullet() {
 
 #[test]
 fn floor_respected() {
+    // Page already full enough, so no below-floor filler is added.
     let r = ranked(vec![entry(1, 3.5, "2022-01", 1), entry(2, 1.0, "2021-01", 1)]);
-    let out = fit(&r, &profile(), 1, 2.0, &[]).unwrap();
+    let mut compile_fn = |_: &CvDoc| Ok(Compiled { pages: 1, fill: 0.8, pdf: vec![] });
+    let (out, _) = fit_with(&r, &profile(), 1, 2.0, &[], &mut compile_fn).unwrap();
     let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
     assert_eq!(ids, vec![1]);
+}
+
+/// Fake compile: each bullet fills 0.2 of a page; over 1.0 spills to page 2.
+fn fill_by_bullets(doc: &CvDoc) -> Result<Compiled, RenderError> {
+    let n: usize = doc.sections.iter().flat_map(|s| &s.items).map(|i| i.bullets.len()).sum();
+    let used = 0.2 * n as f32;
+    Ok(Compiled { pages: if used <= 1.0 { 1 } else { 2 }, fill: used.min(1.0), pdf: vec![] })
+}
+
+#[test]
+fn sparse_page_gets_below_floor_filler_volunteer_first() {
+    let mut vol = entry(3, 0.5, "2019-01", 2);
+    vol.entry.kind = EntryKind::Volunteer;
+    let r = ranked(vec![entry(1, 3.5, "2022-01", 1), entry(2, 1.0, "2021-01", 2), vol]);
+    let mut compile_fn = fill_by_bullets;
+    let (out, _) = fit_with(&r, &profile(), 1, 2.0, &[], &mut compile_fn).unwrap();
+    // Base 0.2 + volunteer 0.4 = 0.6 < 0.75, so entry 2 then lands at 1.0.
+    let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
+    assert!(ids.contains(&3), "volunteer added: {ids:?}");
+    assert!(out.compiled.fill >= 0.75);
+    assert_eq!(out.compiled.pages, 1);
+}
+
+#[test]
+fn filler_stops_at_threshold_and_never_adds_a_page() {
+    let r = ranked(vec![
+        entry(1, 3.5, "2022-01", 1),
+        entry(2, 1.0, "2021-01", 2),
+        entry(3, 0.9, "2020-01", 2),
+        entry(4, 0.8, "2019-01", 2),
+    ]);
+    let mut compile_fn = fill_by_bullets;
+    let (out, _) = fit_with(&r, &profile(), 1, 2.0, &[], &mut compile_fn).unwrap();
+    let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
+    // 0.2 + 0.4 (entry 2) = 0.6 < 0.75; + 0.4 (entry 3) = 1.0 -> stop.
+    assert_eq!(ids, vec![1, 2, 3]);
+    assert_eq!(out.compiled.pages, 1);
+    assert_eq!(out.style, StyleStep(0));
 }
 
 #[test]
