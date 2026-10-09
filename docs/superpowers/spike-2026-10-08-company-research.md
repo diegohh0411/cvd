@@ -39,4 +39,6 @@
 
 ## Exa
 
-- Pending the user's key; fixture captured before Task 5.
+- `POST https://api.exa.ai/search`, header `x-api-key`, body `{"query", "type":"auto", "numResults":5, "contents":{"text":{"maxCharacters":500}}}`.
+- 200 → `results[]` with `title`, `url`, `text` (page text, capped by `maxCharacters`); also `id`, `image`, `entities` (unused).
+- Invalid key → HTTP 401. Fixture: `src-tauri/tests/fixtures/exa_search_response.json`.
