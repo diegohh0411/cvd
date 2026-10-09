@@ -3,6 +3,7 @@ import { Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideDownload, lucideRefreshCw } from '@ng-icons/lucide';
 
+import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSkeletonComponent } from '@/shared/components/skeleton/skeleton.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
@@ -49,6 +50,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
   imports: [
     PageHeaderComponent,
     RouterLink,
+    ZardBadgeComponent,
     ZardButtonComponent,
     ZardSkeletonComponent,
     NgIcon,
@@ -153,6 +155,13 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
               <div role="tabpanel" class="min-h-0 flex-1 overflow-y-auto">
                 @switch (tab()) {
                   @case ('jd') {
+                    @if (ws.ranked()?.tags?.length) {
+                      <div class="mb-4 flex flex-wrap gap-1.5" aria-label="Role focus">
+                        @for (tag of ws.ranked()!.tags; track tag) {
+                          <z-badge zType="secondary">{{ tag }}</z-badge>
+                        }
+                      </div>
+                    }
                     <article class="text-sm leading-relaxed whitespace-pre-wrap">{{ ws.job()?.raw_text }}</article>
                   }
                   @case ('selection') {

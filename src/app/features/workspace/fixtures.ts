@@ -37,6 +37,7 @@ export const RANKED: Ranked = {
     [{ id: 2, name: 'Go', category: '' }, 0.2],
   ],
   seniority: 'senior',
+  tags: ['backend', 'distributed systems'],
 };
 
 export const SELECTION: Selection = {
