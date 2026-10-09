@@ -81,14 +81,14 @@ export const NAV: readonly NavItem[] = [
       <div z-sidebar-header>
         <ul z-sidebar-menu>
           <li z-sidebar-menu-item>
-            <a z-sidebar-menu-button zSize="lg" routerLink="/jobs" [zTooltip]="'CV Decisions'">
+            <a z-sidebar-menu-button zSize="lg" routerLink="/jobs" [zTooltip]="'CVD'">
               <div
                 class="bg-primary text-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg"
               >
                 <ng-icon name="lucideFileText" class="size-4" />
               </div>
               <div class="grid flex-1 text-left text-sm leading-tight">
-                <span class="truncate font-semibold">CV Decisions</span>
+                <span class="truncate font-semibold">CVD</span>
                 <span class="text-muted-foreground truncate text-xs">{{ profileName() }}</span>
               </div>
             </a>

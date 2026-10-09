@@ -25,7 +25,7 @@ export const FIRST_RUN_STEPS = ['Profile', 'Model', 'First entry'] as const;
   template: `
     <z-dialog [zVisible]="firstRun.visible()" (zVisibleChange)="!$event && firstRun.close()" class="sm:max-w-2xl" [zMaskClosable]="false">
       <z-dialog-header>
-        <z-dialog-title>Welcome to CV Decisions</z-dialog-title>
+        <z-dialog-title>Welcome to CVD</z-dialog-title>
         <z-dialog-description>
           Step {{ step() + 1 }} of {{ steps.length }} · {{ steps[step()] }}
         </z-dialog-description>

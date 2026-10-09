@@ -1,4 +1,4 @@
-# CV Decisions — Design Spec
+# CVD — Design Spec
 
 **Date:** 2026-10-08
 **Status:** Draft for review

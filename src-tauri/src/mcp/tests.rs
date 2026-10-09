@@ -100,7 +100,7 @@ fn db_path_prefers_env_override() {
         Some(std::path::PathBuf::from("/tmp/x.db"))
     );
     let default = super::db_path_from(None).unwrap();
-    assert!(default.ends_with("com.diego.cv-decisions/cv.db"), "{}", default.display());
+    assert!(default.ends_with("com.diego.cvd/cv.db"), "{}", default.display());
 }
 
 fn job_args() -> super::UpsertJobArgs {

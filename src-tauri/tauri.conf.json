@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cv-decisions",
+  "productName": "cvd",
   "version": "0.1.0",
-  "identifier": "com.diego.cv-decisions",
+  "identifier": "com.diego.cvd",
   "build": {
     "beforeDevCommand": "bun run start",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
-    "frontendDist": "../dist/cv-decisions/browser"
+    "frontendDist": "../dist/cvd/browser"
   },
   "app": {
     "windows": [
       {
-        "title": "CV Decisions",
+        "title": "CVD",
         "width": 1280,
         "height": 820,
         "minWidth": 900,

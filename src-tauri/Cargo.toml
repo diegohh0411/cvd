@@ -1,10 +1,11 @@
 [package]
-name = "cv-decisions"
+name = "cvd"
 version = "0.1.0"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["Diego Hernández Herrera"]
+license-file = "../LICENSE"
 edition = "2021"
-default-run = "cv-decisions"
+default-run = "cvd"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,7 +13,7 @@ default-run = "cv-decisions"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "cv_decisions_lib"
+name = "cvd_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]

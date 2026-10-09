@@ -18,7 +18,7 @@ use crate::store::{Store, StoreError};
 pub use validate::normalize_entry;
 
 /// Tauri's bundle identifier; `app_data_dir()` is `<data_dir>/<identifier>`.
-const APP_IDENTIFIER: &str = "com.diego.cv-decisions";
+const APP_IDENTIFIER: &str = "com.diego.cvd";
 
 /// Resolves the app database: `override_path` (from `CVD_DB_PATH`) or the
 /// same `cv.db` the desktop app opens.

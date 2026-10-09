@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "cv-decisions",
+      "name": "cvd",
       "dependencies": {
         "@angular/cdk": "^22",
         "@angular/common": "^22.0.1",

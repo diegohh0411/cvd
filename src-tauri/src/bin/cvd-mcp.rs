@@ -1,8 +1,8 @@
 //! Stdio MCP server over the app's database. stdout carries the protocol;
 //! diagnostics go to stderr.
 
-use cv_decisions_lib::mcp::{db_path_from, CvServer};
-use cv_decisions_lib::store::Store;
+use cvd_lib::mcp::{db_path_from, CvServer};
+use cvd_lib::store::Store;
 use rmcp::ServiceExt;
 
 #[tokio::main]
