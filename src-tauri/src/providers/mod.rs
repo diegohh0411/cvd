@@ -59,6 +59,8 @@ pub struct RemoteModel {
 pub enum ProviderError {
     #[error("Check your OpenRouter key")]
     Unauthorized,
+    #[error("Check your {0} key")]
+    KeyRejected(&'static str),
     #[error("Network error: {0}")]
     Network(String),
     #[error("Bad response from provider: {0}")]

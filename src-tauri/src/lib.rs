@@ -10,6 +10,7 @@ mod models;
 mod providers;
 #[allow(dead_code)]
 mod render;
+mod search;
 mod state;
 #[allow(dead_code)]
 pub mod store;

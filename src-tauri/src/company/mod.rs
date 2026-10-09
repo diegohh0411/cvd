@@ -5,7 +5,7 @@ mod render;
 
 pub use key::{domain_from_url, normalize_name};
 pub use render::render;
-pub use policy::{backoff, need, parse_ts, format_ts, Need, COMPANY_TTL};
+pub use policy::{backoff, need, parse_ts, format_ts, Need};
 
 #[cfg(test)]
 mod tests;

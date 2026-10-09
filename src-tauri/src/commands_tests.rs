@@ -325,6 +325,33 @@ mod provider_keys {
         assert_eq!(st.active_model().await.unwrap(), "openrouter:typesafe/jev-1.13");
     }
 
+    async fn exa_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/search"))
+            .and(header("x-api-key", valid))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"results": []})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn exa_key_validates_and_enables_search() {
+        let server = exa_server("exa-good").await;
+        let (st, _) = state().await;
+        let st = st.with_exa_base(server.uri());
+        assert_eq!(st.search().err().map(|e| e.to_string()).as_deref(), Some("Add your Exa key in Settings."));
+        assert_eq!(set_provider_key(&st, "exa", "bad").await.unwrap_err().kind(), "ProviderAuth");
+        assert_eq!(st.store.get_secret("exa").await.unwrap(), None);
+        let status = set_provider_key(&st, "exa", " exa-good ").await.unwrap();
+        assert_eq!(status.last4.as_deref(), Some("good"));
+        assert!(st.search().is_ok());
+        delete_provider_key(&st, "exa").await.unwrap();
+        assert!(st.search().is_err());
+    }
+
     #[test]
     fn engine_errors_map_to_provider_kinds() {
         assert_eq!(AppError::from(EngineError::Unauthorized).kind(), "ProviderAuth");

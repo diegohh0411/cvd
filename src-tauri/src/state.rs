@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::AppError;
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
 use crate::models::{self, REGISTRY};
-use crate::providers::{ModelRef, ProviderRegistry, OPENROUTER_BASE};
+use crate::providers::{ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
+use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
 use crate::store::Store;
 
 /// Settings key holding the active model id.
@@ -46,6 +47,9 @@ pub struct AppState {
     /// Remote providers with keys; rebuilt by `reload_providers`.
     providers: RwLock<Arc<ProviderRegistry>>,
     pub openrouter_base: String,
+    /// Web search for company research; `None` until an Exa key is stored.
+    search: RwLock<Option<Arc<dyn SearchProvider>>>,
+    pub exa_base: String,
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -75,6 +79,8 @@ impl AppState {
             emit,
             providers: RwLock::default(),
             openrouter_base: OPENROUTER_BASE.into(),
+            search: RwLock::default(),
+            exa_base: EXA_BASE.into(),
         }
     }
 
@@ -84,11 +90,32 @@ impl AppState {
         self
     }
 
-    /// Rebuilds the provider registry from the stored keys.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_exa_base(mut self, base: String) -> Self {
+        self.exa_base = base;
+        self
+    }
+
+    /// Rebuilds the provider registry and search backend from the stored keys.
     pub async fn reload_providers(&self) -> Result<(), AppError> {
         let reg = ProviderRegistry::load(&self.store, &self.openrouter_base).await?;
         *self.providers.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(reg);
+        let search = self
+            .store
+            .get_secret(EXA)
+            .await?
+            .map(|k| Arc::new(ExaSearch::new(self.exa_base.clone(), k)) as Arc<dyn SearchProvider>);
+        *self.search.write().unwrap_or_else(|e| e.into_inner()) = search;
         Ok(())
+    }
+
+    /// The web search backend, or why there is none.
+    pub fn search(&self) -> Result<Arc<dyn SearchProvider>, ProviderError> {
+        self.search
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(|| ProviderError::Missing("Add your Exa key in Settings.".into()))
     }
 
     pub fn providers(&self) -> Arc<ProviderRegistry> {

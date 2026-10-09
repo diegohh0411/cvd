@@ -5,6 +5,7 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::search::{ExaSearch, SearchProvider, EXA};
 use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
@@ -97,7 +98,9 @@ impl From<crate::providers::ProviderError> for AppError {
     fn from(e: crate::providers::ProviderError) -> Self {
         match e {
             crate::providers::ProviderError::Missing(m) => Self::ModelMissing(m),
-            crate::providers::ProviderError::Unauthorized => Self::ProviderAuth(e.to_string()),
+            crate::providers::ProviderError::Unauthorized | crate::providers::ProviderError::KeyRejected(_) => {
+                Self::ProviderAuth(e.to_string())
+            }
             crate::providers::ProviderError::Network(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
@@ -516,7 +519,7 @@ pub struct KeyStatus {
 }
 
 fn known_provider(provider: &str) -> Res<()> {
-    if provider == OPENROUTER {
+    if provider == OPENROUTER || provider == EXA {
         Ok(())
     } else {
         Err(AppError::NotFound(format!("Unknown provider {provider}.")))
@@ -534,7 +537,11 @@ fn key_status(key: Option<&str>) -> KeyStatus {
 pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
     known_provider(provider)?;
     let key = key.trim();
-    OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
+    if provider == EXA {
+        ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
+    } else {
+        OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
+    }
     st.store.set_secret(provider, key).await?;
     st.reload_providers().await?;
     st.reset_engine();
