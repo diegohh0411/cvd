@@ -4,6 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { toAppError } from './errors';
 import type {
+  Company,
+  CompanyProfile,
   Cv,
   Entry,
   EntryInput,
@@ -22,7 +24,9 @@ import type {
   ScoreRow,
   Selection,
   Skill,
+  SkipMode,
   StatusColor,
+  ModelRole,
 } from './types';
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -54,6 +58,14 @@ export const resumeMatch = (runId: number) => call<void>('resume_match', { runId
 export const listRuns = (jdId: number) => call<MatchRun[]>('list_runs', { jdId });
 export const getScores = (runId: number) => call<ScoreRow[]>('get_scores', { runId });
 export const getRanked = (runId: number) => call<Ranked>('get_ranked', { runId });
+export const skipResearch = (runId: number, mode: SkipMode) => call<void>('skip_research', { runId, mode });
+export const rescore = (runId: number) => call<number>('rescore', { runId });
+
+// ---- companies ----
+export const getCompany = (id: number) => call<Company>('get_company', { id });
+export const getJobCompany = (jdId: number) => call<Company | null>('get_job_company', { jdId });
+export const editCompany = (id: number, profile: CompanyProfile) => call<Company>('edit_company', { id, profile });
+export const refreshCompany = (id: number) => call<Company>('refresh_company', { id });
 
 // ---- job statuses ----
 export const listJobStatuses = () => call<JobStatus[]>('list_job_statuses');
@@ -81,10 +93,13 @@ export const listModels = () => call<ModelInfo[]>('list_models');
 export const downloadModel = (id: string) => call<void>('download_model', { id });
 export const cancelDownload = (id: string) => call<void>('cancel_download', { id });
 export const setActiveModel = (id: string) => call<void>('set_active_model', { id });
+export const setResearchModel = (id: string) => call<void>('set_research_model', { id });
+export const getResearchModel = () => call<string | null>('get_research_model');
 export const engineStatus = () => call<EngineStatus>('engine_status');
 
 // ---- online providers ----
 export const setProviderKey = (provider: ProviderId, key: string) => call<KeyStatus>('set_provider_key', { provider, key });
 export const deleteProviderKey = (provider: ProviderId) => call<void>('delete_provider_key', { provider });
 export const providerKeyStatus = (provider: ProviderId) => call<KeyStatus>('provider_key_status', { provider });
-export const listRemoteModels = (refresh: boolean) => call<ProviderModels[]>('list_remote_models', { refresh });
+export const listRemoteModels = (refresh: boolean, role: ModelRole = 'decision') =>
+  call<ProviderModels[]>('list_remote_models', { refresh, role });

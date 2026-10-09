@@ -46,6 +46,11 @@ base64 = "0.22"
 rmcp = { version = "3.5.1", features = ["server", "transport-io", "macros"] }
 schemars = "1"
 dirs = "7.0.0"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+agentix = "=0.31.0"
+dom_smoothie = "0.18"
+html2text = "0.17"
+futures = "0.3.34"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

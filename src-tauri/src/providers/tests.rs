@@ -111,3 +111,22 @@ async fn live_openrouter_smoke() {
         println!("{id}: {:?}", answers["rust"]);
     }
 }
+
+#[test]
+fn openrouter_chat_endpoint() {
+    let ep = OpenRouterProvider::new("https://openrouter.ai/api".into(), "k".into()).chat_endpoint("deepseek/x").unwrap();
+    assert_eq!(ep, ChatEndpoint { base_url: "https://openrouter.ai/api/v1".into(), api_key: Some("k".into()), model: "deepseek/x".into() });
+}
+
+#[tokio::test]
+async fn openrouter_lists_tool_models_for_chat() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(query_param("supported_parameters", "tools"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(models_fixture()))
+        .mount(&server)
+        .await;
+    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri()).await.unwrap();
+    assert_eq!(reg.remote_chat_models(false).await[0].models.len(), 4);
+}

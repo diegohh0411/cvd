@@ -3,6 +3,7 @@
 use super::types::{Answer, EngineError, Question};
 use super::wire::{parse_wire_response, wire_request};
 use super::DecisionEngine;
+use crate::models::ModelKind;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -20,7 +21,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const BATCH: &str = "16384";
 
 pub trait Launcher: Send + Sync {
-    fn spawn(&self, model: &Path, port: u16) -> Result<Box<dyn Child>, EngineError>;
+    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError>;
 }
 
 pub trait Child: Send {
@@ -28,9 +29,13 @@ pub trait Child: Send {
     fn alive(&mut self) -> bool;
 }
 
-/// Command-line arguments for `llama-server`.
-pub fn server_args(model: &Path, port: u16) -> Vec<String> {
-    vec![
+/// Context for chat models: room for a research agent's tool results.
+const CHAT_CTX: &str = "32768";
+
+/// Command-line arguments for `llama-server`. Chat models also need Jinja
+/// chat templates (so tool calls are parsed) and a larger context.
+pub fn server_args(model: &Path, port: u16, kind: ModelKind) -> Vec<String> {
+    let mut args = vec![
         "-m".into(),
         model.to_string_lossy().into_owned(),
         "--host".into(),
@@ -41,7 +46,11 @@ pub fn server_args(model: &Path, port: u16) -> Vec<String> {
         BATCH.into(),
         "-ub".into(),
         BATCH.into(),
-    ]
+    ];
+    if kind == ModelKind::Chat {
+        args.extend(["--jinja".into(), "-c".into(), CHAT_CTX.into()]);
+    }
+    args
 }
 
 /// Asks the OS for a free loopback port, then releases it for the server.
@@ -63,6 +72,7 @@ enum Failure {
 pub struct LlamaSidecar {
     launcher: Box<dyn Launcher>,
     model_path: PathBuf,
+    kind: ModelKind,
     http: reqwest::Client,
     /// Port of the running server. Holding this lock serialises requests and restarts.
     port: tokio::sync::Mutex<Option<u16>>,
@@ -79,6 +89,7 @@ impl LlamaSidecar {
         Self {
             launcher,
             model_path,
+            kind: ModelKind::Decision,
             http: reqwest::Client::builder()
                 .timeout(REQUEST_TIMEOUT)
                 .no_proxy()
@@ -89,6 +100,42 @@ impl LlamaSidecar {
             shut_down: AtomicBool::new(false),
             #[cfg(test)]
             fixed_port: None,
+        }
+    }
+
+    /// Serves a chat model (OpenAI-compatible `/v1/chat/completions`) instead of decisions.
+    pub fn with_kind(mut self, kind: ModelKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    /// Starts the server if needed (restarting a dead one once) and returns its port.
+    pub async fn ensure_started(&self) -> Result<u16, EngineError> {
+        let mut slot = self.port.lock().await;
+        let mut restarted = false;
+        loop {
+            if self.shut_down.load(Ordering::SeqCst) {
+                return Err(EngineError::Unavailable("llama-server was shut down".into()));
+            }
+            match *slot {
+                Some(p) if self.child_alive() => return Ok(p),
+                Some(_) => {
+                    self.kill_child();
+                    *slot = None;
+                }
+                None => {}
+            }
+            match self.start().await {
+                Ok(p) => *slot = Some(p),
+                Err(Failure::Final(e)) => return Err(e),
+                Err(Failure::Dead(why)) => {
+                    self.kill_child();
+                    if restarted {
+                        return Err(EngineError::Unavailable(why));
+                    }
+                    restarted = true;
+                }
+            }
         }
     }
 
@@ -133,7 +180,7 @@ impl LlamaSidecar {
 
     async fn start(&self) -> Result<u16, Failure> {
         let port = self.pick_port().map_err(Failure::Final)?;
-        let child = self.launcher.spawn(&self.model_path, port).map_err(Failure::Final)?;
+        let child = self.launcher.spawn(&self.model_path, port, self.kind).map_err(Failure::Final)?;
         {
             let mut slot = self.child.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(child);
@@ -257,7 +304,7 @@ impl Child for TauriChild {
 }
 
 impl Launcher for TauriLauncher {
-    fn spawn(&self, model: &Path, port: u16) -> Result<Box<dyn Child>, EngineError> {
+    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
         use tauri_plugin_shell::{process::CommandEvent, ShellExt};
         let unavailable = |e: tauri_plugin_shell::Error| EngineError::Unavailable(format!("cannot start llama-server: {e}"));
         let (mut rx, child) = self
@@ -265,7 +312,7 @@ impl Launcher for TauriLauncher {
             .shell()
             .sidecar("llama-server")
             .map_err(unavailable)?
-            .args(server_args(model, port))
+            .args(server_args(model, port, kind))
             .spawn()
             .map_err(unavailable)?;
         let alive = Arc::new(AtomicBool::new(true));

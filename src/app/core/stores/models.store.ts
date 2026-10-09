@@ -71,6 +71,17 @@ export class ModelsStore {
     await api.setActiveModel(id);
   }
 
+  readonly researchModel = signal<string | null>(null);
+
+  async loadResearchModel(): Promise<void> {
+    this.researchModel.set(await api.getResearchModel().catch(() => null));
+  }
+
+  async useForResearch(id: string): Promise<void> {
+    await api.setResearchModel(id);
+    this.researchModel.set(id);
+  }
+
   private listen(): void {
     if (this.listening) return;
     this.listening = true;
@@ -94,8 +105,9 @@ export class ModelsStore {
   }
 }
 
+/** Recommends a System One (decision) model; research models are chosen in Settings. */
 export function recommend(specs: ModelSpec[], ramGb: number | null): ModelSpec | null {
-  const fits = specs.filter((s) => ramGb === null || s.min_ram_gb <= ramGb);
+  const fits = specs.filter((s) => s.kind === 'decision' && (ramGb === null || s.min_ram_gb <= ramGb));
   return fits.find((s) => s.id === DEFAULT_MODEL) ?? [...fits].sort((a, b) => b.size_bytes - a.size_bytes)[0] ?? null;
 }
 

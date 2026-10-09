@@ -5,6 +5,8 @@ import { lucideCheck, lucideLoader } from '@ng-icons/lucide';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardProgressComponent } from '@/shared/components/progress/progress.component';
 import type { MatchStage } from '../../core/ipc/types';
+import { ResearchProgressComponent } from '../companies/research-progress.component';
+import type { ResearchState } from './workspace.store';
 
 export const STEPS = ['Reading JD', 'Scoring entries and bullets', 'Fitting page'] as const;
 
@@ -24,7 +26,7 @@ const pct = (done: number, total: number) => (total ? Math.round((done / total) 
 
 @Component({
   selector: 'app-matching-stepper',
-  imports: [ZardButtonComponent, ZardProgressComponent, NgIcon],
+  imports: [ZardButtonComponent, ZardProgressComponent, NgIcon, ResearchProgressComponent],
   viewProviders: [provideIcons({ lucideCheck, lucideLoader })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -33,6 +35,9 @@ const pct = (done: number, total: number) => (total ? Math.round((done / total) 
         <h2 class="font-semibold">Matching your library</h2>
         <p class="text-muted-foreground text-sm">Runs locally. Usually 30–90 seconds. <span class="tabular-nums">{{ elapsed() }}s</span></p>
       </div>
+      @if (research(); as r) {
+        <app-research-progress [state]="r" [companyName]="companyName()" (skip)="skipResearch.emit($event)" />
+      }
       <ol class="flex flex-col gap-3" aria-live="polite">
         @for (s of steps; track s; let i = $index) {
           <li class="flex flex-col gap-1.5">
@@ -62,7 +67,10 @@ const pct = (done: number, total: number) => (total ? Math.round((done / total) 
 export class MatchingStepperComponent {
   readonly progress = input<MatchStage | null>(null);
   readonly startedAt = input<number | null>(null);
+  readonly research = input<ResearchState | null>(null);
+  readonly companyName = input('the company');
   readonly cancel = output<void>();
+  readonly skipResearch = output<'cancel' | 'background'>();
   protected readonly steps = STEPS;
   protected readonly state = computed(() => stepState(this.progress()));
   private readonly now = signal(Date.now());

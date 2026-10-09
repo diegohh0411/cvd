@@ -1,0 +1,83 @@
+{
+    "requestId": "d31e4c6881c6a101e6d0836850283e6e",
+    "resolvedSearchType": "",
+    "results": [
+        {
+            "id": "https://www.anthropic.com/",
+            "title": "Home \\ Anthropic",
+            "url": "https://www.anthropic.com/",
+            "text": "Home \\ Anthropic\n\n# AI research and products that put safety at the frontier\n\nAI will have a vast impact on the world. Anthropic is a public benefit corporation dedicated to securing its benefits and mitigating its risks. \n\n## :Claude: Haiku 5.5\n\nThe cheapest, fastest, and most capable small model we\u2019ve ever released.\n\n### Introducing Haiku 5.5\n\nDesigned for high-volume, cost-sensitive work. It\u2019s our fastest, cheapest, and most capable small model to date. \n\n- Date\n\nOctober 7, 2026\n- Category\n\nA",
+            "image": "https://cdn.prod.website-files.com/67ce28cfec624e2b733f8a52/68309ab48369f7ad9b4a40e1_open-graph.jpg",
+            "entities": [
+                {
+                    "id": "https://exa.ai/library/organization/bxsfqjvzd99",
+                    "type": "company",
+                    "version": 1,
+                    "properties": {
+                        "name": "Anthropic",
+                        "foundedYear": 2021,
+                        "description": "We're an AI research company that builds reliable, interpretable, and steerable AI systems. Our first product is Claude, an AI assistant for tasks at any scale.\n\nOur research interests span multiple areas including natural language, human feedback, scaling laws, reinforcement learning, code generation, and interpretability. ",
+                        "workforce": {
+                            "total": 6110
+                        },
+                        "headquarters": {
+                            "address": "548 Market St, PMB 90375,; San Francisco, California 94104, United States",
+                            "city": "San Francisco",
+                            "postalCode": null,
+                            "country": "United States"
+                        },
+                        "financials": {
+                            "revenueAnnual": 14000000000,
+                            "fundingTotal": 195240377627,
+                            "fundingLatestRound": {
+                                "name": "Debt financing",
+                                "date": "2026-09-01",
+                                "amount": 15000000000
+                            }
+                        },
+                        "webTraffic": null,
+                        "research": null
+                    }
+                }
+            ]
+        },
+        {
+            "id": "https://www.anthropic.com/company",
+            "title": "Company \\ Anthropic",
+            "url": "https://www.anthropic.com/company",
+            "text": "Company \\ Anthropic\n\n# Making AI systems you can rely on\n\nAnthropic is an AI safety and research company. We build reliable, interpretable, and steerable AI systems.\n\n### We Build Safer Systems\n\nWe aim to build frontier AI systems that are reliable, interpretable, and steerable. We conduct frontier research, develop and apply a variety of safety techniques, and deploy the resulting systems via a set of partnerships and products.\n\n### Safety Is a Science\n\nWe treat AI safety as a systematic scienc",
+            "image": "https://cdn.sanity.io/images/4zrzovbb/website/6d4a0d28992ade92d6fa63646fd9c9d318245c6c-2400x1260.jpg"
+        },
+        {
+            "id": "https://en.wikipedia.org/wiki/Anthropic",
+            "title": "Anthropic - Wikipedia",
+            "url": "https://en.wikipedia.org/wiki/Anthropic",
+            "author": "Contributors to Wikimedia projects",
+            "text": "Anthropic - Wikipedia\n\n# Anthropic\n\nAnthropic, PBC\n\n| | |\n| --- | --- |\n| Headquarters at 500 Howard St, San Francisco | |\n| Type | Public benefit corporation Private |\n| Industry | Artificial intelligence |\n| Founded | January 26, 2021 (5 years ago) [1] |\n| Founders | Dario Amodei Daniela Amodei Jared Kaplan [2] Jack Clark [3] Chris Olah [4] Ben Mann [5] Sam McCandlish [4] Tom Brown [4] |\n| Headquarters | 500 Howard Street, [6] San Francisco, California, U.S. |\n| Key people | Dario Amodei (CEO)",
+            "image": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Slack_offices%2C_Howard_Street%2C_San_Francisco_%28viewed_from_the_south-west%2C_January_2020%29.jpg/1280px-Slack_offices%2C_Howard_Street%2C_San_Francisco_%28viewed_from_the_south-west%2C_January_2020%29.jpg?utm_source=en.wikipedia.org&utm_campaign=index&utm_content=thumbnail"
+        },
+        {
+            "id": "https://www.britannica.com/money/Anthropic-PBC",
+            "title": "Anthropic | History, Controversies, & Claude AI | Britannica Money",
+            "url": "https://www.britannica.com/money/Anthropic-PBC",
+            "text": "Anthropic | History, Controversies, & Claude AI | Britannica Money\n\nTable of Contents\n\n---\n\n2021\u201323: Founding, early models, and public launch\n\n2024\u201325: Expansion and government partnerships\n\n2026: Legal issues and corporate developments\n\nPentagon dispute and court ruling\n\nRead More\n\nTable Of Contents\n\n# Anthropic, PBC\n\nAmerican artificial intelligence company\n\nPrintCiteShare\n\nWritten byKarl Montevirgen\n\nFact-checked byThe Editors of Encyclopaedia Britannica\n\nUpdated: Aug. 31, 2026\u2022Article Histo",
+            "image": "https://cdn.britannica.com/20/285620-159-F90BD554/Anthropic-and-Claude-logos-shown-on-cell-phone.jpg",
+            "favicon": "https://www.britannica.com/money/favicon.ico?favicon.0cn4pdjskcnax.ico"
+        },
+        {
+            "id": "https://www.anthropic.com/overview",
+            "title": "Overview \\ Anthropic",
+            "url": "https://www.anthropic.com/overview",
+            "text": "Overview \\ Anthropic\n\n[Skip to main content](#main-content)[Skip to footer](#footer)\n[\n](https://www.anthropic.com/)\n[Try Claude](https://claude.ai/)\nOverview \\\\ Anthropic",
+            "image": "https://cdn.sanity.io/images/4zrzovbb/website/c07f638082c569e8ce1e89ae95ee6f332a98ec08-2400x1260.jpg",
+            "favicon": "https://www.anthropic.com/images/icons/favicon-32x32.png"
+        }
+    ],
+    "searchTime": 720.8,
+    "costDollars": {
+        "total": 0.007,
+        "search": {
+            "neural": 0.007
+        }
+    }
+}

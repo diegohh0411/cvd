@@ -13,7 +13,7 @@ use hf_hub::Cache;
 use sha2::{Digest, Sha256};
 use sysinfo::System;
 
-pub use registry::{ModelSpec, REGISTRY};
+pub use registry::{ModelKind, ModelSpec, REGISTRY};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {

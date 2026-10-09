@@ -30,6 +30,8 @@ impl Default for MatchConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
+    /// Waiting for company research (see `company://research` for its steps).
+    Researching { company_id: i64 },
     ReadingJd,
     /// `done`/`total` count questions across the run's batched requests.
     Scoring { done: usize, total: usize },
@@ -68,12 +70,14 @@ pub struct Ranked {
 const TAG_THRESHOLD: f64 = 0.5;
 
 /// Starts a new run for `jd_id` and scores it end to end.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_match(
     store: &Store,
     engine: &dyn DecisionEngine,
     jd_id: i64,
     model_id: &str,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: CancellationToken,
     on_progress: impl Fn(Progress),
 ) -> Result<i64, MatchError> {
@@ -84,7 +88,7 @@ pub async fn run_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, jd_id, cfg, &cancel, &on_progress).await,
+        execute(store, engine, run_id, jd_id, cfg, company, &cancel, &on_progress).await,
     )
     .await
 }
@@ -95,6 +99,7 @@ pub async fn resume_match(
     engine: &dyn DecisionEngine,
     run_id: i64,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: CancellationToken,
     on_progress: impl Fn(Progress),
 ) -> Result<i64, MatchError> {
@@ -103,7 +108,7 @@ pub async fn resume_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, run.jd_id, cfg, &cancel, &on_progress).await,
+        execute(store, engine, run_id, run.jd_id, cfg, company, &cancel, &on_progress).await,
     )
     .await
 }
@@ -258,12 +263,14 @@ async fn ask(
 /// Asks every question about the JD in as few requests as fit: JD meta,
 /// skills, entry relevance and seniority fit, and every bullet. The JD is the
 /// shared state; each entry or bullet question carries its own data.
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     store: &Store,
     engine: &dyn DecisionEngine,
     run_id: i64,
     jd_id: i64,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: &CancellationToken,
     on_progress: &impl Fn(Progress),
 ) -> Result<(), MatchError> {
@@ -338,7 +345,7 @@ async fn execute(
     let mut done = total - todo.len();
     on_progress(Progress::Scoring { done, total });
 
-    let state = questions::jd_state(&jd.raw_text);
+    let state = questions::jd_state(&jd.raw_text, company);
     for batch in batches(todo, &state, cfg.token_budget) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();

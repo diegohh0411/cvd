@@ -1,4 +1,5 @@
 mod commands;
+mod company;
 // Some items in these modules are only used by tests or by later plans.
 #[allow(dead_code)]
 mod engine;
@@ -9,6 +10,7 @@ mod models;
 mod providers;
 #[allow(dead_code)]
 mod render;
+mod search;
 mod state;
 #[allow(dead_code)]
 pub mod store;
@@ -79,6 +81,14 @@ pub fn run() {
             ipc::list_models,
             ipc::download_model,
             ipc::set_active_model,
+            ipc::set_research_model,
+            ipc::skip_research,
+            ipc::rescore,
+            ipc::get_company,
+            ipc::get_job_company,
+            ipc::edit_company,
+            ipc::refresh_company,
+            ipc::get_research_model,
             ipc::set_provider_key,
             ipc::delete_provider_key,
             ipc::provider_key_status,

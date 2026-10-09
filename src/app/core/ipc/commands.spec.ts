@@ -36,6 +36,26 @@ describe('ipc commands', () => {
     ]);
   });
 
+  it('names the company research commands and arguments', async () => {
+    const t = mockTauri({ skip_research: null, rescore: 4, get_job_company: null, edit_company: {}, refresh_company: {}, set_research_model: null, list_remote_models: [] });
+    await api.skipResearch(3, 'background');
+    await api.rescore(3);
+    await api.getJobCompany(7);
+    await api.editCompany(5, { summary: '', industry: '', size: '', stage: '', headquarters: '', remote_policy: '', products: '', tech_stack: [], sources: [] });
+    await api.refreshCompany(5);
+    await api.setResearchModel('lfm2.5-2.6b');
+    await api.listRemoteModels(false, 'chat');
+    expect(t.calls.map((c) => [c.cmd, Object.keys(c.args).sort()])).toEqual([
+      ['skip_research', ['mode', 'runId']],
+      ['rescore', ['runId']],
+      ['get_job_company', ['jdId']],
+      ['edit_company', ['id', 'profile']],
+      ['refresh_company', ['id']],
+      ['set_research_model', ['id']],
+      ['list_remote_models', ['refresh', 'role']],
+    ]);
+  });
+
   it('serializes overrides as serde externally tagged enums', async () => {
     const t = mockTauri({ fit_cv: {} });
     const overrides: Override[] = [{ Include: { Entry: 5 } }, { Exclude: { Bullet: 9 } }, { Order: [3, 1, 2] }];
@@ -74,7 +94,7 @@ describe('ipc commands', () => {
       ['set_provider_key', { provider: 'openrouter', key: 'k' }],
       ['delete_provider_key', { provider: 'openrouter' }],
       ['provider_key_status', { provider: 'openrouter' }],
-      ['list_remote_models', { refresh: true }],
+      ['list_remote_models', { refresh: true, role: 'decision' }],
     ]);
   });
 

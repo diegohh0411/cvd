@@ -120,9 +120,9 @@ impl StubLauncher {
 }
 
 impl Launcher for StubLauncher {
-    fn spawn(&self, model: &Path, port: u16) -> Result<Box<dyn Child>, EngineError> {
+    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
         let i = self.spawns.fetch_add(1, Ordering::SeqCst);
-        self.args.lock().unwrap().push(server_args(model, port));
+        self.args.lock().unwrap().push(server_args(model, port, kind));
         let cfg = self.cfgs[i.min(self.cfgs.len() - 1)];
         let alive = Arc::new(AtomicBool::new(true));
         run_stub(port, cfg, alive.clone(), self.hits.clone());
@@ -216,7 +216,7 @@ async fn overflow_body_maps_to_context_overflow() {
     });
     struct Fixed;
     impl Launcher for Fixed {
-        fn spawn(&self, _: &Path, _: u16) -> Result<Box<dyn Child>, EngineError> {
+        fn spawn(&self, _: &Path, _: u16, _: ModelKind) -> Result<Box<dyn Child>, EngineError> {
             Ok(Box::new(StubChild { alive: Arc::new(AtomicBool::new(true)) }))
         }
     }
@@ -249,9 +249,9 @@ async fn real_server_shape() {
         }
     }
     impl Launcher for ProcessLauncher {
-        fn spawn(&self, model: &Path, port: u16) -> Result<Box<dyn Child>, EngineError> {
+        fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
             let c = std::process::Command::new(&self.0)
-                .args(server_args(model, port))
+                .args(server_args(model, port, kind))
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -278,4 +278,23 @@ async fn real_server_shape() {
         ref other => panic!("{other:?}"),
     }
     eprintln!("real_server_shape: {got:?}");
+}
+
+#[test]
+fn chat_args_add_jinja() {
+    let m = PathBuf::from("/m.gguf");
+    let decision = server_args(&m, 1, ModelKind::Decision);
+    assert!(!decision.iter().any(|a| a == "--jinja"));
+    let chat = server_args(&m, 1, ModelKind::Chat);
+    assert!(chat.starts_with(&decision));
+    assert_eq!(&chat[decision.len()..], ["--jinja", "-c", "32768"]);
+}
+
+#[tokio::test]
+async fn ensure_started_returns_port_once() {
+    let (s, spawns, _) = sidecar(StubLauncher::new(vec![HEALTHY]));
+    let a = s.ensure_started().await.unwrap();
+    let b = s.ensure_started().await.unwrap();
+    assert_eq!(a, b);
+    assert_eq!(spawns.load(Ordering::SeqCst), 1);
 }

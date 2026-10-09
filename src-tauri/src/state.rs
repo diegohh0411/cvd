@@ -1,19 +1,24 @@
 //! Shared application state behind the Tauri commands.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::AppError;
+use crate::company::agent::ResearchError;
+use crate::company::coordinator::{ResearchCoordinator, ResearchFn};
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
-use crate::models::{self, REGISTRY};
-use crate::providers::{ModelRef, ProviderRegistry, OPENROUTER_BASE};
+use crate::models::{self, ModelKind, REGISTRY};
+use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
+use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
 use crate::store::Store;
 
 /// Settings key holding the active model id.
 pub const ACTIVE_MODEL_KEY: &str = "active_model";
+/// Settings key holding the company research (chat) model id, same encoding as `ACTIVE_MODEL_KEY`.
+pub const RESEARCH_MODEL_KEY: &str = "research_model";
 
 /// Sends a named event with a JSON payload to the webview.
 pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
@@ -46,6 +51,18 @@ pub struct AppState {
     /// Remote providers with keys; rebuilt by `reload_providers`.
     providers: RwLock<Arc<ProviderRegistry>>,
     pub openrouter_base: String,
+    /// Web search for company research; `None` until an Exa key is stored.
+    search: RwLock<Option<Arc<dyn SearchProvider>>>,
+    pub exa_base: String,
+    /// The local chat-model server for research, kept apart from the decision
+    /// sidecar so switching System One models never stops it.
+    research: ResearchSlot,
+    /// Tests: replaces the real research agent.
+    research_fn: Option<ResearchFn>,
+    /// Per-run signal to stop waiting for company research (see `skip_research`).
+    skips: Skips,
+    /// Company research runs (single-flight per company, one at a time).
+    pub coordinator: Arc<ResearchCoordinator>,
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -64,7 +81,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl AppState {
     pub fn new(store: Store, models_dir: PathBuf, source: EngineSource, emit: Emitter) -> Self {
+        let coordinator = Arc::new(ResearchCoordinator::new(1, emit.clone()));
         Self {
+            coordinator,
             store,
             models_dir,
             source,
@@ -75,6 +94,11 @@ impl AppState {
             emit,
             providers: RwLock::default(),
             openrouter_base: OPENROUTER_BASE.into(),
+            search: RwLock::default(),
+            exa_base: EXA_BASE.into(),
+            research: ResearchSlot::default(),
+            research_fn: None,
+            skips: Skips::default(),
         }
     }
 
@@ -84,11 +108,88 @@ impl AppState {
         self
     }
 
-    /// Rebuilds the provider registry from the stored keys.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_exa_base(mut self, base: String) -> Self {
+        self.exa_base = base;
+        self
+    }
+
+    /// Rebuilds the provider registry and search backend from the stored keys.
     pub async fn reload_providers(&self) -> Result<(), AppError> {
         let reg = ProviderRegistry::load(&self.store, &self.openrouter_base).await?;
         *self.providers.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(reg);
+        let search = self
+            .store
+            .get_secret(EXA)
+            .await?
+            .map(|k| Arc::new(ExaSearch::new(self.exa_base.clone(), k)) as Arc<dyn SearchProvider>);
+        *self.search.write().unwrap_or_else(|e| e.into_inner()) = search;
         Ok(())
+    }
+
+    pub async fn research_model(&self) -> Result<Option<String>, AppError> {
+        Ok(self.store.get_setting(RESEARCH_MODEL_KEY).await?)
+    }
+
+    /// Where the research agent sends chat requests. A local model starts (or
+    /// reuses) its own llama-server.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub async fn research_endpoint(&self) -> Result<ChatEndpoint, AppError> {
+        self.research_env().endpoint().await
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_research_fn(mut self, f: ResearchFn) -> Self {
+        self.research_fn = Some(f);
+        self
+    }
+
+    /// Everything company research needs, detached from `self` so spawned tasks can own it.
+    pub fn research_env(&self) -> ResearchEnv {
+        ResearchEnv {
+            store: self.store.clone(),
+            providers: self.providers(),
+            search: self.search().ok(),
+            app: match &self.source {
+                EngineSource::Sidecar(app) => Some(app.clone()),
+                EngineSource::Fixed(_) => None,
+            },
+            slot: self.research.clone(),
+            models_dir: self.models_dir.clone(),
+            override_fn: self.research_fn.clone(),
+        }
+    }
+
+    /// Registers a skip signal for a run that is about to wait on research.
+    pub fn register_skip(&self, run_id: i64) -> CancellationToken {
+        let t = CancellationToken::new();
+        lock(&self.skips).insert(run_id, t.clone());
+        t
+    }
+
+    /// Fires the skip signal of a run waiting on research; false when none waits.
+    pub fn skip(&self, run_id: i64) -> bool {
+        lock(&self.skips).remove(&run_id).map(|t| t.cancel()).is_some()
+    }
+
+    pub fn skips(&self) -> Skips {
+        self.skips.clone()
+    }
+
+    /// Stops the local research server, if any (e.g. after the research model changes).
+    pub fn reset_research(&self) {
+        if let Some((_, s)) = lock(&self.research).take() {
+            s.shutdown();
+        }
+    }
+
+    /// The web search backend, or why there is none.
+    pub fn search(&self) -> Result<Arc<dyn SearchProvider>, ProviderError> {
+        self.search
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(|| ProviderError::Missing("Add your Exa key in Settings.".into()))
     }
 
     pub fn providers(&self) -> Arc<ProviderRegistry> {
@@ -135,12 +236,7 @@ impl AppState {
 
     /// Path of an installed model file, or `ModelMissing`.
     pub fn installed_path(&self, model_id: &str) -> Result<PathBuf, AppError> {
-        let missing = || AppError::ModelMissing(format!("Model {model_id} is not installed."));
-        let spec = REGISTRY.iter().find(|s| s.id == model_id).ok_or_else(missing)?;
-        if !models::installed(&self.models_dir).contains(&spec) {
-            return Err(missing());
-        }
-        models::model_path(spec, &self.models_dir).ok_or_else(missing)
+        installed_path(&self.models_dir, model_id)
     }
 
     pub async fn engine_status(&self) -> Result<EngineStatus, AppError> {
@@ -216,6 +312,7 @@ impl AppState {
             token.cancel();
         }
         self.reset_engine();
+        self.reset_research();
     }
 
     pub fn runs(&self) -> Arc<Mutex<HashMap<i64, CancellationToken>>> {
@@ -249,4 +346,93 @@ pub fn set_engine_error(slot: &Mutex<Option<String>>, error: Option<String>) {
 
 pub fn remove_run(runs: &Mutex<HashMap<i64, CancellationToken>>, run_id: i64) {
     lock(runs).remove(&run_id);
+}
+
+fn installed_path(models_dir: &Path, model_id: &str) -> Result<PathBuf, AppError> {
+    let missing = || AppError::ModelMissing(format!("Model {model_id} is not installed."));
+    let spec = REGISTRY.iter().find(|s| s.id == model_id).ok_or_else(missing)?;
+    if !models::installed(models_dir).contains(&spec) {
+        return Err(missing());
+    }
+    models::model_path(spec, models_dir).ok_or_else(missing)
+}
+
+/// Runs currently waiting on company research, by run id.
+pub type Skips = Arc<Mutex<HashMap<i64, CancellationToken>>>;
+
+/// The local research server, keyed by model id.
+type ResearchSlot = Arc<Mutex<Option<(String, Arc<LlamaSidecar>)>>>;
+
+#[derive(Clone)]
+pub struct ResearchEnv {
+    pub store: Store,
+    providers: Arc<ProviderRegistry>,
+    search: Option<Arc<dyn SearchProvider>>,
+    app: Option<tauri::AppHandle>,
+    slot: ResearchSlot,
+    models_dir: PathBuf,
+    override_fn: Option<ResearchFn>,
+}
+
+impl ResearchEnv {
+    pub async fn endpoint(&self) -> Result<ChatEndpoint, AppError> {
+        let id = self
+            .store
+            .get_setting(RESEARCH_MODEL_KEY)
+            .await?
+            .ok_or_else(|| AppError::ModelMissing("Choose a Company research model in Settings.".into()))?;
+        let r = ModelRef::parse(&id);
+        if !r.is_local() {
+            return Ok(self.providers.chat_endpoint(&r)?);
+        }
+        let Some(app) = &self.app else {
+            return Err(AppError::EngineUnavailable("Local research models need the app runtime.".into()));
+        };
+        let sidecar = {
+            let mut slot = lock(&self.slot);
+            match slot.as_ref().filter(|(m, _)| *m == id) {
+                Some((_, s)) => s.clone(),
+                None => {
+                    let path = installed_path(&self.models_dir, &id)?;
+                    let s = Arc::new(
+                        LlamaSidecar::new(Box::new(TauriLauncher(app.clone())), path).with_kind(ModelKind::Chat),
+                    );
+                    if let Some((_, old)) = slot.replace((id.clone(), s.clone())) {
+                        old.shutdown();
+                    }
+                    s
+                }
+            }
+        };
+        let port = sidecar.ensure_started().await?;
+        Ok(ChatEndpoint { base_url: format!("http://127.0.0.1:{port}/v1"), api_key: None, model: r.id })
+    }
+
+    /// The agent run the coordinator executes. Endpoint and search are resolved
+    /// lazily, inside the run, so a fresh profile never starts a server; a missing
+    /// key or model becomes `ResearchError::Unavailable`.
+    pub fn research_fn(&self) -> ResearchFn {
+        if let Some(f) = &self.override_fn {
+            return f.clone();
+        }
+        let env = self.clone();
+        Arc::new(move |input, cancel, on_step| {
+            let env = env.clone();
+            Box::pin(async move {
+                let unavailable = |m: String| ResearchError::Unavailable(m);
+                // Cheapest checks first: no server starts unless research can run.
+                let model = env
+                    .store
+                    .get_setting(RESEARCH_MODEL_KEY)
+                    .await
+                    .ok()
+                    .flatten()
+                    .ok_or_else(|| unavailable("Choose a Company research model in Settings.".into()))?;
+                let search = env.search.clone().ok_or_else(|| unavailable("Add your Exa key in Settings.".into()))?;
+                let ep = env.endpoint().await.map_err(|e| unavailable(e.to_string()))?;
+                let out = crate::company::agent::research(&ep, search, input, cancel, on_step).await?;
+                Ok((out, model))
+            })
+        })
+    }
 }

@@ -3,9 +3,13 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 
 import * as api from '../../core/ipc/commands';
 import { toAppError } from '../../core/ipc/errors';
-import { onAnyMatchProgress } from '../../core/ipc/events';
+import { onAnyMatchProgress, onResearch } from '../../core/ipc/events';
+import { stepLine } from '../companies/research-progress.component';
 import type {
   AppError,
+  Company,
+  ResearchEvent,
+  SkipMode,
   FitOutput,
   JobDescription,
   MatchProgressEvent,
@@ -27,6 +31,18 @@ import {
   toggleEntry,
   toOverrides,
 } from './selection.model';
+
+/** Live company research while a run waits on it. */
+export interface ResearchState {
+  companyId: number;
+  round: { n: number; max: number } | null;
+  /** Human-readable agent steps, oldest first. */
+  log: string[];
+  startedAt: number;
+}
+
+/** Steps kept in the live log. */
+const LOG_LINES = 6;
 
 export type Phase = 'loading' | 'new' | 'matching' | 'review' | 'cancelled' | 'failed';
 
@@ -53,6 +69,9 @@ export class WorkspaceStore {
   readonly runError = signal<AppError | null>(null);
   readonly startedAt = signal<number | null>(null);
   readonly finishedAt = signal<number | null>(null);
+  readonly research = signal<ResearchState | null>(null);
+  /** The job's company profile, once resolved. */
+  readonly company = signal<Company | null>(null);
 
   readonly ranked = signal<Ranked | null>(null);
   readonly scores = signal<ScoreRow[]>([]);
@@ -69,6 +88,7 @@ export class WorkspaceStore {
   private fitSeq = 0;
   private fitTimer: ReturnType<typeof setTimeout> | null = null;
   private unlisten: Promise<UnlistenFn> | null = null;
+  private unlistenResearch: Promise<UnlistenFn> | null = null;
   /** Progress that arrived before `start_match` returned its run id. */
   private early = new Map<number, MatchStage[]>();
   private readonly awaitingRun = signal(false);
@@ -100,6 +120,7 @@ export class WorkspaceStore {
     inject(DestroyRef).onDestroy(() => {
       if (this.fitTimer) clearTimeout(this.fitTimer);
       void this.unlisten?.then((u) => u());
+      void this.unlistenResearch?.then((u) => u());
     });
   }
 
@@ -114,6 +135,7 @@ export class WorkspaceStore {
       this.budget.set(budget === '2' ? 2 : 1);
       this.run.set(runs[0] ?? null);
       this.job.set(job);
+      void this.loadCompany();
       if (runs[0]?.status === 'done') await this.loadResults();
       else if (!runs[0] && autoStart) await this.start();
     } catch (e) {
@@ -124,6 +146,25 @@ export class WorkspaceStore {
   /** Subscribes before any run starts so no progress is lost (Review Focus #2). */
   private listen(): void {
     this.unlisten ??= onAnyMatchProgress((e) => this.onProgress(e));
+    this.unlistenResearch ??= onResearch((e) => this.onResearch(e));
+  }
+
+  private onResearch({ company_id, event }: ResearchEvent): void {
+    const r = this.research();
+    if (!r || r.companyId !== company_id) return;
+    if (event.stage === 'ready') this.company.set(event.company);
+    if (event.stage !== 'step') return;
+    if (event.step.kind === 'round') {
+      this.research.set({ ...r, round: { n: event.step.n, max: event.step.max } });
+    } else {
+      this.research.set({ ...r, log: [...r.log, stepLine(event.step)].slice(-LOG_LINES) });
+    }
+  }
+
+  async loadCompany(): Promise<void> {
+    const job = this.job();
+    if (!job) return;
+    this.company.set(await api.getJobCompany(job.id).catch(() => null));
   }
 
   private onProgress({ run_id, event }: MatchProgressEvent): void {
@@ -138,12 +179,17 @@ export class WorkspaceStore {
   private apply(event: MatchStage): void {
     const run = this.run();
     if (!run) return;
+    if (event.stage === 'researching') {
+      this.research.set({ companyId: event.company_id, round: null, log: [], startedAt: Date.now() });
+    } else {
+      this.research.set(null);
+    }
     switch (event.stage) {
       case 'done':
         this.progress.set(event);
         this.finishedAt.set(Date.now());
         this.setRun({ ...run, status: 'done' });
-        void this.loadResults();
+        void this.afterDone(run.id);
         break;
       case 'cancelled':
         this.setRun({ ...run, status: 'cancelled' });
@@ -172,7 +218,7 @@ export class WorkspaceStore {
     this.progress.set({ stage: 'reading_jd' });
     try {
       const runId = await api.startMatch(job.id);
-      this.setRun({ id: runId, jd_id: job.id, model_id: '', status: 'running', created_at: '' });
+      this.setRun({ id: runId, jd_id: job.id, model_id: '', status: 'running', created_at: '', company_researched_at: null });
       this.awaitingRun.set(false);
       for (const e of this.early.get(runId) ?? []) this.apply(e);
       this.early.clear();
@@ -199,6 +245,41 @@ export class WorkspaceStore {
     }
   }
 
+  /** Reloads the finished run (for `company_researched_at`), the company and the results. */
+  private async afterDone(runId: number): Promise<void> {
+    const job = this.job();
+    if (job) {
+      const fresh = (await api.listRuns(job.id).catch(() => [])).find((r) => r.id === runId);
+      if (fresh && this.run()?.id === runId) this.setRun(fresh);
+    }
+    await Promise.all([this.loadCompany(), this.loadResults()]);
+  }
+
+  /** Stops waiting on company research; `cancel` also stops the research itself. */
+  async skipResearch(mode: SkipMode): Promise<void> {
+    const run = this.run();
+    if (run) await api.skipResearch(run.id, mode);
+  }
+
+  /** Scores the job again in a new run, with the company profile as it is now. */
+  async rescore(): Promise<void> {
+    const run = this.run();
+    const job = this.job();
+    if (!run || !job) return;
+    this.resetRun();
+    this.startedAt.set(Date.now());
+    this.progress.set({ stage: 'reading_jd' });
+    this.awaitingRun.set(true);
+    try {
+      const id = await api.rescore(run.id);
+      this.setRun({ id, jd_id: job.id, model_id: '', status: 'running', created_at: '', company_researched_at: null });
+      for (const e of this.early.get(id) ?? []) this.apply(e);
+      this.early.clear();
+    } finally {
+      this.awaitingRun.set(false);
+    }
+  }
+
   async cancel(): Promise<void> {
     const run = this.run();
     if (run) await api.cancelMatch(run.id);
@@ -206,6 +287,7 @@ export class WorkspaceStore {
 
   private resetRun(): void {
     this.runError.set(null);
+    this.research.set(null);
     this.ranked.set(null);
     this.scores.set([]);
     this.fit.set(null);
