@@ -15,6 +15,10 @@ use crate::providers::{ChatEndpoint, ProviderError};
 use crate::search::SearchProvider;
 use crate::store::types::{CompanyProfile, Source};
 
+/// Unit tests read pages from a local mock server; the app only reads public hosts.
+const FETCH_POLICY: tools::FetchPolicy =
+    if cfg!(test) { tools::FetchPolicy::LocalFirstHopOnly } else { tools::FetchPolicy::PublicOnly };
+
 /// Fetched pages kept verbatim in the history; older ones become a placeholder.
 const KEEP_PAGES: usize = 3;
 /// Time the final "submit now" turn gets once the budget is spent.
@@ -66,6 +70,9 @@ pub enum ResearchError {
     Model(String),
     #[error(transparent)]
     Search(#[from] ProviderError),
+    /// The result could not be saved (e.g. a concurrent merge); not the company's fault.
+    #[error("Could not save company research: {0}")]
+    Persist(String),
     /// Research can't run yet (missing key or model); not a failure of the company.
     #[error("{0}")]
     Unavailable(String),
@@ -192,7 +199,7 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
                     .unwrap_or_default();
                 (self.on_step)(ResearchStep::Reading { domain });
                 self.fetched = Some(url.clone());
-                Outcome::Text(tools::fetch_page(&self.http, &url).await)
+                Outcome::Text(tools::fetch_page_with(&self.http, &url, FETCH_POLICY).await)
             }
             SUBMIT_PROFILE => match serde_json::from_value::<SubmitArgs>(args) {
                 Ok(a) if !a.canonical_name.trim().is_empty() => Outcome::Submitted(Box::new(a.into_output())),

@@ -470,7 +470,7 @@ mod company_flow {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(researching(&events, run));
         let states = log.1.lock().unwrap().clone();
-        assert!(states.iter().all(|s| s.starts_with("COMPANY PROFILE:\nName: Acme (acme.com)\nIndustry: Fintech")), "{states:?}");
+        assert!(states.iter().all(|s| s.starts_with(&format!("{}Name: Acme (acme.com)\nIndustry: Fintech", crate::matcher::questions::PROFILE_HEADER))), "{states:?}");
         let company = get_job_company(&st, jd).await.unwrap().unwrap();
         assert_eq!(company.status, CompanyStatus::Ok);
         assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, company.researched_at);

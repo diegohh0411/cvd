@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use super::agent::{ResearchError, ResearchInput, ResearchOutput, ResearchStep};
-use super::{backoff, format_ts, need, normalize_name, Need};
+use super::{backoff, format_ts, is_job_board, need, normalize_name, Need};
 use crate::state::Emitter;
 use crate::store::types::Company;
 use crate::store::Store;
@@ -32,6 +32,8 @@ type Outcome = Shared<BoxFuture<'static, Result<Company, ResearchError>>>;
 
 pub struct ResearchCoordinator {
     slots: Arc<Semaphore>,
+    /// Serializes find/merge/save so concurrent runs for overlapping companies can't race.
+    persist_lock: Arc<tokio::sync::Mutex<()>>,
     inflight: Arc<Mutex<HashMap<i64, (Outcome, CancellationToken)>>>,
     emit: Emitter,
 }
@@ -42,7 +44,12 @@ fn emit_stage(emit: &Emitter, company_id: i64, event: serde_json::Value) {
 
 impl ResearchCoordinator {
     pub fn new(max_concurrent: usize, emit: Emitter) -> Self {
-        Self { slots: Arc::new(Semaphore::new(max_concurrent.max(1))), inflight: Arc::default(), emit }
+        Self {
+            slots: Arc::new(Semaphore::new(max_concurrent.max(1))),
+            persist_lock: Arc::default(),
+            inflight: Arc::default(),
+            emit,
+        }
     }
 
     /// The company with a fresh profile: returned as is when fresh or backing
@@ -81,6 +88,7 @@ impl ResearchCoordinator {
                         run,
                         token.clone(),
                         self.slots.clone(),
+                        self.persist_lock.clone(),
                         self.inflight.clone(),
                         self.emit.clone(),
                     ));
@@ -117,6 +125,7 @@ async fn execute(
     run: ResearchFn,
     cancel: CancellationToken,
     slots: Arc<Semaphore>,
+    persist_lock: Arc<tokio::sync::Mutex<()>>,
     inflight: Arc<Mutex<HashMap<i64, (Outcome, CancellationToken)>>>,
     emit: Emitter,
 ) -> Result<Company, ResearchError> {
@@ -131,6 +140,7 @@ async fn execute(
         let step_emit = emit.clone();
         let on_step = Box::new(move |s: ResearchStep| emit_stage(&step_emit, id, json!({ "stage": "step", "step": s })));
         let (out, model_id) = run(input, cancel.clone(), on_step).await?;
+        let _guard = persist_lock.lock().await;
         persist(&store, &company, &out, &model_id).await
     }
     .await;
@@ -139,7 +149,7 @@ async fn execute(
             emit_stage(&emit, id, json!({ "stage": "cancelled" }));
             Err(ResearchError::Cancelled)
         }
-        Err(e @ ResearchError::Unavailable(_)) => {
+        Err(e @ (ResearchError::Unavailable(_) | ResearchError::Persist(_))) => {
             emit_stage(&emit, id, json!({ "stage": "failed", "error": e.to_string() }));
             Err(e)
         }
@@ -159,21 +169,39 @@ async fn execute(
     result
 }
 
-/// Saves the profile, folding this row into an existing one when the agent's
-/// canonical name or domain shows they are the same company.
+/// Saves the profile. The row is folded into another only when the agent's
+/// canonical name matches it (a shared domain alone never merges: parents and
+/// subsidiaries share domains). A domain owned by another row, or a job board,
+/// is not stored. Callers hold the persist lock.
 async fn persist(store: &Store, company: &Company, out: &ResearchOutput, model_id: &str) -> Result<Company, ResearchError> {
-    let db = |e: crate::store::StoreError| ResearchError::Model(format!("could not save research: {e}"));
+    let db = |e: crate::store::StoreError| ResearchError::Persist(e.to_string());
+    // Another run may have merged this row away while we researched; follow its alias.
+    let mut target = match store.get_company(company.id).await {
+        Ok(c) => c.id,
+        Err(_) => store
+            .find_company(None, &company.normalized_name)
+            .await
+            .map_err(db)?
+            .map(|c| c.id)
+            .ok_or_else(|| ResearchError::Persist("the company was removed".into()))?,
+    };
     let canonical = normalize_name(&out.canonical_name);
-    let mut target = company.id;
-    if let Some(other) = store.find_company(out.domain.as_deref(), &canonical).await.map_err(db)? {
-        if other.id != company.id {
-            let (keep, drop) = (other.id.min(company.id), other.id.max(company.id));
-            store.merge_company(drop, keep).await.map_err(db)?;
-            target = keep;
-        }
-    }
     if !canonical.is_empty() {
+        if let Some(other) = store.find_company(None, &canonical).await.map_err(db)? {
+            if other.id != target {
+                let (keep, drop) = (other.id.min(target), other.id.max(target));
+                store.merge_company(drop, keep).await.map_err(db)?;
+                target = keep;
+            }
+        }
         store.add_alias(&canonical, target).await.map_err(db)?;
     }
-    store.save_research(target, &out.canonical_name, out.domain.as_deref(), &out.profile, model_id).await.map_err(db)
+    let domain = match out.domain.as_deref().filter(|d| !is_job_board(d)) {
+        Some(d) => match store.find_company(Some(d), "").await.map_err(db)? {
+            Some(owner) if owner.id != target => None,
+            _ => Some(d),
+        },
+        None => None,
+    };
+    store.save_research(target, &out.canonical_name, domain, &out.profile, model_id).await.map_err(db)
 }

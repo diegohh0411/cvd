@@ -7,7 +7,7 @@ mod tools;
 mod policy;
 mod render;
 
-pub use key::{domain_from_url, normalize_name};
+pub use key::{domain_from_url, is_job_board, normalize_name};
 pub use render::render;
 pub use policy::{backoff, format_ts, need, Need};
 #[cfg(test)]

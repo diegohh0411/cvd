@@ -85,16 +85,111 @@ fn page_text(html: &str) -> String {
     readable.unwrap_or_else(|| collapse(&html2text::from_read(html.as_bytes(), 120).unwrap_or_default()))
 }
 
+/// Which hosts `fetch_page` may read. The agent's URLs come from the model
+/// (and so from web pages), so production only reads public addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchPolicy {
+    PublicOnly,
+    /// Tests: the first URL may be a local test server; every redirect is still checked.
+    #[cfg_attr(not(test), allow(dead_code))]
+    LocalFirstHopOnly,
+}
+
+const MAX_REDIRECTS: usize = 5;
+const REFUSED: &str = "Error: refusing to read a private or local address";
+
+fn private_v4(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_documentation()
+        || (a == 100 && (64..128).contains(&b))
+}
+
+fn private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => private_v4(v4),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return private_v4(v4);
+            }
+            let first = v6.segments()[0];
+            v6.is_loopback() || v6.is_unspecified() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// True when every address the URL's host resolves to is public.
+async fn is_public(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return !private_ip(ip);
+    }
+    let port = url.port_or_known_default().unwrap_or(80);
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => {
+            let addrs: Vec<_> = addrs.collect();
+            !addrs.is_empty() && addrs.iter().all(|a| !private_ip(a.ip()))
+        }
+        Err(_) => false,
+    }
+}
+
+fn no_redirect_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(PAGE_TIMEOUT)
+            .build()
+            .expect("reqwest client")
+    })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn fetch_page(http: &reqwest::Client, url: &str) -> String {
-    let parsed = match reqwest::Url::parse(url) {
+    fetch_page_with(http, url, FetchPolicy::PublicOnly).await
+}
+
+/// Reads a page as text, following redirects by hand so each hop is checked.
+pub async fn fetch_page_with(_http: &reqwest::Client, url: &str, policy: FetchPolicy) -> String {
+    let mut current = match reqwest::Url::parse(url) {
         Ok(u) if matches!(u.scheme(), "http" | "https") => u,
         _ => return format!("Error: only http and https URLs can be read, got {url}"),
     };
-    let resp = match http.get(parsed).timeout(PAGE_TIMEOUT).send().await {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => return format!("Error: HTTP {} for {url}", r.status()),
-        Err(e) => return format!("Error: could not fetch {url}: {e}"),
+    let http = no_redirect_client();
+    let mut hop = 0;
+    let resp = loop {
+        let local_ok = policy == FetchPolicy::LocalFirstHopOnly && hop == 0;
+        if !local_ok && !is_public(&current).await {
+            return format!("{REFUSED}: {current}");
+        }
+        let r = match http.get(current.clone()).send().await {
+            Ok(r) => r,
+            Err(e) => return format!("Error: could not fetch {url}: {e}"),
+        };
+        if !r.status().is_redirection() {
+            break r;
+        }
+        hop += 1;
+        let next = r
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|l| l.to_str().ok())
+            .and_then(|l| current.join(l).ok())
+            .filter(|u| matches!(u.scheme(), "http" | "https"));
+        match next {
+            Some(n) if hop <= MAX_REDIRECTS => current = n,
+            _ => return format!("Error: too many or invalid redirects for {url}"),
+        }
     };
+    if !resp.status().is_success() {
+        return format!("Error: HTTP {} for {url}", resp.status());
+    }
     let mut body = Vec::new();
     let mut resp = resp;
     loop {

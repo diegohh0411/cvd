@@ -217,3 +217,30 @@ async fn live_research() {
     println!("{:?} in {:?}", out, start.elapsed());
     assert!(out.is_ok());
 }
+
+mod ssrf {
+    use super::super::tools::{fetch_page_with, FetchPolicy};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn fetch_page_rejects_private_hosts() {
+        let http = reqwest::Client::new();
+        for url in ["http://127.0.0.1:9/", "http://localhost/", "http://192.168.1.1/admin", "http://10.0.0.1/", "http://169.254.169.254/latest", "http://[::1]/", "http://0.0.0.0/"] {
+            let out = fetch_page_with(&http, url, FetchPolicy::PublicOnly).await;
+            assert!(out.starts_with("Error: refusing to read a private or local address"), "{url}: {out}");
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_page_rejects_redirect_to_private_host() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "http://127.0.0.1:9/secret"))
+            .mount(&server)
+            .await;
+        // The first hop is allowed (test server), the redirect target must be re-checked.
+        let out = fetch_page_with(&reqwest::Client::new(), &server.uri(), FetchPolicy::LocalFirstHopOnly).await;
+        assert!(out.starts_with("Error: refusing to read a private or local address"), "{out}");
+    }
+}

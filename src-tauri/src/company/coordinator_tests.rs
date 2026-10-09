@@ -190,3 +190,55 @@ async fn merge_on_canonical_match() {
     assert!(s.get_company(new.id).await.is_err());
     assert_eq!(s.find_company(None, "google mexico").await.unwrap().unwrap().id, old.id);
 }
+
+#[tokio::test]
+async fn domain_only_match_does_not_merge() {
+    let s = Store::open("sqlite::memory:").await.unwrap();
+    let google = s.create_company("Google", "google", Some("google.com")).await.unwrap();
+    let sub = s.create_company("Alphabet Mexico", "alphabet mexico", None).await.unwrap();
+    let (c, _) = coordinator(1);
+    let f = scripted(Arc::default(), Duration::ZERO, Ok(output("Alphabet Mexico", Some("google.com"))));
+    let got = c.ensure(&s, sub.clone(), input("Alphabet Mexico"), f).await.unwrap();
+    assert_eq!(got.id, sub.id, "a shared domain alone must not merge companies");
+    assert_eq!(got.domain, None, "the domain stays with the row that owns it");
+    assert!(s.get_company(google.id).await.is_ok());
+}
+
+#[tokio::test]
+async fn job_board_domain_is_dropped() {
+    let (s, id) = store_with("Acme").await;
+    let (c, _) = coordinator(1);
+    let f = scripted(Arc::default(), Duration::ZERO, Ok(output("Acme", Some("linkedin.com"))));
+    let got = c.ensure(&s, s.get_company(id).await.unwrap(), input("Acme"), f).await.unwrap();
+    assert_eq!(got.domain, None);
+}
+
+#[tokio::test]
+async fn row_merged_away_mid_research_still_saves() {
+    let s = Store::open("sqlite::memory:").await.unwrap();
+    let nu = s.create_company("Nu", "nu", None).await.unwrap();
+    let nubank = s.create_company("Nubank", "nubank", None).await.unwrap();
+    let (c, _) = coordinator(2);
+    let f = scripted(Arc::default(), Duration::from_millis(50), Ok(output("Nubank", Some("nubank.com.br"))));
+    let (r, _) = tokio::join!(c.ensure(&s, nu.clone(), input("Nu"), f), async {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        s.merge_company(nu.id, nubank.id).await.unwrap();
+    });
+    let got = r.expect("research survives its row being merged away");
+    assert_eq!(got.id, nubank.id);
+    assert_eq!(got.status, CompanyStatus::Ok);
+}
+
+#[tokio::test]
+async fn concurrent_persists_for_the_same_company_do_not_fail() {
+    let s = Store::open("sqlite::memory:").await.unwrap();
+    let a = s.create_company("Nu", "nu", None).await.unwrap();
+    let b = s.create_company("Nu Pagamentos", "nu pagamentos", None).await.unwrap();
+    let (c, _) = coordinator(2);
+    let f = scripted(Arc::default(), Duration::from_millis(20), Ok(output("Nubank", Some("nubank.com.br"))));
+    let (ra, rb) = tokio::join!(c.ensure(&s, a.clone(), input("Nu"), f.clone()), c.ensure(&s, b.clone(), input("Nu Pagamentos"), f));
+    let (ra, rb) = (ra.unwrap(), rb.unwrap());
+    assert_eq!(ra.id, rb.id, "both runs end on one merged row");
+    let left = s.find_company(None, "nubank").await.unwrap().unwrap();
+    assert_eq!(left.fail_count, 0);
+}
