@@ -107,7 +107,7 @@ export class NewJobComponent implements OnInit {
     } catch (e) {
       const err = toAppError(e);
       if (err.kind === 'ModelMissing') {
-        await this.router.navigate(['/models'], { queryParams: { tab: 'download' } });
+        await this.router.navigate(['/ai/models']);
       }
       this.toast.error('Could not start matching', { description: err.message });
     } finally {

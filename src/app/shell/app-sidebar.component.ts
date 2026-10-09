@@ -9,6 +9,7 @@ import {
   lucideLibrary,
   lucideMoreHorizontal,
   lucideSettings2,
+  lucideUserRound,
 } from '@ng-icons/lucide';
 
 import { ZardCollapsibleImports } from '@/shared/components/collapsible/collapsible.imports';
@@ -24,7 +25,7 @@ interface NavItem {
   readonly items: readonly { title: string; link: string; query?: Record<string, string> }[];
 }
 
-const NAV: readonly NavItem[] = [
+export const NAV: readonly NavItem[] = [
   {
     title: 'Jobs',
     icon: 'lucideBriefcase',
@@ -48,13 +49,13 @@ const NAV: readonly NavItem[] = [
     ],
   },
   {
-    title: 'Models',
+    title: 'AI',
     icon: 'lucideBot',
-    base: '/models',
+    base: '/ai',
     items: [
-      { title: 'Installed', link: '/models', query: { tab: 'installed' } },
-      { title: 'Download', link: '/models', query: { tab: 'download' } },
-      { title: 'Engine', link: '/models', query: { tab: 'engine' } },
+      { title: 'Roles', link: '/ai/roles' },
+      { title: 'Models', link: '/ai/models' },
+      { title: 'Providers', link: '/ai/providers' },
     ],
   },
 ];
@@ -71,6 +72,7 @@ const NAV: readonly NavItem[] = [
       lucideLibrary,
       lucideMoreHorizontal,
       lucideSettings2,
+      lucideUserRound,
     }),
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -134,6 +136,19 @@ const NAV: readonly NavItem[] = [
                 </z-collapsible-content>
               </li>
             }
+            <li z-sidebar-menu-item>
+              <a
+                z-sidebar-menu-button
+                routerLink="/profile"
+                routerLinkActive
+                #profile="routerLinkActive"
+                [zActive]="profile.isActive"
+                [zTooltip]="'Profile'"
+              >
+                <ng-icon name="lucideUserRound" />
+                <span>Profile</span>
+              </a>
+            </li>
             <li z-sidebar-menu-item>
               <a
                 z-sidebar-menu-button

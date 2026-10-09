@@ -24,8 +24,7 @@ export class MatchReadiness {
     if (state === 'none' || state === 'missing') {
       return {
         message: state === 'none' ? 'No decision model is active yet.' : 'The active model is not installed.',
-        link: '/models',
-        queryParams: { tab: 'download' },
+        link: '/ai/models',
         action: 'Download a model',
       };
     }

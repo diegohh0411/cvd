@@ -327,7 +327,7 @@ export class WorkspacePageComponent {
 
   private onStartError(e: unknown): void {
     const err = toAppError(e);
-    if (err.kind === 'ModelMissing') void this.router.navigate(['/models'], { queryParams: { tab: 'download' } });
+    if (err.kind === 'ModelMissing') void this.router.navigate(['/ai/models']);
     this.toast.error('Could not start matching', { description: err.message });
   }
 }

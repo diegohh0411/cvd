@@ -21,9 +21,10 @@ describe('match readiness', () => {
     expect(r.blocker()?.link).toBe('/library/experience');
   });
 
-  it('blocks without a model, pointing to Models › Download', async () => {
+  it('blocks without a model, pointing to AI › Models', async () => {
     const r = await setup([RANKED.entries[0].entry], 'none');
-    expect(r.blocker()).toMatchObject({ link: '/models', queryParams: { tab: 'download' } });
+    expect(r.blocker()?.link).toBe('/ai/models');
+    expect(r.blocker()?.queryParams).toBeUndefined();
   });
 
   it('is ready with entries and an active model', async () => {
