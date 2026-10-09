@@ -16,6 +16,7 @@ const spec = (id: string, gb: number, size: number): ModelSpec => ({
   sha256: '',
   size_bytes: size,
   min_ram_gb: gb,
+  kind: 'decision',
 });
 const SPECS = [spec('clef-flash', 8, 6e9), spec('clef-27b', 20, 17e9), spec('kev-4b', 4, 3e9)];
 

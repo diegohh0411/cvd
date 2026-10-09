@@ -13,8 +13,8 @@ import { defaultFileName, ensurePdf } from './export.service';
 import { failureCopy } from './workspace-page.component';
 import { roleSignals } from './cards.component';
 
-const JOB: JobDescription = { id: 7, title: 'Dev', company: 'Acme', raw_text: 'Rust', created_at: '2026-10-08 10:00:00', url: '', status_id: null };
-const run = (status: MatchRun['status'], id = 3): MatchRun => ({ id, jd_id: 7, model_id: 'clef-flash', status, created_at: '' });
+const JOB: JobDescription = { id: 7, title: 'Dev', company: 'Acme', raw_text: 'Rust', created_at: '2026-10-08 10:00:00', url: '', status_id: null, company_id: null };
+const run = (status: MatchRun['status'], id = 3): MatchRun => ({ id, jd_id: 7, model_id: 'clef-flash', status, created_at: '', company_researched_at: null });
 
 function setup(handlers: Record<string, unknown> = {}): { t: TauriMock; ws: WorkspaceStore } {
   const t = mockTauri({

@@ -3,11 +3,12 @@ import { Router, RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideDownload, lucideRefreshCw } from '@ng-icons/lucide';
 
+import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSkeletonComponent } from '@/shared/components/skeleton/skeleton.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { toAppError } from '../../core/ipc/errors';
-import type { AppError, Selection } from '../../core/ipc/types';
+import type { AppError, Selection, SkipMode } from '../../core/ipc/types';
 import { EngineStore } from '../../core/stores/engine.store';
 import { jobLabel } from '../../core/stores/jobs.store';
 import { ProfileStore } from '../../core/stores/profile.store';
@@ -18,6 +19,7 @@ import { MatchReadiness } from '../jobs/match-readiness';
 import { WorkspaceCardsComponent } from './cards.component';
 import { defaultFileName, ExportService } from './export.service';
 import { ExportsTabComponent } from './exports-tab.component';
+import { CompanyPanelComponent, contextBadge } from '../companies/company-panel.component';
 import { MatchingStepperComponent } from './matching-stepper.component';
 import { PdfPreviewComponent } from './pdf-preview.component';
 import { SelectionListComponent } from './selection-list.component';
@@ -59,6 +61,8 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
     ExportsTabComponent,
     BlockerAlertComponent,
     JobPropertiesComponent,
+    CompanyPanelComponent,
+    ZardBadgeComponent,
   ],
   providers: [WorkspaceStore],
   viewProviders: [provideIcons({ lucideDownload, lucideRefreshCw })],
@@ -93,6 +97,24 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
         @if (ws.job(); as job) {
           <app-job-properties [job]="job" (changed)="ws.job.set($event)" />
         }
+        @if (badge().show || ws.company()) {
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            @if (badge().show) {
+              <z-badge zType="outline" data-testid="context-badge">{{ badge().label }}</z-badge>
+              @if (badge().canRescore) {
+                <button z-button zType="outline" zSize="sm" (click)="rescore()">Re-score</button>
+              }
+            }
+            @if (ws.company(); as c) {
+              <button z-button zType="ghost" zSize="sm" (click)="showCompany.set(!showCompany())" [attr.aria-expanded]="showCompany()">
+                {{ showCompany() ? 'Hide' : 'Show' }} {{ c.name }} profile
+              </button>
+            }
+          </div>
+        }
+        @if (showCompany() && ws.company(); as c) {
+          <app-company-panel [company]="c" (changed)="ws.company.set($event)" />
+        }
         @switch (ws.phase()) {
           @case ('new') {
             <div class="mx-auto flex w-full max-w-md flex-col gap-4 rounded-xl border p-6">
@@ -105,7 +127,14 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
             </div>
           }
           @case ('matching') {
-            <app-matching-stepper [progress]="ws.progress()" [startedAt]="ws.startedAt()" (cancel)="cancel()" />
+            <app-matching-stepper
+              [progress]="ws.progress()"
+              [startedAt]="ws.startedAt()"
+              [research]="ws.research()"
+              [companyName]="ws.company()?.name ?? ws.job()?.company ?? 'the company'"
+              (cancel)="cancel()"
+              (skipResearch)="skipResearch($event)"
+            />
           }
           @case ('review') {
             <app-workspace-cards />
@@ -198,6 +227,8 @@ export class WorkspacePageComponent {
   protected readonly confirmRematch = signal(false);
   protected readonly jobIdNum = computed(() => Number(this.jobId()));
   protected readonly failure = computed(() => failureCopy(this.ws.runError()));
+  protected readonly badge = computed(() => contextBadge(this.ws.run(), this.ws.company()));
+  protected readonly showCompany = signal(false);
   protected readonly crumbs = computed(() => {
     const job = this.ws.job();
     return [{ label: 'Jobs', link: '/jobs' }, { label: job ? jobLabel(job) : '…' }];
@@ -247,6 +278,23 @@ export class WorkspacePageComponent {
       await this.ws.cancel();
     } catch (e) {
       this.toast.error('Could not cancel', { description: toAppError(e).message });
+    }
+  }
+
+  async skipResearch(mode: SkipMode): Promise<void> {
+    try {
+      await this.ws.skipResearch(mode);
+    } catch (e) {
+      this.toast.error('Could not skip research', { description: toAppError(e).message });
+    }
+  }
+
+  async rescore(): Promise<void> {
+    this.tab.set('jd');
+    try {
+      await this.ws.rescore();
+    } catch (e) {
+      this.onStartError(e);
     }
   }
 

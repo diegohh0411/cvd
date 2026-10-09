@@ -9,12 +9,13 @@ import type { Profile } from '../../core/ipc/types';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BUDGET_SETTING } from '../workspace/workspace.store';
+import { ModelRolesComponent } from './model-roles.component';
 import { ProviderKeyComponent } from './provider-key.component';
 import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-form.component';
 
 @Component({
   selector: 'app-settings-page',
-  imports: [PageHeaderComponent, ProfileFormComponent, ProviderKeyComponent, ZardButtonComponent],
+  imports: [PageHeaderComponent, ProfileFormComponent, ProviderKeyComponent, ModelRolesComponent, ZardButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Settings' }]" />
@@ -34,9 +35,18 @@ import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-for
       <section class="grid gap-3">
         <div>
           <h2 class="font-semibold">Providers</h2>
-          <p class="text-muted-foreground text-sm">API keys for online decision models.</p>
+          <p class="text-muted-foreground text-sm">API keys for online models and web search.</p>
         </div>
-        <app-provider-key />
+        <app-provider-key provider="openrouter" />
+        <app-provider-key provider="exa" />
+      </section>
+
+      <section class="grid gap-3">
+        <div>
+          <h2 class="font-semibold">Models</h2>
+          <p class="text-muted-foreground text-sm">Which model does each job.</p>
+        </div>
+        <app-model-roles />
       </section>
 
       <section class="grid gap-3">

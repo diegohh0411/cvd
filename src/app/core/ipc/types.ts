@@ -68,6 +68,8 @@ export interface JobDescription {
   /** Link to the original posting; '' when unknown. */
   url: string;
   status_id: number | null;
+  /** Resolved company; null until a match resolves it. */
+  company_id: number | null;
 }
 
 export const STATUS_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'] as const;
@@ -88,6 +90,8 @@ export interface MatchRun {
   model_id: string;
   status: RunStatus;
   created_at: string;
+  /** `researched_at` of the company profile used; null = scored without company context. */
+  company_researched_at: string | null;
 }
 
 export type TargetType = 'entry' | 'bullet' | 'skill' | 'meta';
@@ -158,7 +162,11 @@ export interface ModelSpec {
   sha256: string;
   size_bytes: number;
   min_ram_gb: number;
+  /** `decision` = System One; `chat` = company research. */
+  kind: ModelKind;
 }
+
+export type ModelKind = 'decision' | 'chat';
 
 export interface ModelInfo {
   spec: ModelSpec;
@@ -184,7 +192,7 @@ export type AppErrorKind =
   | 'ProviderCredits'
   | 'ProviderUnavailable';
 
-export type ProviderId = 'openrouter';
+export type ProviderId = 'openrouter' | 'exa';
 
 export interface KeyStatus {
   has_key: boolean;
@@ -212,6 +220,7 @@ export interface AppError {
 }
 
 export type MatchStage =
+  | { stage: 'researching'; company_id: number }
   | { stage: 'reading_jd' }
   | { stage: 'scoring'; done: number; total: number }
   | { stage: 'done' }
@@ -228,3 +237,59 @@ export interface DownloadEvent {
   done: number;
   total: number;
 }
+
+export interface Source {
+  url: string;
+  title: string;
+}
+
+export interface CompanyProfile {
+  summary: string;
+  industry: string;
+  size: string;
+  stage: string;
+  headquarters: string;
+  remote_policy: string;
+  products: string;
+  tech_stack: string[];
+  sources: Source[];
+}
+
+export type CompanyStatus = 'pending' | 'ok' | 'failed';
+
+export interface Company {
+  id: number;
+  name: string;
+  normalized_name: string;
+  domain: string | null;
+  profile: CompanyProfile;
+  status: CompanyStatus;
+  /** UTC `YYYY-MM-DD HH:MM:SS`. */
+  researched_at: string | null;
+  model_id: string;
+  fail_count: number;
+  last_error: string;
+  retry_after: string | null;
+  edited_at: string | null;
+}
+
+export type ResearchStep =
+  | { kind: 'searching'; query: string }
+  | { kind: 'reading'; domain: string }
+  | { kind: 'round'; n: number; max: number };
+
+export type ResearchStage =
+  | { stage: 'queued' }
+  | { stage: 'started' }
+  | { stage: 'step'; step: ResearchStep }
+  | { stage: 'ready'; company: Company }
+  | { stage: 'failed'; error: string }
+  | { stage: 'cancelled' };
+
+export interface ResearchEvent {
+  company_id: number;
+  event: ResearchStage;
+}
+
+export type SkipMode = 'cancel' | 'background';
+export type ModelRole = 'decision' | 'chat';

@@ -1,11 +1,12 @@
 import { DestroyRef } from '@angular/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
-import type { DownloadEvent, MatchProgressEvent, MatchStage } from './types';
+import type { DownloadEvent, MatchProgressEvent, MatchStage, ResearchEvent } from './types';
 
 export const MATCH_EVENT = 'match://progress';
 export const DOWNLOAD_EVENT = 'model://download';
 export const ENGINE_EVENT = 'engine://status';
+export const RESEARCH_EVENT = 'company://research';
 
 /** Progress for one run. Subscribe before starting the run so nothing is missed. */
 export function onMatchProgress(runId: number | (() => number | null), cb: (e: MatchStage) => void): Promise<UnlistenFn> {
@@ -17,6 +18,10 @@ export function onMatchProgress(runId: number | (() => number | null), cb: (e: M
 
 export function onAnyMatchProgress(cb: (e: MatchProgressEvent) => void): Promise<UnlistenFn> {
   return listen<MatchProgressEvent>(MATCH_EVENT, ({ payload }) => cb(payload));
+}
+
+export function onResearch(cb: (e: ResearchEvent) => void): Promise<UnlistenFn> {
+  return listen<ResearchEvent>(RESEARCH_EVENT, ({ payload }) => cb(payload));
 }
 
 export function onDownload(cb: (e: DownloadEvent) => void): Promise<UnlistenFn> {

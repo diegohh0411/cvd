@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, OnInit, output } from '@angular/core';
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
@@ -29,7 +29,10 @@ export function eta(remaining: number, rate: number): string {
             @if (m.spec.id === recommendedId()) {
               <z-badge>Recommended</z-badge>
             }
-            @if (m.spec.id === activeId()) {
+            @if (m.spec.kind === 'chat') {
+              <z-badge zType="outline">Company research</z-badge>
+            }
+            @if (m.spec.id === activeId() || m.spec.id === models.researchModel()) {
               <z-badge zType="secondary">Active</z-badge>
             } @else if (m.installed) {
               <z-badge zType="outline">Installed</z-badge>
@@ -53,7 +56,11 @@ export function eta(remaining: number, rate: number): string {
           }
           <div class="flex gap-2">
             @if (m.installed) {
-              @if (m.spec.id !== activeId()) {
+              @if (m.spec.kind === 'chat') {
+                @if (m.spec.id !== models.researchModel()) {
+                  <button z-button zSize="sm" (click)="models.useForResearch(m.spec.id)">Use for research</button>
+                }
+              } @else if (m.spec.id !== activeId()) {
                 <button z-button zSize="sm" (click)="activate(m)">Use this model</button>
               }
             } @else if (d?.status === 'downloading') {
@@ -69,7 +76,7 @@ export function eta(remaining: number, rate: number): string {
     </div>
   `,
 })
-export class ModelCardsComponent {
+export class ModelCardsComponent implements OnInit {
   /** Only installed models when true. */
   readonly installedOnly = input(false);
   /** Activate automatically when a download finishes. */
@@ -83,9 +90,16 @@ export class ModelCardsComponent {
   protected readonly recommendedId = computed(() => this.models.recommended()?.id);
   protected readonly activeId = computed(() => this.engine.status().model_id);
 
+  ngOnInit(): void {
+    void this.models.loadResearchModel();
+  }
+
   async download(m: ModelInfo): Promise<void> {
     const ok = await this.models.download(m.spec.id);
-    if (ok && this.autoActivate() && !this.activeId()) await this.activate(m);
+    if (!ok || !this.autoActivate()) return;
+    if (m.spec.kind === 'chat') {
+      if (!this.models.researchModel()) await this.models.useForResearch(m.spec.id);
+    } else if (!this.activeId()) await this.activate(m);
   }
 
   async activate(m: ModelInfo): Promise<void> {
