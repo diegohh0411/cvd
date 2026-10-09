@@ -189,7 +189,7 @@ impl AppState {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-            .ok_or_else(|| ProviderError::Missing("Add your Exa key in Settings.".into()))
+            .ok_or_else(|| ProviderError::Missing("Add your Exa key in AI → Providers.".into()))
     }
 
     pub fn providers(&self) -> Arc<ProviderRegistry> {
@@ -380,7 +380,7 @@ impl ResearchEnv {
             .store
             .get_setting(RESEARCH_MODEL_KEY)
             .await?
-            .ok_or_else(|| AppError::ModelMissing("Choose a Company research model in Settings.".into()))?;
+            .ok_or_else(|| AppError::ModelMissing("Choose a Company research model in AI → Roles.".into()))?;
         let r = ModelRef::parse(&id);
         if !r.is_local() {
             return Ok(self.providers.chat_endpoint(&r)?);
@@ -427,8 +427,8 @@ impl ResearchEnv {
                     .await
                     .ok()
                     .flatten()
-                    .ok_or_else(|| unavailable("Choose a Company research model in Settings.".into()))?;
-                let search = env.search.clone().ok_or_else(|| unavailable("Add your Exa key in Settings.".into()))?;
+                    .ok_or_else(|| unavailable("Choose a Company research model in AI → Roles.".into()))?;
+                let search = env.search.clone().ok_or_else(|| unavailable("Add your Exa key in AI → Providers.".into()))?;
                 let ep = env.endpoint().await.map_err(|e| unavailable(e.to_string()))?;
                 let out = crate::company::agent::research(&ep, search, input, cancel, on_step).await?;
                 Ok((out, model))
