@@ -69,11 +69,24 @@ pub enum ProviderError {
     Missing(String),
 }
 
+/// An OpenAI-compatible chat endpoint with tool calling (company research).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatEndpoint {
+    /// Ends in `/v1`; requests go to `{base_url}/chat/completions`.
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub model: String,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
+    /// Decision (System One) models.
     async fn list_models(&self) -> Result<Vec<RemoteModel>, ProviderError>;
+    /// Chat models that support tool calling.
+    async fn list_chat_models(&self) -> Result<Vec<RemoteModel>, ProviderError>;
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError>;
+    fn chat_endpoint(&self, model_id: &str) -> Result<ChatEndpoint, ProviderError>;
 }
 
 #[cfg(test)]

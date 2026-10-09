@@ -81,6 +81,8 @@ pub fn run() {
             ipc::list_models,
             ipc::download_model,
             ipc::set_active_model,
+            ipc::set_research_model,
+            ipc::get_research_model,
             ipc::set_provider_key,
             ipc::delete_provider_key,
             ipc::provider_key_status,

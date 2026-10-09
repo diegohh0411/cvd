@@ -9,7 +9,7 @@ use crate::search::{ExaSearch, SearchProvider, EXA};
 use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
-use crate::models::{self, ModelError, ModelSpec, REGISTRY};
+use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
 use crate::render::fit::{self, Override, Selection};
 use crate::render::{self, Compiled, RenderError, StyleStep};
 use crate::state::AppState;
@@ -496,9 +496,40 @@ async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
     Err(last.expect("at least one attempt").into())
 }
 
+/// A local model's kind; `NotFound` when the id is unknown.
+fn local_kind(id: &str) -> Res<ModelKind> {
+    REGISTRY
+        .iter()
+        .find(|s| s.id == id)
+        .map(|s| s.kind)
+        .ok_or_else(|| AppError::NotFound(format!("Unknown model {id}.")))
+}
+
+fn require_kind(id: &str, want: ModelKind) -> Res<()> {
+    if local_kind(id)? != want {
+        let role = if want == ModelKind::Chat { "Company research" } else { "System One" };
+        return Err(AppError::NotFound(format!("Model {id} can't be used for {role}.")));
+    }
+    Ok(())
+}
+
+pub async fn set_research_model(st: &AppState, id: &str) -> Res<()> {
+    let r = ModelRef::parse(id);
+    if r.is_local() {
+        require_kind(id, ModelKind::Chat)?;
+        st.installed_path(id)?;
+    } else {
+        st.providers().check(&r)?;
+    }
+    st.store.set_setting(crate::state::RESEARCH_MODEL_KEY, id).await?;
+    st.reset_research();
+    Ok(())
+}
+
 pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     let r = ModelRef::parse(id);
     if r.is_local() {
+        require_kind(id, ModelKind::Decision)?;
         st.installed_path(id)?;
     } else {
         st.providers().check(&r)?;
@@ -563,8 +594,12 @@ pub async fn provider_key_status(st: &AppState, provider: &str) -> Res<KeyStatus
     Ok(key_status(st.store.get_secret(provider).await?.as_deref()))
 }
 
-pub async fn list_remote_models(st: &AppState, refresh: bool) -> Res<Vec<ProviderModels>> {
-    Ok(st.providers().remote_models(refresh).await)
+/// `role` is `"decision"` (System One) or `"chat"` (company research).
+pub async fn list_remote_models(st: &AppState, refresh: bool, role: &str) -> Res<Vec<ProviderModels>> {
+    Ok(match role {
+        "chat" => st.providers().remote_chat_models(refresh).await,
+        _ => st.providers().remote_models(refresh).await,
+    })
 }
 
 pub mod ipc {
@@ -679,8 +714,8 @@ pub mod ipc {
         super::provider_key_status(&st, &provider).await
     }
     #[tauri::command]
-    pub async fn list_remote_models(st: S<'_>, refresh: bool) -> Res<Vec<ProviderModels>> {
-        super::list_remote_models(&st, refresh).await
+    pub async fn list_remote_models(st: S<'_>, refresh: bool, role: Option<String>) -> Res<Vec<ProviderModels>> {
+        super::list_remote_models(&st, refresh, role.as_deref().unwrap_or("decision")).await
     }
     #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {
@@ -725,6 +760,14 @@ pub mod ipc {
     #[tauri::command]
     pub async fn set_active_model(st: S<'_>, id: String) -> Res<()> {
         super::set_active_model(&st, &id).await
+    }
+    #[tauri::command]
+    pub async fn set_research_model(st: S<'_>, id: String) -> Res<()> {
+        super::set_research_model(&st, &id).await
+    }
+    #[tauri::command]
+    pub async fn get_research_model(st: S<'_>) -> Res<Option<String>> {
+        st.research_model().await
     }
 }
 

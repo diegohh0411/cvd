@@ -352,6 +352,24 @@ mod provider_keys {
         assert!(st.search().is_err());
     }
 
+    #[tokio::test]
+    async fn research_model_role() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        let err = st.research_endpoint().await.unwrap_err();
+        assert_eq!(err.kind(), "ModelMissing");
+        assert_eq!(err.to_string(), "Choose a Company research model in Settings.");
+        assert_eq!(set_research_model(&st, "clef-flash").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(set_active_model(&st, "lfm2.5-2.6b").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(set_research_model(&st, "openrouter:deepseek/x").await.unwrap_err().kind(), "ModelMissing");
+        set_provider_key(&st, "openrouter", "good").await.unwrap();
+        set_research_model(&st, "openrouter:deepseek/x").await.unwrap();
+        let ep = st.research_endpoint().await.unwrap();
+        assert_eq!(ep.model, "deepseek/x");
+        assert_eq!(ep.base_url, format!("{}/v1", server.uri()));
+        assert_eq!(st.research_model().await.unwrap().as_deref(), Some("openrouter:deepseek/x"));
+    }
+
     #[test]
     fn engine_errors_map_to_provider_kinds() {
         assert_eq!(AppError::from(EngineError::Unauthorized).kind(), "ProviderAuth");

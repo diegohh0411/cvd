@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::openrouter::OPENROUTER;
-use super::{ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel};
+use super::{ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel};
 use crate::engine::DecisionEngine;
 use crate::store::{Store, StoreError};
 
@@ -50,25 +50,40 @@ impl ProviderRegistry {
         self.get(&r.provider).ok_or_else(|| missing_key(&r.provider))?.engine(&r.id)
     }
 
-    /// Every registered provider's model list; one failing provider never hides the others.
+    pub fn chat_endpoint(&self, r: &ModelRef) -> Result<ChatEndpoint, ProviderError> {
+        self.get(&r.provider).ok_or_else(|| missing_key(&r.provider))?.chat_endpoint(&r.id)
+    }
+
+    /// Every registered provider's decision models; one failing provider never hides the others.
     pub async fn remote_models(&self, refresh: bool) -> Vec<ProviderModels> {
+        self.collect(refresh, false).await
+    }
+
+    /// Every registered provider's tool-capable chat models.
+    pub async fn remote_chat_models(&self, refresh: bool) -> Vec<ProviderModels> {
+        self.collect(refresh, true).await
+    }
+
+    async fn collect(&self, refresh: bool, chat: bool) -> Vec<ProviderModels> {
         let mut out = Vec::new();
         for p in &self.providers {
             let id = p.id().to_string();
+            let cache_key = if chat { format!("{id}#chat") } else { id.clone() };
             let cached = self
                 .cache
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&id)
+                .get(&cache_key)
                 .filter(|(at, _)| !refresh && at.elapsed() < CACHE_TTL)
                 .map(|(_, m)| m.clone());
             let result = match cached {
                 Some(models) => Ok(models),
+                None if chat => p.list_chat_models().await,
                 None => p.list_models().await,
             };
             out.push(match result {
                 Ok(models) => {
-                    self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), (Instant::now(), models.clone()));
+                    self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(cache_key, (Instant::now(), models.clone()));
                     ProviderModels { provider: id, models, error: None }
                 }
                 Err(e) => ProviderModels { provider: id, models: vec![], error: Some(e.to_string()) },

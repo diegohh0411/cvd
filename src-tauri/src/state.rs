@@ -8,13 +8,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::AppError;
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
-use crate::models::{self, REGISTRY};
-use crate::providers::{ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
+use crate::models::{self, ModelKind, REGISTRY};
+use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
 use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
 use crate::store::Store;
 
 /// Settings key holding the active model id.
 pub const ACTIVE_MODEL_KEY: &str = "active_model";
+/// Settings key holding the company research (chat) model id, same encoding as `ACTIVE_MODEL_KEY`.
+pub const RESEARCH_MODEL_KEY: &str = "research_model";
 
 /// Sends a named event with a JSON payload to the webview.
 pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
@@ -50,6 +52,9 @@ pub struct AppState {
     /// Web search for company research; `None` until an Exa key is stored.
     search: RwLock<Option<Arc<dyn SearchProvider>>>,
     pub exa_base: String,
+    /// The local chat-model server for research, kept apart from the decision
+    /// sidecar so switching System One models never stops it.
+    research: Mutex<Option<(String, Arc<LlamaSidecar>)>>,
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -81,6 +86,7 @@ impl AppState {
             openrouter_base: OPENROUTER_BASE.into(),
             search: RwLock::default(),
             exa_base: EXA_BASE.into(),
+            research: Mutex::default(),
         }
     }
 
@@ -107,6 +113,51 @@ impl AppState {
             .map(|k| Arc::new(ExaSearch::new(self.exa_base.clone(), k)) as Arc<dyn SearchProvider>);
         *self.search.write().unwrap_or_else(|e| e.into_inner()) = search;
         Ok(())
+    }
+
+    pub async fn research_model(&self) -> Result<Option<String>, AppError> {
+        Ok(self.store.get_setting(RESEARCH_MODEL_KEY).await?)
+    }
+
+    /// Where the research agent sends chat requests. A local model starts (or
+    /// reuses) its own llama-server.
+    pub async fn research_endpoint(&self) -> Result<ChatEndpoint, AppError> {
+        let id = self
+            .research_model()
+            .await?
+            .ok_or_else(|| AppError::ModelMissing("Choose a Company research model in Settings.".into()))?;
+        let r = ModelRef::parse(&id);
+        if !r.is_local() {
+            return Ok(self.providers().chat_endpoint(&r)?);
+        }
+        let EngineSource::Sidecar(app) = &self.source else {
+            return Err(AppError::EngineUnavailable("Local research models need the app runtime.".into()));
+        };
+        let sidecar = {
+            let mut slot = lock(&self.research);
+            match slot.as_ref().filter(|(m, _)| *m == id) {
+                Some((_, s)) => s.clone(),
+                None => {
+                    let path = self.installed_path(&id)?;
+                    let s = Arc::new(
+                        LlamaSidecar::new(Box::new(TauriLauncher(app.clone())), path).with_kind(ModelKind::Chat),
+                    );
+                    if let Some((_, old)) = slot.replace((id.clone(), s.clone())) {
+                        old.shutdown();
+                    }
+                    s
+                }
+            }
+        };
+        let port = sidecar.ensure_started().await?;
+        Ok(ChatEndpoint { base_url: format!("http://127.0.0.1:{port}/v1"), api_key: None, model: r.id })
+    }
+
+    /// Stops the local research server, if any (e.g. after the research model changes).
+    pub fn reset_research(&self) {
+        if let Some((_, s)) = lock(&self.research).take() {
+            s.shutdown();
+        }
     }
 
     /// The web search backend, or why there is none.
@@ -243,6 +294,7 @@ impl AppState {
             token.cancel();
         }
         self.reset_engine();
+        self.reset_research();
     }
 
     pub fn runs(&self) -> Arc<Mutex<HashMap<i64, CancellationToken>>> {

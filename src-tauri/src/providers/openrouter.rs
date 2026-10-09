@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use super::{Provider, ProviderError, RemoteModel};
+use super::{ChatEndpoint, Provider, ProviderError, RemoteModel};
 use crate::engine::{DecisionEngine, HttpSystemOneEngine};
 
 pub const OPENROUTER_BASE: &str = "https://openrouter.ai/api";
@@ -40,6 +40,15 @@ impl OpenRouterProvider {
         resp.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))
     }
 
+    async fn models(&self, path: &str) -> Result<Vec<RemoteModel>, ProviderError> {
+        let v = self.get(path).await?;
+        let data = v
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ProviderError::BadResponse("missing `data` array".into()))?;
+        Ok(data.iter().filter_map(to_model).collect())
+    }
+
     /// The models list answers 200 even for invalid keys, so validate against `/v1/key`.
     pub async fn validate_key(&self) -> Result<(), ProviderError> {
         self.get("/v1/key").await.map(|_| ())
@@ -68,15 +77,22 @@ impl Provider for OpenRouterProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<RemoteModel>, ProviderError> {
-        let v = self.get("/v1/models?output_modalities=decisions").await?;
-        let data = v
-            .get("data")
-            .and_then(Value::as_array)
-            .ok_or_else(|| ProviderError::BadResponse("missing `data` array".into()))?;
-        Ok(data.iter().filter_map(to_model).collect())
+        self.models("/v1/models?output_modalities=decisions").await
+    }
+
+    async fn list_chat_models(&self) -> Result<Vec<RemoteModel>, ProviderError> {
+        self.models("/v1/models?supported_parameters=tools").await
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
         Ok(Arc::new(HttpSystemOneEngine::new(self.base_url.clone(), self.api_key.clone(), model_id.into())))
+    }
+
+    fn chat_endpoint(&self, model_id: &str) -> Result<ChatEndpoint, ProviderError> {
+        Ok(ChatEndpoint {
+            base_url: format!("{}/v1", self.base_url),
+            api_key: Some(self.api_key.clone()),
+            model: model_id.into(),
+        })
     }
 }

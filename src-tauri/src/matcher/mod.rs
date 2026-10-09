@@ -63,6 +63,7 @@ pub struct Ranked {
 }
 
 /// Starts a new run for `jd_id` and scores it end to end.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_match(
     store: &Store,
     engine: &dyn DecisionEngine,
@@ -255,6 +256,7 @@ async fn ask(
 /// Asks every question about the JD in as few requests as fit: JD meta,
 /// skills, entry relevance and seniority fit, and every bullet. The JD is the
 /// shared state; each entry or bullet question carries its own data.
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     store: &Store,
     engine: &dyn DecisionEngine,
