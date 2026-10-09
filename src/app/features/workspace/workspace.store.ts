@@ -23,6 +23,7 @@ import {
   type OverrideState,
   reorder,
   toggleBullet,
+  freeze,
   toggleEntry,
   toOverrides,
 } from './selection.model';
@@ -229,17 +230,17 @@ export class WorkspaceStore {
   toggleEntry(entryId: number, include: boolean): void {
     const r = this.ranked();
     if (!r) return;
-    this.edit(toggleEntry(this.overrides(), r, entryId, include));
+    this.edit(toggleEntry(this.base(), r, entryId, include));
   }
 
   toggleBullet(bulletId: number, include: boolean): void {
     const r = this.ranked();
     if (!r) return;
-    this.edit(toggleBullet(this.overrides(), r, bulletId, include));
+    this.edit(toggleBullet(this.base(), r, bulletId, include));
   }
 
   reorder(entryIds: number[]): void {
-    this.edit(reorder(this.overrides(), entryIds));
+    this.edit(reorder(this.base(), entryIds));
   }
 
   setBudget(budget: number): void {
@@ -252,14 +253,14 @@ export class WorkspaceStore {
   restore(selection: Selection): void {
     const r = this.ranked();
     if (!r) return;
-    const chosen = new Map(selection.entries.map((e) => [e.entry_id, new Set(e.bullet_ids)]));
-    const targets: OverrideState['targets'] = {};
-    for (const re of r.entries) {
-      const bullets = chosen.get(re.entry.id);
-      if (!bullets) targets[`E:${re.entry.id}`] = 'exclude';
-      for (const [b] of re.bullets) targets[`B:${b.id}`] = bullets?.has(b.id) ? 'include' : 'exclude';
-    }
-    this.edit({ targets, order: selection.entries.map((e) => e.entry_id) });
+    this.edit(freeze(r, selection));
+  }
+
+  /** Overrides to edit from: the matcher's pick is frozen on the first edit so the fitter never re-adds bullets. */
+  private base(): OverrideState {
+    const r = this.ranked();
+    const sel = this.selection();
+    return !this.edited() && r && sel ? freeze(r, sel, this.overrides().order) : this.overrides();
   }
 
   private edit(next: OverrideState): void {

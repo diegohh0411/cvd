@@ -67,10 +67,30 @@ function set(s: OverrideState, t: Target, v: 'include' | 'exclude' | null): Over
   return { ...s, targets };
 }
 
+/**
+ * Pins a selection as explicit overrides so later refits keep exactly it: the fitter
+ * stops filling freed space on its own and only the user's edits change the CV.
+ */
+export function freeze(ranked: Ranked, selection: Selection, order: number[] | null = selection.entries.map((e) => e.entry_id)): OverrideState {
+  const chosen = new Map(selection.entries.map((e) => [e.entry_id, new Set(e.bullet_ids)]));
+  const targets: OverrideState['targets'] = {};
+  for (const re of ranked.entries) {
+    const bullets = chosen.get(re.entry.id);
+    if (!bullets) targets[key({ Entry: re.entry.id })] = 'exclude';
+    for (const [b] of re.bullets) targets[key({ Bullet: b.id })] = bullets?.has(b.id) ? 'include' : 'exclude';
+  }
+  return { targets, order };
+}
+
 /** Checks or unchecks a whole entry. */
 export function toggleEntry(s: OverrideState, ranked: Ranked, entryId: number, include: boolean): OverrideState {
   let next = set(s, { Entry: entryId }, include ? 'include' : 'exclude');
   const re = ranked.entries.find((r) => r.entry.id === entryId);
+  if (include && re) {
+    // Let the fitter pick bullets for a newly checked entry, but only if none are pinned yet.
+    if (!re.bullets.some(([b]) => next.targets[key({ Bullet: b.id })] === 'include'))
+      for (const [b] of re.bullets) next = set(next, { Bullet: b.id }, null);
+  }
   if (!include && re) {
     // Pinned bullets would otherwise keep nothing; drop them with the entry.
     for (const [b] of re.bullets) if (next.targets[key({ Bullet: b.id })] === 'include') next = set(next, { Bullet: b.id }, null);

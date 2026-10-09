@@ -99,7 +99,11 @@ describe('WorkspaceStore', () => {
     pending[0](fitOut({ pages: 1, fill: 0.1 }));
     await flush();
     expect(ws.fit()?.pages).toBe(2);
-    expect(t.callsTo('fit_cv')[1]['overrides']).toEqual([{ Exclude: { Entry: 2 } }, { Include: { Bullet: 12 } }]);
+    const sent = t.callsTo('fit_cv')[1]['overrides'] as unknown[];
+    // The matcher's pick is frozen on the first edit, so every target is explicit.
+    expect(sent).toContainEqual({ Exclude: { Entry: 2 } });
+    expect(sent).toContainEqual({ Include: { Bullet: 12 } });
+    expect(sent).not.toContainEqual({ Include: { Entry: 2 } });
     expect(t.callsTo('set_ui_setting')).toEqual([{ key: 'ui.page_budget', value: '2' }]);
   });
 
