@@ -12,7 +12,7 @@ import { ModelsStore } from '../../core/stores/models.store';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { cleanInput, EntryFormComponent, entryErrors } from '../library/entry-form.component';
 import { ModelCardsComponent } from '../models/model-cards.component';
-import { cleanProfile, ProfileFormComponent, profileErrors } from '../settings/profile-form.component';
+import { cleanProfile, ProfileFormComponent, profileErrors } from '../profile/profile-form.component';
 import { FirstRunService } from './first-run.service';
 
 export const FIRST_RUN_STEPS = ['Profile', 'Model', 'First entry'] as const;
