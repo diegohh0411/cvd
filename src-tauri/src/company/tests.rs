@@ -19,3 +19,79 @@ fn domain_from_url_skips_job_boards() {
     assert_eq!(domain_from_url("not a url"), None);
     assert_eq!(domain_from_url(""), None);
 }
+
+mod policy_tests {
+    use super::super::*;
+    use crate::store::types::{Company, CompanyProfile, CompanyStatus};
+    use chrono::{Duration, TimeZone, Utc};
+
+    fn now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 10, 8, 12, 0, 0).unwrap()
+    }
+
+    fn company(status: CompanyStatus, researched_days_ago: Option<i64>) -> Company {
+        Company {
+            id: 1,
+            name: "Acme".into(),
+            normalized_name: "acme".into(),
+            domain: None,
+            profile: CompanyProfile::default(),
+            status,
+            researched_at: researched_days_ago.map(|d| format_ts(now() - Duration::days(d))),
+            model_id: String::new(),
+            fail_count: 0,
+            last_error: String::new(),
+            retry_after: None,
+            edited_at: None,
+        }
+    }
+
+    #[test]
+    fn fresh_within_ttl() {
+        assert_eq!(need(&company(CompanyStatus::Ok, Some(29)), now()), Need::Fresh);
+    }
+
+    #[test]
+    fn stale_after_30_days() {
+        assert_eq!(need(&company(CompanyStatus::Ok, Some(31)), now()), Need::Research);
+        assert_eq!(need(&company(CompanyStatus::Pending, None), now()), Need::Research);
+    }
+
+    #[test]
+    fn edited_rows_still_expire() {
+        let mut c = company(CompanyStatus::Ok, Some(31));
+        c.edited_at = Some(format_ts(now()));
+        assert_eq!(need(&c, now()), Need::Research);
+    }
+
+    #[test]
+    fn failed_backs_off_then_retries() {
+        let mut c = company(CompanyStatus::Failed, None);
+        c.retry_after = Some(format_ts(now() + Duration::hours(1)));
+        assert_eq!(need(&c, now()), Need::BackingOff);
+        c.retry_after = Some(format_ts(now() - Duration::minutes(1)));
+        assert_eq!(need(&c, now()), Need::Research);
+    }
+
+    #[test]
+    fn stale_ok_profile_with_failed_refresh_backs_off() {
+        // A refresh that failed keeps the old profile; it must not be retried on every match.
+        let mut c = company(CompanyStatus::Failed, Some(40));
+        c.retry_after = Some(format_ts(now() + Duration::hours(2)));
+        assert_eq!(need(&c, now()), Need::BackingOff);
+    }
+
+    #[test]
+    fn backoff_caps_at_7_days() {
+        assert_eq!(backoff(1), std::time::Duration::from_secs(3600));
+        assert_eq!(backoff(4), std::time::Duration::from_secs(8 * 3600));
+        assert_eq!(backoff(20), std::time::Duration::from_secs(7 * 24 * 3600));
+    }
+
+    #[test]
+    fn timestamps_roundtrip_store_format() {
+        assert_eq!(format_ts(now()), "2026-10-08 12:00:00");
+        assert_eq!(parse_ts("2026-10-08 12:00:00"), Some(now()));
+        assert_eq!(parse_ts("garbage"), None);
+    }
+}
