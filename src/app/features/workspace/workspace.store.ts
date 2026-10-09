@@ -222,6 +222,11 @@ export class WorkspaceStore {
     const [ranked, scores] = await Promise.all([api.getRanked(run.id), api.getScores(run.id)]);
     this.ranked.set(ranked);
     this.scores.set(scores);
+    const saved = await this.loadSaved(run.id);
+    if (saved) {
+      this.overrides.set(saved);
+      this.edited.set(true);
+    }
     await this.refitNow();
   }
 
@@ -263,9 +268,26 @@ export class WorkspaceStore {
     return !this.edited() && r && sel ? freeze(r, sel, this.overrides().order) : this.overrides();
   }
 
+  /** Overrides survive leaving the job: the store is route-scoped, so they are kept per run in UI settings. */
+  private async loadSaved(runId: number): Promise<OverrideState | null> {
+    try {
+      const raw = await api.getUiSetting(`ui.overrides.${runId}`);
+      const parsed = raw ? (JSON.parse(raw) as OverrideState) : null;
+      return parsed && typeof parsed.targets === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private persist(): void {
+    const run = this.run();
+    if (run) void api.setUiSetting(`ui.overrides.${run.id}`, JSON.stringify(this.overrides())).catch(() => undefined);
+  }
+
   private edit(next: OverrideState): void {
     this.overrides.set(next);
     this.edited.set(true);
+    this.persist();
     this.refit();
   }
 
