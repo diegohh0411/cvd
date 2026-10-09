@@ -1,10 +1,35 @@
 # CVD
 
-This template should help get you started developing with Tauri and Angular.
+A local-first desktop app that tailors your CV to each job. Keep one library of your real experience, paste a job description, and CVD ranks your entries and bullets against the role, then exports a one-page, ATS-friendly PDF.
 
-## Recommended IDE Setup
+- **Truthful:** it only selects and orders your own content. It never writes or rewrites it.
+- **Private:** your data lives in a local SQLite database. Matching runs on a local model by default; the only network use is downloading the model, plus optional OpenRouter models if you add a key.
+- **Explainable:** you can see why each item was picked, override any choice, and watch the page fill live.
 
-[VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) + [Angular Language Service](https://marketplace.visualstudio.com/items?itemName=Angular.ng-template).
+## How it works
+
+1. Build your library: profile, experience, projects, education, volunteering and skills.
+2. Paste a job description. A decision model scores each entry, bullet and skill against it.
+3. Review the pick, check or uncheck items, and reorder them. The page fit updates as you edit.
+4. Export a text-extractable PDF (rendered with Typst) that stays within your page budget.
+
+## Stack
+
+Tauri 2 (Rust core), Angular 22 with ZardUI, SQLite, llama.cpp as a bundled `llama-server` sidecar, Typst for PDFs. Design notes live in [`docs/superpowers`](docs/superpowers).
+
+## Development
+
+Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
+
+```bash
+bun install
+bash src-tauri/scripts/fetch-llama-server.sh   # downloads the llama-server sidecar
+bun run tauri dev                              # run the desktop app
+bun run test                                   # Angular tests
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Local inference is currently set up for macOS on Apple Silicon.
 
 ## Agent access (MCP)
 
