@@ -203,3 +203,17 @@ async fn fetch_page_rejects_file_scheme() {
     let out = fetch_page(&http, "file:///etc/passwd").await;
     assert!(out.starts_with("Error:"), "{out}");
 }
+
+/// Live smoke test against a running chat server and Exa:
+/// `CVD_CHAT_BASE=http://127.0.0.1:PORT/v1 EXA_API_KEY=... cargo test --lib live_research -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore]
+async fn live_research() {
+    let ep = ChatEndpoint { base_url: std::env::var("CVD_CHAT_BASE").unwrap(), api_key: std::env::var("CVD_CHAT_KEY").ok(), model: std::env::var("CVD_CHAT_MODEL").unwrap_or_default() };
+    let search = Arc::new(crate::search::ExaSearch::new(crate::search::EXA_BASE.into(), std::env::var("EXA_API_KEY").unwrap()));
+    let input = ResearchInput { name: "Nubank".into(), domain: None, jd_snippet: "Senior Backend Engineer (Clojure) at Nubank, São Paulo.".into() };
+    let start = std::time::Instant::now();
+    let out = research(&ep, search, input, CancellationToken::new(), |s| println!("step: {s:?}")).await;
+    println!("{:?} in {:?}", out, start.elapsed());
+    assert!(out.is_ok());
+}
