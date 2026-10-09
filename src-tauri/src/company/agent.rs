@@ -137,7 +137,7 @@ pub async fn research(
 /// What one tool call produced.
 enum Outcome {
     Text(String),
-    Submitted(ResearchOutput),
+    Submitted(Box<ResearchOutput>),
 }
 
 struct Loop<'a, F> {
@@ -195,7 +195,7 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
                 Outcome::Text(tools::fetch_page(&self.http, &url).await)
             }
             SUBMIT_PROFILE => match serde_json::from_value::<SubmitArgs>(args) {
-                Ok(a) if !a.canonical_name.trim().is_empty() => Outcome::Submitted(a.into_output()),
+                Ok(a) if !a.canonical_name.trim().is_empty() => Outcome::Submitted(Box::new(a.into_output())),
                 Ok(_) => Outcome::Text("Error: submit_profile needs a non-empty canonical_name.".into()),
                 Err(e) => Outcome::Text(format!("Error: invalid submit_profile arguments: {e}")),
             },
@@ -230,7 +230,7 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
                 return Err(ResearchError::Cancelled);
             }
             let text = match self.run_tool(c).await {
-                Outcome::Submitted(out) => return Ok(Some(out)),
+                Outcome::Submitted(out) => return Ok(Some(*out)),
                 Outcome::Text(t) => t,
             };
             self.history.push(Message::ToolResult { call_id: c.id.clone(), content: vec![Content::Text { text }] });

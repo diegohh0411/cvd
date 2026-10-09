@@ -5,7 +5,12 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::company::{self, agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS}, coordinator::ResearchCoordinator};
 use crate::search::{ExaSearch, SearchProvider, EXA};
+use crate::state::ResearchEnv;
+use crate::store::types::{Company, CompanyProfile};
+use crate::store::StoreError;
+use tokio_util::sync::CancellationToken;
 use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
@@ -16,7 +21,7 @@ use crate::state::AppState;
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
-use crate::store::StoreError;
+use crate::store::Store;
 
 pub const MATCH_EVENT: &str = "match://progress";
 pub const DOWNLOAD_EVENT: &str = "model://download";
@@ -103,6 +108,16 @@ impl From<crate::providers::ProviderError> for AppError {
             }
             crate::providers::ProviderError::Network(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
+        }
+    }
+}
+
+impl From<ResearchError> for AppError {
+    fn from(e: ResearchError) -> Self {
+        match e {
+            ResearchError::Unavailable(m) => Self::ModelMissing(m),
+            ResearchError::Search(p) => p.into(),
+            other => Self::EngineUnavailable(other.to_string()),
         }
     }
 }
@@ -265,7 +280,8 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
 }
 
 /// Scores `run_id` in a spawned task. A freshly created run has no scores,
-/// so `matcher::resume_match` scores it end to end.
+/// so `matcher::resume_match` scores it end to end. Company research runs
+/// first and blocks scoring unless skipped (see `skip_research`).
 fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
     let engine = st.engine_for(model_id)?;
     let token = st
@@ -273,18 +289,20 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
         .ok_or_else(|| AppError::Io(format!("Match run {run_id} is already running.")))?;
     let (store, emit, runs) = (st.store.clone(), st.emitter(), st.runs());
     let engine_error = st.engine_error_slot();
+    let (coordinator, env, skips) = (st.coordinator.clone(), st.research_env(), st.skips());
+    let skip = st.register_skip(run_id);
     tokio::spawn(async move {
         let progress_emit = emit.clone();
-        let outcome = matcher::resume_match(
-            &store,
-            &*engine,
-            run_id,
-            MatchConfig::default(),
-            None,
-            token,
-            move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p })),
-        )
-        .await;
+        let on_progress = move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p }));
+        let context = company_context(&store, &coordinator, &env, run_id, &token, skip, &on_progress).await;
+        skips.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id);
+        let outcome = match context {
+            Ok(ctx) => {
+                matcher::resume_match(&store, &*engine, run_id, MatchConfig::default(), ctx.as_deref(), token, on_progress)
+                    .await
+            }
+            Err(e) => Err(e.into()),
+        };
         match &outcome {
             Ok(_) => crate::state::set_engine_error(&engine_error, None),
             Err(MatchError::Engine(e)) if !matches!(e, EngineError::ContextOverflow) => {
@@ -306,6 +324,112 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
         emit(ENGINE_EVENT, json!({}));
     });
     Ok(())
+}
+
+/// Resolves the job's company, waits for its research when needed, records
+/// which profile the run uses, and renders it for the System One state.
+/// Research problems never fail the match: it scores without context.
+async fn company_context(
+    store: &Store,
+    coordinator: &ResearchCoordinator,
+    env: &ResearchEnv,
+    run_id: i64,
+    run_cancel: &CancellationToken,
+    skip: CancellationToken,
+    on_progress: &(impl Fn(matcher::Progress) + Send + Sync),
+) -> Result<Option<String>, StoreError> {
+    let jd_id = store.get_run(run_id).await?.jd_id;
+    let Some(jd) = store.get_jd(jd_id).await? else { return Ok(None) };
+    let (normalized, domain) = (company::normalize_name(&jd.company), company::domain_from_url(&jd.url));
+    if normalized.is_empty() && domain.is_none() {
+        store.set_run_company(run_id, None).await?;
+        return Ok(None);
+    }
+    let found = match jd.company_id {
+        Some(id) => store.get_company(id).await.ok(),
+        None => None,
+    };
+    let c = match found {
+        Some(c) => c,
+        None => match store.find_company(domain.as_deref(), &normalized).await? {
+            Some(c) => c,
+            None => {
+                let name = if jd.company.trim().is_empty() { domain.clone().unwrap_or_default() } else { jd.company.trim().to_string() };
+                store.create_company(&name, &normalized, domain.as_deref()).await?
+            }
+        },
+    };
+    store.set_jd_company(jd_id, Some(c.id)).await?;
+    if company::need(&c, chrono::Utc::now()) == company::Need::Research {
+        on_progress(matcher::Progress::Researching { company_id: c.id });
+        let input = ResearchInput {
+            name: c.name.clone(),
+            domain: c.domain.clone().or(domain),
+            jd_snippet: jd.raw_text.chars().take(JD_SNIPPET_CHARS).collect(),
+        };
+        // Outcomes are persisted by the coordinator; here we only stop waiting.
+        tokio::select! {
+            _ = coordinator.ensure(store, c.clone(), input, env.research_fn()) => {}
+            _ = skip.cancelled() => {}
+            _ = run_cancel.cancelled() => {}
+        }
+    }
+    // Research may have merged the company into another row; re-read through the job.
+    let company_id = store.get_jd(jd_id).await?.and_then(|j| j.company_id);
+    let current = match company_id {
+        Some(id) => store.get_company(id).await.ok(),
+        None => None,
+    };
+    // Any researched profile beats none, even a stale one whose refresh failed.
+    let usable = current.filter(|c| c.researched_at.is_some());
+    store.set_run_company(run_id, usable.as_ref().and_then(|c| c.researched_at.as_deref())).await?;
+    Ok(usable.map(|c| company::render(&c.name, c.domain.as_deref(), &c.profile)))
+}
+
+/// Stops a run from waiting on company research. `mode` is `"cancel"` (also
+/// stops the research) or `"background"` (research continues and is cached).
+pub async fn skip_research(st: &AppState, run_id: i64, mode: &str) -> Res<()> {
+    if mode == "cancel" {
+        let jd_id = st.store.get_run(run_id).await?.jd_id;
+        if let Some(company_id) = st.store.get_jd(jd_id).await?.and_then(|j| j.company_id) {
+            st.coordinator.cancel(company_id);
+        }
+    }
+    if st.skip(run_id) {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("Match run {run_id} is not waiting for company research.")))
+    }
+}
+
+/// Scores the run's job again in a new run, with the company profile as it is now.
+pub async fn rescore(st: &AppState, run_id: i64) -> Res<i64> {
+    let jd_id = st.store.get_run(run_id).await?.jd_id;
+    start_match(st, jd_id).await
+}
+
+pub async fn get_company(st: &AppState, id: i64) -> Res<Company> {
+    st.store.get_company(id).await.map_err(|_| AppError::NotFound(format!("Company {id} not found.")))
+}
+
+pub async fn get_job_company(st: &AppState, jd_id: i64) -> Res<Option<Company>> {
+    match get_job(st, jd_id).await?.company_id {
+        Some(id) => Ok(st.store.get_company(id).await.ok()),
+        None => Ok(None),
+    }
+}
+
+/// A manual edit; a later refresh (or TTL expiry) overwrites it.
+pub async fn edit_company(st: &AppState, id: i64, profile: CompanyProfile) -> Res<Company> {
+    get_company(st, id).await?;
+    Ok(st.store.edit_company(id, &profile).await?)
+}
+
+/// Researches the company now, ignoring the TTL and any backoff.
+pub async fn refresh_company(st: &AppState, id: i64) -> Res<Company> {
+    let c = get_company(st, id).await?;
+    let input = ResearchInput { name: c.name.clone(), domain: c.domain.clone(), jd_snippet: String::new() };
+    Ok(st.coordinator.start(&st.store, c, input, st.research_env().research_fn()).await?)
 }
 
 pub async fn list_runs(st: &AppState, jd_id: i64) -> Res<Vec<MatchRun>> {
@@ -760,6 +884,30 @@ pub mod ipc {
     #[tauri::command]
     pub async fn set_active_model(st: S<'_>, id: String) -> Res<()> {
         super::set_active_model(&st, &id).await
+    }
+    #[tauri::command]
+    pub async fn skip_research(st: S<'_>, run_id: i64, mode: String) -> Res<()> {
+        super::skip_research(&st, run_id, &mode).await
+    }
+    #[tauri::command]
+    pub async fn rescore(st: S<'_>, run_id: i64) -> Res<i64> {
+        super::rescore(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn get_company(st: S<'_>, id: i64) -> Res<Company> {
+        super::get_company(&st, id).await
+    }
+    #[tauri::command]
+    pub async fn get_job_company(st: S<'_>, jd_id: i64) -> Res<Option<Company>> {
+        super::get_job_company(&st, jd_id).await
+    }
+    #[tauri::command]
+    pub async fn edit_company(st: S<'_>, id: i64, profile: CompanyProfile) -> Res<Company> {
+        super::edit_company(&st, id, profile).await
+    }
+    #[tauri::command]
+    pub async fn refresh_company(st: S<'_>, id: i64) -> Res<Company> {
+        super::refresh_company(&st, id).await
     }
     #[tauri::command]
     pub async fn set_research_model(st: S<'_>, id: String) -> Res<()> {

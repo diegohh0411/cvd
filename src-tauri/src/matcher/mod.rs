@@ -30,6 +30,8 @@ impl Default for MatchConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
+    /// Waiting for company research (see `company://research` for its steps).
+    Researching { company_id: i64 },
     ReadingJd,
     /// `done`/`total` count questions across the run's batched requests.
     Scoring { done: usize, total: usize },

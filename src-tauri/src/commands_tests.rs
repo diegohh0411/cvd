@@ -379,3 +379,205 @@ mod provider_keys {
         assert_eq!(AppError::from(EngineError::ModelUnavailable("m".into())).kind(), "ProviderUnavailable");
     }
 }
+
+mod company_flow {
+    use super::*;
+    use crate::company::agent::{ResearchError, ResearchOutput, ResearchStep};
+    use crate::company::coordinator::ResearchFn;
+    use crate::engine::DecisionEngine;
+    use crate::store::types::{CompanyProfile, CompanyStatus};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio_util::sync::CancellationToken;
+
+    /// Records the System One state of every request.
+    struct StateLog(FakeDecisionEngine, Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl DecisionEngine for StateLog {
+        async fn decide(
+            &self,
+            state: &str,
+            q: &BTreeMap<String, Question>,
+        ) -> Result<BTreeMap<String, Answer>, EngineError> {
+            self.1.lock().unwrap().push(state.to_string());
+            self.0.decide(state, q).await
+        }
+    }
+
+    fn research(calls: Arc<AtomicUsize>, delay: Duration, result: Result<ResearchOutput, ResearchError>) -> ResearchFn {
+        Arc::new(move |_i, cancel: CancellationToken, on_step| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let result = result.clone();
+            Box::pin(async move {
+                on_step(ResearchStep::Round { n: 1, max: 25 });
+                tokio::select! {
+                    _ = cancel.cancelled() => Err(ResearchError::Cancelled),
+                    _ = tokio::time::sleep(delay) => result.map(|o| (o, "lfm".to_string())),
+                }
+            })
+        })
+    }
+
+    fn acme() -> ResearchOutput {
+        ResearchOutput {
+            canonical_name: "Acme".into(),
+            domain: Some("acme.com".into()),
+            profile: CompanyProfile { industry: "Fintech".into(), ..Default::default() },
+        }
+    }
+
+    async fn setup(f: ResearchFn) -> (AppState, Arc<StateLog>, Events) {
+        let store = Store::open("sqlite::memory:").await.unwrap();
+        let events: Events = Arc::default();
+        let sink = events.clone();
+        let log = Arc::new(StateLog(fake(), Mutex::default()));
+        let st = AppState::new(
+            store,
+            std::env::temp_dir().join("cvd-test-models"),
+            EngineSource::Fixed(log.clone()),
+            Arc::new(move |n: &str, v: serde_json::Value| sink.lock().unwrap().push((n.to_string(), v))),
+        )
+        .with_research_fn(f);
+        st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+        save_entry(&st, entry("Engineer")).await.unwrap();
+        (st, log, events)
+    }
+
+    fn researching(events: &Events, run: i64) -> bool {
+        events.lock().unwrap().iter().any(|(n, v)| n == MATCH_EVENT && v["run_id"] == run && v["event"]["stage"] == "researching")
+    }
+
+    #[tokio::test]
+    async fn empty_company_scores_without_research() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (st, log, events) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
+        assert!(!researching(&events, run));
+        assert!(log.1.lock().unwrap().iter().all(|s| s.starts_with("JOB DESCRIPTION:")));
+    }
+
+    #[tokio::test]
+    async fn researched_profile_reaches_state() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (st, log, events) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "Acme Inc.", "Rust developer", "https://www.linkedin.com/jobs/1", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(researching(&events, run));
+        let states = log.1.lock().unwrap().clone();
+        assert!(states.iter().all(|s| s.starts_with("COMPANY PROFILE:\nName: Acme (acme.com)\nIndustry: Fintech")), "{states:?}");
+        let company = get_job_company(&st, jd).await.unwrap().unwrap();
+        assert_eq!(company.status, CompanyStatus::Ok);
+        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, company.researched_at);
+        // A second match reuses the fresh profile.
+        let run2 = start_match(&st, jd).await.unwrap();
+        wait_done(&st, run2).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    async fn wait_researching(events: &Events, run: i64) {
+        for _ in 0..200 {
+            if researching(events, run) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("run {run} never started researching");
+    }
+
+    #[tokio::test]
+    async fn skip_background_scores_and_research_finishes() {
+        let (st, log, events) = setup(research(Arc::default(), Duration::from_millis(300), Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        wait_researching(&events, run).await;
+        skip_research(&st, run, "background").await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
+        assert!(log.1.lock().unwrap().iter().all(|s| s.starts_with("JOB DESCRIPTION:")));
+        for _ in 0..100 {
+            if get_job_company(&st, jd).await.unwrap().unwrap().status == CompanyStatus::Ok {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("background research did not finish");
+    }
+
+    #[tokio::test]
+    async fn skip_cancel_scores_and_research_cancelled() {
+        let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        wait_researching(&events, run).await;
+        skip_research(&st, run, "cancel").await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        let c = get_job_company(&st, jd).await.unwrap().unwrap();
+        assert_eq!(c.status, CompanyStatus::Pending);
+        assert_eq!(c.fail_count, 0);
+        assert_eq!(skip_research(&st, run, "cancel").await.unwrap_err().kind(), "NotFound");
+    }
+
+    #[tokio::test]
+    async fn research_failure_scores_without_context() {
+        let (st, _, _) = setup(research(Arc::default(), Duration::ZERO, Err(ResearchError::Budget))).await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
+        assert_eq!(get_job_company(&st, jd).await.unwrap().unwrap().status, CompanyStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn no_research_model_scores_without_context() {
+        let (st, events) = state().await;
+        st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+        save_entry(&st, entry("Engineer")).await.unwrap();
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        let failed = events.lock().unwrap().iter().any(|(n, v)| {
+            n == crate::company::coordinator::RESEARCH_EVENT
+                && v["event"]["error"] == "Choose a Company research model in Settings."
+        });
+        assert!(failed);
+        assert_eq!(get_job_company(&st, jd).await.unwrap().unwrap().fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn rescore_creates_new_run_with_current_profile() {
+        let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        wait_researching(&events, run).await;
+        skip_research(&st, run, "cancel").await.unwrap();
+        wait_done(&st, run).await;
+        let c = get_job_company(&st, jd).await.unwrap().unwrap();
+        st.store.save_research(c.id, "Acme", Some("acme.com"), &acme().profile, "lfm").await.unwrap();
+        let run2 = rescore(&st, run).await.unwrap();
+        assert_ne!(run2, run);
+        assert_eq!(wait_done(&st, run2).await, RunStatus::Done);
+        assert!(st.store.get_run(run2).await.unwrap().company_researched_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn edit_then_refresh_overwrites() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (st, _, _) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        wait_done(&st, start_match(&st, jd).await.unwrap()).await;
+        let c = get_job_company(&st, jd).await.unwrap().unwrap();
+        let edited = edit_company(&st, c.id, CompanyProfile { industry: "Mine".into(), ..Default::default() }).await.unwrap();
+        assert!(edited.edited_at.is_some());
+        assert_eq!(get_company(&st, c.id).await.unwrap().profile.industry, "Mine");
+        let refreshed = refresh_company(&st, c.id).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(refreshed.profile.industry, "Fintech");
+        assert_eq!(refreshed.edited_at, None);
+    }
+}
