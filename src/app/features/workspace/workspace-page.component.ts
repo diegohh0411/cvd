@@ -51,6 +51,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
   imports: [
     PageHeaderComponent,
     RouterLink,
+    ZardBadgeComponent,
     ZardButtonComponent,
     ZardSkeletonComponent,
     NgIcon,
@@ -182,6 +183,13 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
               <div role="tabpanel" class="min-h-0 flex-1 overflow-y-auto">
                 @switch (tab()) {
                   @case ('jd') {
+                    @if (ws.ranked()?.tags?.length) {
+                      <div class="mb-4 flex flex-wrap gap-1.5" aria-label="Role focus">
+                        @for (tag of ws.ranked()!.tags; track tag) {
+                          <z-badge zType="secondary">{{ tag }}</z-badge>
+                        }
+                      </div>
+                    }
                     <article class="text-sm leading-relaxed whitespace-pre-wrap">{{ ws.job()?.raw_text }}</article>
                   }
                   @case ('selection') {

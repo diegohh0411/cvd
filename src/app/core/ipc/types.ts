@@ -115,6 +115,7 @@ export interface Ranked {
   entries: RankedEntry[];
   skills: [Skill, number][];
   seniority: string;
+  tags: string[];
 }
 
 export interface SelectedEntry {

@@ -62,7 +62,12 @@ pub struct Ranked {
     pub entries: Vec<RankedEntry>,
     pub skills: Vec<(Skill, f64)>,
     pub seniority: String,
+    /// JD focus tags the model judged relevant, most probable first.
+    pub tags: Vec<String>,
 }
+
+/// Minimum "yes" probability for a tag to be shown.
+const TAG_THRESHOLD: f64 = 0.5;
 
 /// Starts a new run for `jd_id` and scores it end to end.
 #[allow(clippy::too_many_arguments)]
@@ -290,6 +295,15 @@ async fn execute(
             (TargetType::Meta, 0),
         ),
     ];
+    for tag in questions::JD_TAGS {
+        let key = questions::tag_key(tag);
+        all.push(Pending::new(
+            key.clone(),
+            &key,
+            questions::tag_question(tag),
+            (TargetType::Meta, 0),
+        ));
+    }
     for s in store.list_skills().await? {
         let key = questions::skill_key(s.id);
         all.push(Pending::new(
@@ -391,10 +405,18 @@ pub fn rank(store_scores: &[ScoreRow], entries: &[Entry], skills: &[Skill]) -> R
         .map(|(k, _)| k.clone())
         .unwrap_or_default();
 
+    let mut tags: Vec<(String, f64)> = store_scores
+        .iter()
+        .filter(|r| r.target_type == TargetType::Meta && r.score >= TAG_THRESHOLD)
+        .filter_map(|r| Some((r.question.strip_prefix(questions::TAG_PREFIX)?.to_string(), r.score)))
+        .collect();
+    tags.sort_by(|a, b| desc(&a.1, &b.1));
+
     Ranked {
         entries: ranked,
         skills,
         seniority,
+        tags: tags.into_iter().map(|(t, _)| t).collect(),
     }
 }
 

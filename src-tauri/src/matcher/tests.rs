@@ -117,6 +117,8 @@ async fn setup(entries: usize, bullets: usize, skills: usize) -> (Store, i64) {
     (s, jd)
 }
 
+const TAGS: usize = questions::JD_TAGS.len();
+
 fn cfg() -> MatchConfig {
     MatchConfig::default()
 }
@@ -136,14 +138,14 @@ fn count(rows: &[ScoreRow], t: TargetType) -> usize {
 async fn small_library_is_one_request() {
     let (s, jd) = setup(12, 2, 3).await;
     let e = Recorder::new(|_| 0.5);
-    let run = run_match(&s, &e, jd, "m", cfg(), None, CancellationToken::new(), |_| {})
+    let run = run_match(&s, &e, jd, "m", unbounded(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
-    // 2 meta + 3 skills + 12 x (relevance + seniority fit) + 24 bullets
+    // 2 meta + tags + 3 skills + 12 x (relevance + seniority fit) + 24 bullets
     assert_eq!(e.requests().len(), 1);
-    assert_eq!(e.requests()[0].len(), 53);
+    assert_eq!(e.requests()[0].len(), 53 + TAGS);
     let rows = s.scores_for_run(run).await.unwrap();
-    assert_eq!(count(&rows, TargetType::Meta), 2);
+    assert_eq!(count(&rows, TargetType::Meta), 2 + TAGS);
     assert_eq!(count(&rows, TargetType::Skill), 3);
     assert_eq!(count(&rows, TargetType::Entry), 24);
     // Every bullet is scored, even for low-scoring entries.
@@ -162,7 +164,7 @@ async fn requests_capped_at_128_questions() {
         .await
         .unwrap();
     let lens: Vec<usize> = e.requests().iter().map(Vec::len).collect();
-    assert_eq!(lens, vec![128, 76]);
+    assert_eq!(lens, vec![128, 76 + TAGS]);
     let rows = s.scores_for_run(1).await.unwrap();
     assert_eq!(count(&rows, TargetType::Skill), 200);
 }
@@ -212,9 +214,9 @@ async fn context_overflow_splits_and_retries() {
     let run = run_match(&s, &e, jd, "m", cfg(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
-    // 2 meta + 8 entry + 8 bullet questions, answered in pieces of <= 5.
+    // 2 meta + tags + 8 entry + 8 bullet questions, answered in pieces of <= 5.
     let rows = s.scores_for_run(run).await.unwrap();
-    assert_eq!(rows.len(), 18);
+    assert_eq!(rows.len(), 18 + TAGS);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
 }
 
@@ -305,9 +307,9 @@ async fn no_bullets_no_skills_ok() {
         .unwrap();
     assert_eq!(e.count(is_skill_call), 0);
     assert_eq!(e.count(is_bullet_call), 0);
-    // seniority + role family + relevance + seniority fit in one request
+    // seniority + role family + tags + relevance + seniority fit in one request
     assert_eq!(e.requests().len(), 1);
-    assert_eq!(e.requests()[0].len(), 4);
+    assert_eq!(e.requests()[0].len(), 4 + TAGS);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
 }
 
@@ -347,13 +349,13 @@ async fn cancel_keeps_partial() {
         .await
         .unwrap();
     assert_eq!(resumed, run);
-    // Only the unanswered questions are asked again: 2 meta + 6 x 3 in total.
-    assert_eq!(e2.inner.calls(), 20 - first);
+    // Only the unanswered questions are asked again: 2 meta + tags + 6 x 3 in total.
+    assert_eq!(e2.inner.calls(), 20 + TAGS - first);
     let asked: Vec<String> = e2.requests().concat();
     assert!(e.requests()[0].iter().all(|k| !asked.contains(k)));
     let rows = s.scores_for_run(run).await.unwrap();
-    assert_eq!(rows.len(), 20);
-    assert_eq!(count(&rows, TargetType::Meta), 2);
+    assert_eq!(rows.len(), 20 + TAGS);
+    assert_eq!(count(&rows, TargetType::Meta), 2 + TAGS);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
 }
 

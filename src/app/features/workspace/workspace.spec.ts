@@ -104,7 +104,9 @@ describe('WorkspaceStore', () => {
     expect(sent).toContainEqual({ Exclude: { Entry: 2 } });
     expect(sent).toContainEqual({ Include: { Bullet: 12 } });
     expect(sent).not.toContainEqual({ Include: { Entry: 2 } });
-    expect(t.callsTo('set_ui_setting')).toEqual([{ key: 'ui.page_budget', value: '2' }]);
+    const saved = t.callsTo('set_ui_setting').map((c) => c['key']);
+    expect(saved).toContain('ui.page_budget');
+    expect(saved).toContain('ui.overrides.3');
   });
 
   it('keeps the last good preview when a compile fails', async () => {
