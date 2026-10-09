@@ -1,5 +1,6 @@
 //! Company context: keys, freshness policy, rendering and the research agent.
 pub mod agent;
+pub mod coordinator;
 mod key;
 mod prompt;
 mod tools;
@@ -14,3 +15,5 @@ pub use policy::{backoff, need, parse_ts, format_ts, Need};
 mod tests;
 #[cfg(test)]
 mod agent_tests;
+#[cfg(test)]
+mod coordinator_tests;

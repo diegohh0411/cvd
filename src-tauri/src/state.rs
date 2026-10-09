@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::AppError;
+use crate::company::coordinator::ResearchCoordinator;
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
 use crate::models::{self, ModelKind, REGISTRY};
 use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
@@ -55,6 +56,8 @@ pub struct AppState {
     /// The local chat-model server for research, kept apart from the decision
     /// sidecar so switching System One models never stops it.
     research: Mutex<Option<(String, Arc<LlamaSidecar>)>>,
+    /// Company research runs (single-flight per company, one at a time).
+    pub coordinator: Arc<ResearchCoordinator>,
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -73,7 +76,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl AppState {
     pub fn new(store: Store, models_dir: PathBuf, source: EngineSource, emit: Emitter) -> Self {
+        let coordinator = Arc::new(ResearchCoordinator::new(1, emit.clone()));
         Self {
+            coordinator,
             store,
             models_dir,
             source,

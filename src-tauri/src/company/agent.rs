@@ -66,6 +66,9 @@ pub enum ResearchError {
     Model(String),
     #[error(transparent)]
     Search(#[from] ProviderError),
+    /// Research can't run yet (missing key or model); not a failure of the company.
+    #[error("{0}")]
+    Unavailable(String),
 }
 
 #[derive(Deserialize)]
