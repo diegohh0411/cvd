@@ -136,7 +136,7 @@ fn count(rows: &[ScoreRow], t: TargetType) -> usize {
 async fn small_library_is_one_request() {
     let (s, jd) = setup(12, 2, 3).await;
     let e = Recorder::new(|_| 0.5);
-    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
+    let run = run_match(&s, &e, jd, "m", cfg(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     // 2 meta + 3 skills + 12 x (relevance + seniority fit) + 24 bullets
@@ -158,7 +158,7 @@ async fn small_library_is_one_request() {
 async fn requests_capped_at_128_questions() {
     let (s, jd) = setup(1, 0, 200).await;
     let e = Recorder::new(|_| 3.0);
-    run_match(&s, &e, jd, "m", unbounded(), CancellationToken::new(), |_| {})
+    run_match(&s, &e, jd, "m", unbounded(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     let lens: Vec<usize> = e.requests().iter().map(Vec::len).collect();
@@ -176,7 +176,7 @@ async fn requests_split_by_token_budget() {
         token_budget: budget,
         ..cfg()
     };
-    let run = run_match(&s, &e, jd, "m", c, CancellationToken::new(), |_| {})
+    let run = run_match(&s, &e, jd, "m", c, None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     assert!(e.requests().len() > 1);
@@ -209,7 +209,7 @@ async fn context_overflow_splits_and_retries() {
     let (s, jd) = setup(4, 2, 0).await;
     let mut e = Recorder::new(|_| 3.0);
     e.overflow_above = 5;
-    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
+    let run = run_match(&s, &e, jd, "m", cfg(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     // 2 meta + 8 entry + 8 bullet questions, answered in pieces of <= 5.
@@ -300,7 +300,7 @@ fn rank_orders_by_score() {
 async fn no_bullets_no_skills_ok() {
     let (s, jd) = setup(1, 0, 0).await;
     let e = Recorder::new(|_| 3.0);
-    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
+    let run = run_match(&s, &e, jd, "m", cfg(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     assert_eq!(e.count(is_skill_call), 0);
@@ -325,7 +325,7 @@ async fn cancel_keeps_partial() {
     let e = Recorder::new(|_| 3.0);
     let cancel = CancellationToken::new();
     let c2 = cancel.clone();
-    let res = run_match(&s, &e, jd, "m", small(), cancel, move |p| {
+    let res = run_match(&s, &e, jd, "m", small(), None, cancel, move |p| {
         if let Progress::Scoring { done, .. } = p {
             if done > 0 {
                 c2.cancel();
@@ -343,7 +343,7 @@ async fn cancel_keeps_partial() {
     assert_eq!(s.scores_for_run(run).await.unwrap().len(), first);
 
     let e2 = Recorder::new(|_| 3.0);
-    let resumed = resume_match(&s, &e2, run, small(), CancellationToken::new(), |_| {})
+    let resumed = resume_match(&s, &e2, run, small(), None, CancellationToken::new(), |_| {})
         .await
         .unwrap();
     assert_eq!(resumed, run);
@@ -363,7 +363,7 @@ async fn engine_failure_keeps_earlier_batches() {
     let e = Recorder::new(|_| 3.0);
     // fail_on_call counts questions; fail on the last one, in the final request.
     e.inner.fail_on_call(20);
-    let res = run_match(&s, &e, jd, "m", small(), CancellationToken::new(), |_| {}).await;
+    let res = run_match(&s, &e, jd, "m", small(), None, CancellationToken::new(), |_| {}).await;
     assert!(matches!(res, Err(MatchError::Engine(_))), "{res:?}");
     assert_eq!(s.get_run(1).await.unwrap().status, RunStatus::Failed);
     let reqs = e.requests();
@@ -381,4 +381,45 @@ async fn failed_status_save_keeps_original_error() {
         .unwrap_err();
     assert!(matches!(err, MatchError::Engine(_)), "{err:?}");
     assert!(matches!(finish(&s, 1, Ok(())).await, Err(MatchError::Store(_))));
+}
+
+#[test]
+fn jd_state_without_company_unchanged() {
+    assert_eq!(jd_state("x", None), "JOB DESCRIPTION:\nx");
+}
+
+#[test]
+fn jd_state_puts_company_first() {
+    let s = jd_state("x", Some("Name: Acme"));
+    assert!(s.starts_with("COMPANY PROFILE:\nName: Acme"));
+    assert!(s.ends_with("\n\nJOB DESCRIPTION:\nx"));
+}
+
+/// Records the state of every request.
+struct StateRecorder(Recorder, Mutex<Vec<String>>);
+
+#[async_trait]
+impl DecisionEngine for StateRecorder {
+    async fn decide(
+        &self,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+    ) -> Result<BTreeMap<String, Answer>, EngineError> {
+        self.1.lock().unwrap().push(state.to_string());
+        self.0.decide(state, questions).await
+    }
+}
+
+#[tokio::test]
+async fn every_batch_shares_the_company_state() {
+    let (s, jd) = setup(12, 2, 3).await;
+    let e = StateRecorder(Recorder::new(|_| 0.5), Mutex::default());
+    let small = MatchConfig { token_budget: 2_000, ..cfg() };
+    run_match(&s, &e, jd, "m", small, Some("Name: Acme\nIndustry: Fintech"), CancellationToken::new(), |_| {})
+        .await
+        .unwrap();
+    let states = e.1.lock().unwrap().clone();
+    assert!(states.len() > 1, "expected several batches");
+    assert!(states.iter().all(|st| st == &states[0]));
+    assert!(states[0].starts_with("COMPANY PROFILE:\nName: Acme\nIndustry: Fintech"));
 }

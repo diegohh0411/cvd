@@ -69,6 +69,7 @@ pub async fn run_match(
     jd_id: i64,
     model_id: &str,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: CancellationToken,
     on_progress: impl Fn(Progress),
 ) -> Result<i64, MatchError> {
@@ -79,7 +80,7 @@ pub async fn run_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, jd_id, cfg, &cancel, &on_progress).await,
+        execute(store, engine, run_id, jd_id, cfg, company, &cancel, &on_progress).await,
     )
     .await
 }
@@ -90,6 +91,7 @@ pub async fn resume_match(
     engine: &dyn DecisionEngine,
     run_id: i64,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: CancellationToken,
     on_progress: impl Fn(Progress),
 ) -> Result<i64, MatchError> {
@@ -98,7 +100,7 @@ pub async fn resume_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, run.jd_id, cfg, &cancel, &on_progress).await,
+        execute(store, engine, run_id, run.jd_id, cfg, company, &cancel, &on_progress).await,
     )
     .await
 }
@@ -259,6 +261,7 @@ async fn execute(
     run_id: i64,
     jd_id: i64,
     cfg: MatchConfig,
+    company: Option<&str>,
     cancel: &CancellationToken,
     on_progress: &impl Fn(Progress),
 ) -> Result<(), MatchError> {
@@ -324,7 +327,7 @@ async fn execute(
     let mut done = total - todo.len();
     on_progress(Progress::Scoring { done, total });
 
-    let state = questions::jd_state(&jd.raw_text);
+    let state = questions::jd_state(&jd.raw_text, company);
     for batch in batches(todo, &state, cfg.token_budget) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();

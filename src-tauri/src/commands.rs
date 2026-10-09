@@ -277,6 +277,7 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
             &*engine,
             run_id,
             MatchConfig::default(),
+            None,
             token,
             move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p })),
         )

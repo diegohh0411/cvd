@@ -125,6 +125,11 @@ fn entry_data(e: &Entry) -> Value {
     })
 }
 
-pub fn jd_state(jd: &str) -> String {
-    format!("JOB DESCRIPTION:\n{jd}")
+/// The shared System One state: the rendered company profile (if any) first,
+/// so every batch and every JD from the same company share a cached prefix.
+pub fn jd_state(jd: &str, company: Option<&str>) -> String {
+    match company {
+        Some(c) => format!("COMPANY PROFILE:\n{c}\n\nJOB DESCRIPTION:\n{jd}"),
+        None => format!("JOB DESCRIPTION:\n{jd}"),
+    }
 }

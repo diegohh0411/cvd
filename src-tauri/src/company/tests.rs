@@ -95,3 +95,49 @@ mod policy_tests {
         assert_eq!(parse_ts("garbage"), None);
     }
 }
+
+mod render_tests {
+    use super::super::*;
+    use crate::store::types::{CompanyProfile, Source};
+
+    #[test]
+    fn render_omits_empty_fields() {
+        let p = CompanyProfile { industry: "Fintech".into(), ..Default::default() };
+        assert_eq!(render("Acme", Some("acme.com"), &p), "Name: Acme (acme.com)\nIndustry: Fintech");
+    }
+
+    #[test]
+    fn render_caps_length() {
+        let long = "x".repeat(5000);
+        let p = CompanyProfile {
+            summary: long.clone(),
+            industry: long.clone(),
+            size: long.clone(),
+            stage: long.clone(),
+            headquarters: long.clone(),
+            remote_policy: long.clone(),
+            products: long.clone(),
+            tech_stack: vec![long.clone(); 20],
+            sources: vec![],
+        };
+        let out = render("Acme", None, &p);
+        assert!(out.len() / 3 <= 400, "{} chars", out.len());
+        assert!(out.starts_with("Name: Acme\n"));
+    }
+
+    #[test]
+    fn render_never_includes_sources() {
+        let p = CompanyProfile {
+            industry: "Fintech".into(),
+            sources: vec![Source { url: "https://secret.example".into(), title: "S".into() }],
+            ..Default::default()
+        };
+        assert!(!render("Acme", None, &p).contains("secret.example"));
+    }
+
+    #[test]
+    fn render_lists_tech_stack() {
+        let p = CompanyProfile { tech_stack: vec!["Rust".into(), "Go".into()], ..Default::default() };
+        assert_eq!(render("Acme", None, &p), "Name: Acme\nTech stack: Rust, Go");
+    }
+}
