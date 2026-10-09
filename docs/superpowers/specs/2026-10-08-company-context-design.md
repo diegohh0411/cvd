@@ -15,7 +15,7 @@ local research agent searches the web, with UI feedback and escape hatches.
 | Blocking | Research blocks System One. User can **Cancel research & proceed** or **Continue in background & proceed**. |
 | Agent loop | `agentix` (pinned exact version), running in the Tauri backend. |
 | Research LLM | llama.cpp first (LFM2.5-2.6B), OpenRouter later. OpenAI-compatible `/v1/chat/completions` with tools. |
-| Search | `SearchProvider` trait, Brave Search API first. |
+| Search | `SearchProvider` trait, Exa first. |
 | Key | Domain → normalized name → alias. No embeddings. |
 | Profile | Typed columns. Manual edits allowed; refresh overwrites them. |
 | TTL | 30 days from `researched_at`, checked in code. Edits do not pause it. |
@@ -68,7 +68,7 @@ ALTER TABLE match_run ADD COLUMN company_researched_at TEXT;  -- NULL = scored w
 
 - **Input:** company name as written, JD URL/domain, a JD snippet for telling similar names apart.
 - **Tools:**
-  - `web_search(query)` → `SearchProvider` (Brave).
+  - `web_search(query)` → `SearchProvider` (Exa).
   - `fetch_page(url)` → `reqwest` + readability extraction, truncated to ~4–6k chars.
   - `submit_profile({canonical_name, domain, summary, industry, size, stage, headquarters, remote_policy, products, tech_stack[], sources[]})`. Calling it ends the loop.
 - **Rules:** only sourced facts; `""` for unknowns.
@@ -100,7 +100,7 @@ pub fn jd_state(jd: &str, company: Option<&CompanyProfile>) -> String
 - **Buttons while researching:** *Cancel research & proceed*, *Continue in background & proceed*.
 - **Badge:** "Scored without company context", plus **Re-score** once a profile exists or has changed.
 - **Company profile panel:** fields, sources, `researched_at`, "edited by you" badge, Edit, Refresh.
-- **Settings:** Search providers (Brave key with a test button); LLM providers and the per-role model pickers.
+- **Settings:** Search providers (Exa key with a test button); LLM providers and the per-role model pickers.
 
 ## Open questions
 

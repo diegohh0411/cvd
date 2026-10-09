@@ -4,7 +4,7 @@
 
 **Goal:** Every System One match is scored with a cached, web-researched company profile; a cache miss blocks the match while a local tool-calling agent researches the company.
 
-**Architecture:** A `company` table (+ `company_alias`) caches typed profiles for 30 days. A `ResearchCoordinator` in `AppState` runs one `agentix` agent per company (single-flight, global concurrency cap) with three tools: `web_search` (a `SearchProvider`, Brave first), `fetch_page`, `submit_profile`. The agent talks to any OpenAI-compatible chat endpoint: a second llama.cpp sidecar (`--jinja`) serving a chat model, or OpenRouter. `start_match` awaits the profile and passes it into `jd_state`, so it becomes part of the System One `state`.
+**Architecture:** A `company` table (+ `company_alias`) caches typed profiles for 30 days. A `ResearchCoordinator` in `AppState` runs one `agentix` agent per company (single-flight, global concurrency cap) with three tools: `web_search` (a `SearchProvider`, Exa first), `fetch_page`, `submit_profile`. The agent talks to any OpenAI-compatible chat endpoint: a second llama.cpp sidecar (`--jinja`) serving a chat model, or OpenRouter. `start_match` awaits the profile and passes it into `jd_state`, so it becomes part of the System One `state`.
 
 **Tech Stack:** Rust (Tauri 2, sqlx/SQLite, reqwest 0.13, tokio, `agentix` pinned, `html2text`), `wiremock` for tests, Angular + vitest frontend.
 
@@ -19,7 +19,7 @@
 - State layout: `COMPANY PROFILE:\n…\n\nJOB DESCRIPTION:\n{jd}`; without a profile it is exactly today's `JOB DESCRIPTION:\n{jd}`.
 - Refresh overwrites every profile field and clears `edited_at`. Cancelled research never increments `fail_count`.
 - `agentix` pinned with `=` to the version chosen in Task 0.
-- Keys live in `secrets` (`brave`, `openrouter`), never sent to the frontend beyond `has_key` + last 4; `cvd-mcp` gets no tools for companies or secrets.
+- Keys live in `secrets` (`exa`, `openrouter`), never sent to the frontend beyond `has_key` + last 4; `cvd-mcp` gets no tools for companies or secrets.
 - Model refs keep the existing encoding (`ModelRef`): bare id = local, `<provider>:<id>` = remote. New setting key `research_model`; existing `active_model` stays the System One role.
 - llama.cpp sidecar for chat models adds `--jinja` to `server_args`; decision models keep their args unchanged.
 - Settings copy: roles are labelled "System One" and "Company research".
@@ -28,24 +28,24 @@
 
 1. JD with an empty `company` and no URL → no research, match scores immediately with the "Scored without company context" badge. (Test in Task 9.)
 2. Two matches started for JDs of the same company → one agent run, both matches get the same profile. (Test in Task 8.)
-3. No Brave key, or no research model configured → research fails fast with an actionable message ("Add your Brave key in Settings."), match proceeds without context; no backoff penalty. (Test in Task 8.)
+3. No Exa key, or no research model configured → research fails fast with an actionable message ("Add your Exa key in Settings."), match proceeds without context; no backoff penalty. (Test in Task 8.)
 4. Model emits malformed tool-call JSON or an unknown tool → the error is returned to the model as the tool result and the loop continues; it never panics. (Test in Task 7.)
 5. Names differing only by accents, case, punctuation or legal suffix ("Nubank S.A. de C.V.", "nubank") → same row. (Test in Task 2.)
 
 ---
 
-### Task 0: Spike — agentix, LFM2.5, Brave
+### Task 0: Spike — agentix, LFM2.5, Exa
 
 No product code. Resolves the unknowns the later tasks consume.
 
 **Files:**
 - Create: `docs/superpowers/spike-2026-10-08-company-research.md`
-- Create: `src-tauri/tests/fixtures/brave_search_response.json`
+- Create: `src-tauri/tests/fixtures/exa_search_response.json`
 
 - [ ] **Step 1:** In a scratch crate, add the latest `agentix` and run its loop against `llama-server -m LFM2.5-2.6B-Q4_K_M.gguf --jinja` with one dummy tool. Record: exact version, the loop/tool API names, how to set base URL + key, how to cap rounds, how to cancel (token or drop), and whether a hook exists to rewrite message history between rounds. If no hook exists, record that Task 7 wraps the loop by driving one round at a time.
 - [ ] **Step 2:** Same scratch run against OpenRouter `https://openrouter.ai/api/v1` with a tool-capable model. Record any request differences.
 - [ ] **Step 3:** Download `LiquidAI/LFM2.5-2.6B-GGUF` Q4_K_M; record exact `hf_file`, `sha256`, `size_bytes`, and a `min_ram_gb`.
-- [ ] **Step 4:** Call `GET https://api.search.brave.com/res/v1/web/search?q=anthropic&count=5` with `X-Subscription-Token`; save the response as the fixture. Record the result fields used (`web.results[].title/url/description`) and the 401/429 behaviour.
+- [ ] **Step 4:** Call `POST https://api.exa.ai/search` with header `x-api-key` and body `{"query":"anthropic company","type":"auto","numResults":5,"contents":{"text":{"maxCharacters":500}}}`; save the response as the fixture. Record the result fields used (`results[].title/url/text`) and the 401/429 behaviour.
 - [ ] **Step 5:** Pick the readable-text crate (`html2text` default; switch only if it fails on 3 real company pages) and record it.
 - [ ] **Step 6: Commit** `docs: company research spike`.
 
@@ -145,22 +145,22 @@ assert_eq!(domain_from_url("not a url"), None);
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement; per-field cap 300 chars, then trim whole fields from the bottom until under the token cap. Update existing callers to pass `None`. **Step 4:** Pass.
 - [ ] **Step 5: Commit** `feat(matcher): company profile in System One state`.
 
-### Task 5: Search providers (Brave)
+### Task 5: Search providers (Exa)
 
 **Files:**
-- Create: `src-tauri/src/search/mod.rs`, `src-tauri/src/search/brave.rs`, `src-tauri/src/search/tests.rs`
-- Modify: `src-tauri/src/commands.rs` (`known_provider` accepts `brave`; `set_provider_key` validates Brave by a 1-result query), `src-tauri/src/state.rs` (`search()` accessor rebuilt in `reload_providers`)
+- Create: `src-tauri/src/search/mod.rs`, `src-tauri/src/search/exa.rs`, `src-tauri/src/search/tests.rs`
+- Modify: `src-tauri/src/commands.rs` (`known_provider` accepts `exa`; `set_provider_key` validates Exa by a 1-result query), `src-tauri/src/state.rs` (`search()` accessor rebuilt in `reload_providers`)
 
 **Interfaces:**
 - Produces:
   - `pub struct SearchHit { title: String, url: String, snippet: String }`
   - `#[async_trait] pub trait SearchProvider: Send + Sync { fn id(&self) -> &'static str; async fn search(&self, query: &str, count: u8) -> Result<Vec<SearchHit>, ProviderError>; }`
-  - `pub struct BraveSearch::new(base_url: String, api_key: String)`; `pub const BRAVE: &str = "brave"`; `BRAVE_BASE = "https://api.search.brave.com"`.
-  - `AppState::search(&self) -> Result<Arc<dyn SearchProvider>, ProviderError>` → `Missing("Add your Brave key in Settings.")` when absent.
+  - `pub struct ExaSearch::new(base_url: String, api_key: String)`; `pub const EXA: &str = "exa"`; `EXA_BASE = "https://api.exa.ai"`.
+  - `AppState::search(&self) -> Result<Arc<dyn SearchProvider>, ProviderError>` → `Missing("Add your Exa key in Settings.")` when absent.
 
-- [ ] **Step 1: Write failing wiremock tests** `brave_parses_fixture` (Task 0 fixture → hits with title/url/snippet), `brave_sends_token_header`, `brave_401_is_unauthorized`, `brave_429_is_network_error_with_rate_limit_message`.
+- [ ] **Step 1: Write failing wiremock tests** `exa_parses_fixture` (Task 0 fixture → hits with title/url/snippet), `exa_sends_api_key_header_and_body` (header `x-api-key`; body has `query`, `numResults: 5`, `contents.text.maxCharacters: 500`), `exa_401_is_unauthorized`, `exa_429_is_network_error_with_rate_limit_message`.
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Pass.
-- [ ] **Step 5: Commit** `feat(search): Brave search provider`.
+- [ ] **Step 5: Commit** `feat(search): Exa search provider`.
 
 ### Task 6: Chat models and the research role
 
@@ -263,9 +263,9 @@ assert_eq!(domain_from_url("not a url"), None);
   - `cancel button calls skip_research(run, "cancel")`; `background button calls skip_research(run, "background")`.
   - `badge "Scored without company context" when a done run has null company_researched_at`; `Re-score` button visible only when the job's company is `ok`.
   - `refresh asks for confirmation when edited_at is set` and not otherwise.
-  - `settings shows Brave key (provider-key with provider "brave") and two model pickers labelled "System One" and "Company research"`; the research picker lists only `kind === "chat"` local models plus remote chat models.
+  - `settings shows Exa key (provider-key with provider "exa") and two model pickers labelled "System One" and "Company research"`; the research picker lists only `kind === "chat"` local models plus remote chat models.
   - `commands.spec`: new command names and argument shapes.
 - [ ] **Step 2:** `bun --bun ng test --watch=false` → FAIL.
 - [ ] **Step 3:** Implement. The company panel opens from the job page and shows the fields, sources (links), `researched_at`, "edited by you" badge, Edit (form over the typed fields; tech stack as a chip list), Refresh. **Step 4:** Pass.
-- [ ] **Step 5:** Launch the app (`run` skill) with a Brave key and LFM2.5 installed; run a match for a real JD; confirm the progress, both skip buttons, the badge and the panel.
+- [ ] **Step 5:** Launch the app (`run` skill) with an Exa key and LFM2.5 installed; run a match for a real JD; confirm the progress, both skip buttons, the badge and the panel.
 - [ ] **Step 6: Commit** `feat(ui): company research progress, profile panel and settings`.

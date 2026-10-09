@@ -1,4 +1,4 @@
-# Spike 2026-10-08: company research (agentix, LFM2.5, Brave, page text)
+# Spike 2026-10-08: company research (agentix, LFM2.5, Exa, page text)
 
 ## agentix 0.31.0 — pin `agentix = "=0.31.0"`
 
@@ -37,6 +37,6 @@
 - **`dom_smoothie` 0.18** (Readability port): clean article text on stripe.com/about, nubank about-us, anthropic.com/company.
 - Decision: `dom_smoothie` first, `html2text` fallback when Readability fails; collapse whitespace.
 
-## Brave
+## Exa
 
 - Pending the user's key; fixture captured before Task 5.
