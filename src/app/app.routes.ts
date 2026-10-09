@@ -32,7 +32,7 @@ export const routes: Routes = [
       { path: 'ai', pathMatch: 'full', redirectTo: 'ai/roles' },
       { path: 'ai/roles', loadComponent: () => import('./features/models/models-page.component').then((m) => m.ModelsPageComponent) },
       { path: 'ai/models', loadComponent: () => import('./features/models/models-page.component').then((m) => m.ModelsPageComponent) },
-      { path: 'ai/providers', loadComponent: () => import('./features/models/models-page.component').then((m) => m.ModelsPageComponent) },
+      { path: 'ai/providers', loadComponent: () => import('./features/ai/providers-page.component').then((m) => m.ProvidersPageComponent) },
       { path: 'models', redirectTo: ({ queryParams }) => modelsRedirect(queryParams['tab']) },
       {
         path: 'settings',

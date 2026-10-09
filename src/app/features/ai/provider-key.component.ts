@@ -26,7 +26,7 @@ const COPY: Record<ProviderId, { name: string; placeholder: string; hint: string
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="grid gap-2 text-sm">
-      <span class="font-medium">{{ copy().name }}</span>
+      <span class="font-medium" data-testid="provider-title">{{ copy().name }}</span>
       @if (status().has_key) {
         <div class="flex items-center gap-3">
           <span data-testid="key-saved">Key saved (…{{ status().last4 }})</span>
