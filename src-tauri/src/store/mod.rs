@@ -1,4 +1,5 @@
 pub mod types;
+mod companies;
 
 #[cfg(test)]
 mod tests;
@@ -152,6 +153,7 @@ fn jd_from_row(r: &SqliteRow) -> JobDescription {
         created_at: r.get("created_at"),
         url: r.get("url"),
         status_id: r.get("status_id"),
+        company_id: r.get("company_id"),
     }
 }
 
@@ -162,6 +164,7 @@ fn run_from_row(r: &SqliteRow) -> Result<MatchRun> {
         model_id: r.get("model_id"),
         status: parse_status(r.get("status"))?,
         created_at: r.get("created_at"),
+        company_researched_at: r.get("company_researched_at"),
     })
 }
 

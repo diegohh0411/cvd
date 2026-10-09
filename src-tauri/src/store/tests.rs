@@ -122,6 +122,7 @@ async fn get_run_reflects_status() {
             model_id: "clef-flash".into(),
             status: RunStatus::Cancelled,
             created_at: got.created_at.clone(),
+            company_researched_at: None,
         }
     );
     assert!(s.get_run(run + 99).await.is_err());
@@ -255,4 +256,86 @@ async fn secret_roundtrip() {
     assert_eq!(s.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-2"));
     s.delete_secret("openrouter").await.unwrap();
     assert_eq!(s.get_secret("openrouter").await.unwrap(), None);
+}
+
+fn profile(industry: &str) -> CompanyProfile {
+    CompanyProfile {
+        industry: industry.into(),
+        tech_stack: vec!["Rust".into()],
+        sources: vec![Source { url: "https://acme.com".into(), title: "Acme".into() }],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn company_lookup_order() {
+    let s = store().await;
+    let by_name = s.create_company("Acme", "acme", None).await.unwrap();
+    let by_domain = s.create_company("Other", "other", Some("acme.com")).await.unwrap();
+    let hit = s.find_company(Some("acme.com"), "acme").await.unwrap().unwrap();
+    assert_eq!(hit.id, by_domain.id);
+    assert_eq!(s.find_company(None, "acme").await.unwrap().unwrap().id, by_name.id);
+    s.add_alias("acme corp", by_name.id).await.unwrap();
+    assert_eq!(s.find_company(None, "acme corp").await.unwrap().unwrap().id, by_name.id);
+    assert!(s.find_company(None, "nobody").await.unwrap().is_none());
+    assert_eq!(by_name.status, CompanyStatus::Pending);
+}
+
+#[tokio::test]
+async fn save_research_clears_edit() {
+    let s = store().await;
+    let c = s.create_company("Acme", "acme", None).await.unwrap();
+    s.mark_research_failed(c.id, "boom", "2030-01-01 00:00:00").await.unwrap();
+    let edited = s.edit_company(c.id, &profile("Edited")).await.unwrap();
+    assert!(edited.edited_at.is_some());
+    assert_eq!(edited.profile.industry, "Edited");
+    let saved = s.save_research(c.id, "Acme Inc", Some("acme.com"), &profile("Fintech"), "lfm").await.unwrap();
+    assert_eq!(saved.edited_at, None);
+    assert_eq!(saved.profile, profile("Fintech"));
+    assert_eq!(saved.name, "Acme Inc");
+    assert_eq!(saved.domain.as_deref(), Some("acme.com"));
+    assert_eq!(saved.status, CompanyStatus::Ok);
+    assert_eq!(saved.fail_count, 0);
+    assert_eq!(saved.last_error, "");
+    assert_eq!(saved.retry_after, None);
+    assert!(saved.researched_at.is_some());
+    assert_eq!(saved.model_id, "lfm");
+}
+
+#[tokio::test]
+async fn mark_failed_increments() {
+    let s = store().await;
+    let c = s.create_company("Acme", "acme", None).await.unwrap();
+    s.mark_research_failed(c.id, "one", "2030-01-01 00:00:00").await.unwrap();
+    s.mark_research_failed(c.id, "two", "2030-01-02 00:00:00").await.unwrap();
+    let got = s.get_company(c.id).await.unwrap();
+    assert_eq!(got.fail_count, 2);
+    assert_eq!(got.last_error, "two");
+    assert_eq!(got.status, CompanyStatus::Failed);
+    assert_eq!(got.retry_after.as_deref(), Some("2030-01-02 00:00:00"));
+}
+
+#[tokio::test]
+async fn merge_moves_aliases_and_jobs() {
+    let s = store().await;
+    let keep = s.create_company("Acme", "acme", Some("acme.com")).await.unwrap();
+    let dup = s.create_company("Acme Labs", "acme labs", None).await.unwrap();
+    s.add_alias("acmelabs", dup.id).await.unwrap();
+    let jd = s.create_jd("Dev", "Acme Labs", "text", "", None).await.unwrap();
+    s.set_jd_company(jd, Some(dup.id)).await.unwrap();
+    s.merge_company(dup.id, keep.id).await.unwrap();
+    assert!(s.get_company(dup.id).await.is_err());
+    assert_eq!(s.find_company(None, "acmelabs").await.unwrap().unwrap().id, keep.id);
+    assert_eq!(s.find_company(None, "acme labs").await.unwrap().unwrap().id, keep.id);
+    assert_eq!(s.get_jd(jd).await.unwrap().unwrap().company_id, Some(keep.id));
+}
+
+#[tokio::test]
+async fn run_records_company_researched_at() {
+    let s = store().await;
+    let jd = s.create_jd("Dev", "Acme", "text", "", None).await.unwrap();
+    let run = s.create_run(jd, "clef-flash").await.unwrap();
+    assert_eq!(s.get_run(run).await.unwrap().company_researched_at, None);
+    s.set_run_company(run, Some("2026-10-08 10:00:00")).await.unwrap();
+    assert_eq!(s.get_run(run).await.unwrap().company_researched_at.as_deref(), Some("2026-10-08 10:00:00"));
 }

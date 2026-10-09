@@ -84,6 +84,8 @@ pub struct JobDescription {
     pub url: String,
     /// Application status (see `JobStatus`); null when unset.
     pub status_id: Option<i64>,
+    /// Resolved company (see `Company`); null until a match resolves it.
+    pub company_id: Option<i64>,
 }
 
 /// Notion's label palette; the UI maps each to light/dark styles.
@@ -126,6 +128,8 @@ pub struct MatchRun {
     pub model_id: String,
     pub status: RunStatus,
     pub created_at: String,
+    /// `researched_at` of the company profile the run was scored with; null = no context.
+    pub company_researched_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,4 +171,48 @@ pub struct CvInput {
     pub page_budget: i64,
     pub selection_json: String,
     pub pdf_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Source {
+    pub url: String,
+    pub title: String,
+}
+
+/// Researched (or hand-edited) facts about a company.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompanyProfile {
+    pub summary: String,
+    pub industry: String,
+    pub size: String,
+    pub stage: String,
+    pub headquarters: String,
+    pub remote_policy: String,
+    pub products: String,
+    pub tech_stack: Vec<String>,
+    pub sources: Vec<Source>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompanyStatus {
+    Pending,
+    Ok,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Company {
+    pub id: i64,
+    pub name: String,
+    pub normalized_name: String,
+    pub domain: Option<String>,
+    pub profile: CompanyProfile,
+    pub status: CompanyStatus,
+    pub researched_at: Option<String>,
+    pub model_id: String,
+    pub fail_count: i64,
+    pub last_error: String,
+    pub retry_after: Option<String>,
+    pub edited_at: Option<String>,
 }
