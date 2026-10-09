@@ -57,11 +57,11 @@ describe('WorkspaceStore', () => {
     const started = ws.start();
     await flush();
     expect(ws.phase()).toBe('matching');
-    await t.emit('match://progress', { run_id: 3, event: { stage: 'scoring_entries', done: 2, total: 5 } });
+    await t.emit('match://progress', { run_id: 3, event: { stage: 'scoring', done: 2, total: 5 } });
     await t.emit('match://progress', { run_id: 99, event: { stage: 'done' } });
     resolveStart(3);
     await started;
-    expect(ws.progress()).toEqual({ stage: 'scoring_entries', done: 2, total: 5 });
+    expect(ws.progress()).toEqual({ stage: 'scoring', done: 2, total: 5 });
     await t.emit('match://progress', { run_id: 3, event: { stage: 'done' } });
     await flush();
     expect(ws.phase()).toBe('review');
@@ -129,7 +129,7 @@ describe('WorkspaceStore', () => {
 
 describe('workspace helpers', () => {
   it('describes stepper state', () => {
-    expect(stepState({ stage: 'scoring_entries', done: 1, total: 4 })).toEqual({ index: 1, percent: 25, detail: '1/4' });
+    expect(stepState({ stage: 'scoring', done: 1, total: 4 })).toEqual({ index: 1, percent: 25, detail: '1/4' });
     expect(stepState(null).index).toBe(0);
   });
 

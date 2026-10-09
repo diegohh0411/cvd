@@ -213,8 +213,7 @@ export interface AppError {
 
 export type MatchStage =
   | { stage: 'reading_jd' }
-  | { stage: 'scoring_entries'; done: number; total: number }
-  | { stage: 'picking_bullets'; done: number; total: number }
+  | { stage: 'scoring'; done: number; total: number }
   | { stage: 'done' }
   | { stage: 'cancelled' }
   | { stage: 'failed'; error: AppError };

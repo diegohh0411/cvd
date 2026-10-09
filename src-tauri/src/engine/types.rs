@@ -1,10 +1,13 @@
+use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// `instructions` is a plain string or a JSON object that carries the data a
+/// question refers to (e.g. `{"entry": {...}, "question": "... `entry` ..."}`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Question {
-    Noul { instructions: String },
-    Choice { instructions: String, options: Vec<String> },
-    Score { instructions: String, legend: BTreeMap<u8, String> },
+    Noul { instructions: Value },
+    Choice { instructions: Value, options: Vec<String> },
+    Score { instructions: Value, legend: BTreeMap<u8, String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]

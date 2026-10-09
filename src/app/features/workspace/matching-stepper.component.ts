@@ -6,17 +6,15 @@ import { ZardButtonComponent } from '@/shared/components/button/button.component
 import { ZardProgressComponent } from '@/shared/components/progress/progress.component';
 import type { MatchStage } from '../../core/ipc/types';
 
-export const STEPS = ['Reading JD', 'Scoring entries', 'Picking bullets', 'Fitting page'] as const;
+export const STEPS = ['Reading JD', 'Scoring entries and bullets', 'Fitting page'] as const;
 
 /** Index of the active step and its progress (0–100) for a progress event. */
 export function stepState(p: MatchStage | null): { index: number; percent: number | null; detail: string } {
   switch (p?.stage) {
-    case 'scoring_entries':
+    case 'scoring':
       return { index: 1, percent: pct(p.done, p.total), detail: `${p.done}/${p.total}` };
-    case 'picking_bullets':
-      return { index: 2, percent: pct(p.done, p.total), detail: `${p.done}/${p.total}` };
     case 'done':
-      return { index: 3, percent: null, detail: '' };
+      return { index: 2, percent: null, detail: '' };
     default:
       return { index: 0, percent: null, detail: '' };
   }

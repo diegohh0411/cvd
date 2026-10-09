@@ -2,8 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use serde_json::{json, Value};
+
 use crate::engine::Question;
-use crate::store::types::Entry;
+use crate::store::types::{Bullet, Entry};
 
 pub const SENIORITY_KEY: &str = "seniority";
 pub const ROLE_FAMILY_KEY: &str = "role_family";
@@ -21,13 +23,21 @@ pub const ROLE_FAMILY_OPTIONS: [&str; 7] = [
     "other",
 ];
 
-pub const ENTRY_INSTRUCTION: &str = "How relevant is this experience to the job description?";
+pub const ENTRY_INSTRUCTION: &str = "How relevant is `entry` to the job description?";
 pub const BULLET_INSTRUCTION: &str =
-    "How strongly does this bullet support a fit for the job description?";
+    "How strongly does `bullet` (from `entry`) support a fit for the job description?";
 pub const SENIORITY_INSTRUCTION: &str = "What seniority level does this role target?";
 pub const ROLE_FAMILY_INSTRUCTION: &str = "Which role family does this job belong to?";
 pub const SENIORITY_FIT_INSTRUCTION: &str =
-    "Does this experience show the seniority the job description needs?";
+    "Does `entry` show the seniority the job description needs?";
+
+pub fn relevance_key(entry_id: i64) -> String {
+    format!("{RELEVANCE_KEY}:{entry_id}")
+}
+
+pub fn seniority_fit_key(entry_id: i64) -> String {
+    format!("{SENIORITY_FIT_KEY}:{entry_id}")
+}
 
 pub fn skill_key(id: i64) -> String {
     format!("skill:{id}")
@@ -39,7 +49,7 @@ pub fn bullet_key(id: i64) -> String {
 
 pub fn skill_question(name: &str) -> Question {
     Question::Noul {
-        instructions: format!("Does this role require or value the skill \"{name}\"?"),
+        instructions: format!("Does this role require or value the skill \"{name}\"?").into(),
     }
 }
 
@@ -70,40 +80,51 @@ pub fn relevance_legend() -> BTreeMap<u8, String> {
     .collect()
 }
 
-pub fn entry_question() -> Question {
+/// Instructions that carry their own data, so one JD-only state serves every
+/// entry and bullet question in a request.
+fn with_data(question: &str, data: Value) -> Value {
+    let mut v = data;
+    v["question"] = question.into();
+    v
+}
+
+pub fn entry_question(e: &Entry) -> Question {
     Question::Score {
-        instructions: ENTRY_INSTRUCTION.into(),
+        instructions: with_data(ENTRY_INSTRUCTION, json!({ "entry": entry_data(e) })),
         legend: relevance_legend(),
     }
 }
 
-pub fn seniority_fit_question() -> Question {
+pub fn seniority_fit_question(e: &Entry) -> Question {
     Question::Noul {
-        instructions: SENIORITY_FIT_INSTRUCTION.into(),
+        instructions: with_data(SENIORITY_FIT_INSTRUCTION, json!({ "entry": entry_data(e) })),
     }
 }
 
-pub fn bullet_question() -> Question {
+pub fn bullet_question(e: &Entry, b: &Bullet) -> Question {
     Question::Score {
-        instructions: BULLET_INSTRUCTION.into(),
+        instructions: with_data(
+            BULLET_INSTRUCTION,
+            json!({ "entry": entry_heading(e), "bullet": b.text }),
+        ),
         legend: relevance_legend(),
     }
+}
+
+fn entry_heading(e: &Entry) -> String {
+    let end = e.end_date.as_deref().unwrap_or("present");
+    format!("{} — {} ({}–{end})", e.title, e.org, e.start_date)
+}
+
+fn entry_data(e: &Entry) -> Value {
+    json!({
+        "heading": entry_heading(e),
+        "description": e.description,
+        "bullets": e.bullets.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
+        "skills": e.skills.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(),
+    })
 }
 
 pub fn jd_state(jd: &str) -> String {
     format!("JOB DESCRIPTION:\n{jd}")
-}
-
-pub fn entry_state(jd: &str, e: &Entry) -> String {
-    let end = e.end_date.as_deref().unwrap_or("present");
-    let mut s = format!(
-        "JOB DESCRIPTION:\n{jd}\n\nCANDIDATE ENTRY:\n{} — {} ({}–{end})\n{}\n",
-        e.title, e.org, e.start_date, e.description
-    );
-    for b in &e.bullets {
-        s.push_str(&format!("- {}\n", b.text));
-    }
-    let skills: Vec<&str> = e.skills.iter().map(|k| k.name.as_str()).collect();
-    s.push_str(&format!("Skills: {}", skills.join(", ")));
-    s
 }
