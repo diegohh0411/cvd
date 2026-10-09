@@ -177,7 +177,11 @@ export class RoleCardComponent implements OnInit {
     { id: 'openrouter', label: 'OpenRouter (online)' },
   ];
   protected readonly copy = computed(() => COPY[this.role()]);
-  protected readonly active = signal<string | null>(null);
+  /** A pick in flight; the store's value wins again once it settles. */
+  private readonly picking = signal<string | null>(null);
+  protected readonly active = computed(
+    () => this.picking() ?? (this.role() === 'research' ? this.models.researchModel() : this.engine.status().model_id),
+  );
   protected readonly viewing = signal<ProviderKind>('local');
   protected readonly hasOpenRouter = signal(false);
   protected readonly hasExa = signal(false);
@@ -210,16 +214,15 @@ export class RoleCardComponent implements OnInit {
 
   async ngOnInit(): Promise<void> {
     const research = this.role() === 'research';
-    const [or, exa, researchModel] = await Promise.all([
+    const [or, exa] = await Promise.all([
       api.providerKeyStatus('openrouter').catch(() => null),
       research ? api.providerKeyStatus('exa').catch(() => null) : null,
-      research ? api.getResearchModel().catch(() => null) : null,
+      research ? this.models.loadResearchModel() : null,
       this.models.load(),
-      this.engine.refresh(),
+      this.engine.load(),
     ]);
     this.hasOpenRouter.set(or?.has_key ?? false);
     this.hasExa.set(exa?.has_key ?? false);
-    this.active.set(research ? researchModel : this.engine.status().model_id);
     this.view(providerOf(this.active()));
   }
 
@@ -240,7 +243,7 @@ export class RoleCardComponent implements OnInit {
   }
 
   protected async pick(o: RoleOption): Promise<void> {
-    if (o.id === this.active() || !o.installed) return;
+    if (this.picking() || o.id === this.active() || !o.installed) return;
     if (providerOf(o.id) === 'openrouter') {
       const ack = await api.getUiSetting(REMOTE_NOTICE_SETTING).catch(() => null);
       if (ack !== '1') {
@@ -258,8 +261,7 @@ export class RoleCardComponent implements OnInit {
   }
 
   private async select(o: RoleOption): Promise<void> {
-    const previous = this.active();
-    this.active.set(o.id);
+    this.picking.set(o.id);
     try {
       if (this.role() === 'research') await this.models.useForResearch(o.id);
       else {
@@ -267,8 +269,9 @@ export class RoleCardComponent implements OnInit {
         await this.engine.refresh();
       }
     } catch (err) {
-      this.active.set(previous);
       this.toast.error('Could not switch model', { description: messageFor(err) });
+    } finally {
+      this.picking.set(null);
     }
   }
 

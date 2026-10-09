@@ -5,6 +5,7 @@ import { pageProviders } from '../../../testing/providers';
 import { flush, mockTauri, type TauriMock } from '../../../testing/tauri-mock';
 import type { ModelInfo, ModelSpec, ProviderModels } from '../../core/ipc/types';
 import { ProvidersPageComponent } from './providers-page.component';
+import { ModelsStore } from '../../core/stores/models.store';
 import { AiModelsPageComponent } from './models-page.component';
 import { RoleCardComponent } from './role-card.component';
 import { localOptions, onlineOptions, providerOf, type Role, roleStatus } from './role-options';
@@ -216,6 +217,36 @@ describe('RoleCardComponent', () => {
     const link = [...c.el.querySelectorAll('a')].find((a) => a.textContent?.includes('Add your Exa key'))!;
     expect(link.getAttribute('href')).toBe('/ai/providers');
     expect(c.q('[data-testid=role-status]')!.textContent).toContain('Needs setup');
+  });
+
+  it('follows the engine when the active model changes elsewhere', async () => {
+    let model = 'kev-4b';
+    const c = await card('system-one', { engine_status: () => ({ model_id: model, state: 'idle', error: null }) });
+    expect(c.radio('kev-4b')!.checked).toBe(true);
+    model = 'clef';
+    await c.t.emit('engine://status', {});
+    await c.settle();
+    expect(c.radio('clef')!.checked).toBe(true);
+    const restart = [...c.el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Restart')!;
+    restart.click();
+    await c.settle();
+    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'clef' });
+  });
+
+  it('follows the research model set elsewhere', async () => {
+    const c = await card('research', { list_models: [info('chat-1', 'chat', true), info('chat-2', 'chat', true)] });
+    TestBed.inject(ModelsStore).researchModel.set('chat-2');
+    await c.settle();
+    expect(c.radio('chat-2')!.checked).toBe(true);
+  });
+
+  it('ignores a second pick while one is in flight', async () => {
+    const c = await card('system-one', { set_active_model: () => new Promise(() => undefined) });
+    c.radio('clef')!.click();
+    await c.settle();
+    c.radio('kev-4b')!.click();
+    await c.settle();
+    expect(c.t.callsTo('set_active_model')).toHaveLength(1);
   });
 
   it('system one card shows runtime and restart', async () => {
