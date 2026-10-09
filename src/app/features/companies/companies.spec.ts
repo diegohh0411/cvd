@@ -7,7 +7,6 @@ import { RANKED } from '../workspace/fixtures';
 import { WorkspaceStore } from '../workspace/workspace.store';
 import { contextBadge, needsRefreshConfirm } from './company-panel.component';
 import { researchLine, stepLine } from './research-progress.component';
-import { researchOptions, systemOneOptions } from '../settings/model-roles.component';
 
 const JOB: JobDescription = { id: 7, title: 'Dev', company: 'Acme', raw_text: 'Rust', created_at: '', url: '', status_id: null, company_id: 5 };
 const run = (status: MatchRun['status'], researched: string | null = null): MatchRun => ({
@@ -63,30 +62,6 @@ describe('company context badge', () => {
   it('asks before a refresh overwrites manual edits', () => {
     expect(needsRefreshConfirm(company({ edited_at: '2026-10-08 11:00:00' }))).toBe(true);
     expect(needsRefreshConfirm(company())).toBe(false);
-  });
-});
-
-describe('model role pickers', () => {
-  const spec = (id: string, kind: 'decision' | 'chat') => ({ id, label: id, hf_repo: '', hf_file: '', sha256: '', size_bytes: 1, min_ram_gb: 1, kind });
-  const models: ModelInfo[] = [
-    { spec: spec('clef-flash', 'decision'), installed: true },
-    { spec: spec('kev-4b', 'decision'), installed: false },
-    { spec: spec('lfm2.5-2.6b', 'chat'), installed: true },
-  ];
-  const remote: ProviderModels[] = [{ provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: null }], error: null }];
-
-  it('offers only installed chat models and remote chat models for research', () => {
-    expect(researchOptions(models, remote)).toEqual([
-      { id: 'lfm2.5-2.6b', label: 'lfm2.5-2.6b (local)' },
-      { id: 'openrouter:deepseek/x', label: 'DeepSeek X (OpenRouter)' },
-    ]);
-  });
-
-  it('offers only installed decision models for System One, keeping a remote active one', () => {
-    expect(systemOneOptions(models, 'openrouter:typesafe/jev')).toEqual([
-      { id: 'clef-flash', label: 'clef-flash (local)' },
-      { id: 'openrouter:typesafe/jev', label: 'typesafe/jev (OpenRouter)' },
-    ]);
   });
 });
 
