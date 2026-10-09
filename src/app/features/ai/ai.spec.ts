@@ -5,6 +5,7 @@ import { pageProviders } from '../../../testing/providers';
 import { flush, mockTauri, type TauriMock } from '../../../testing/tauri-mock';
 import type { ModelInfo, ModelSpec, ProviderModels } from '../../core/ipc/types';
 import { ProvidersPageComponent } from './providers-page.component';
+import { AiModelsPageComponent } from './models-page.component';
 import { RoleCardComponent } from './role-card.component';
 import { localOptions, onlineOptions, providerOf, type Role, roleStatus } from './role-options';
 
@@ -224,5 +225,35 @@ describe('RoleCardComponent', () => {
     restart.click();
     await c.settle();
     expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'kev-4b' });
+  });
+});
+
+describe('AiModelsPageComponent', () => {
+  const handlers = (over: Record<string, unknown> = {}) => ({
+    list_models: [info('kev-4b', 'decision', true), info('chat-1', 'chat', false)],
+    system_ram_gb: 16,
+    engine_status: { model_id: 'kev-4b', state: 'idle', error: null },
+    get_research_model: null,
+    download_model: null,
+    set_research_model: null,
+    set_active_model: null,
+    ...over,
+  });
+
+  it('lists the catalog with RAM info and no Use buttons', async () => {
+    const { el } = await render(AiModelsPageComponent, handlers());
+    expect(el.textContent).toContain('This computer has 16 GB of RAM.');
+    expect(el.querySelector('[data-testid=model-kev-4b]')!.textContent).toContain('Active');
+    expect(el.querySelector('[data-testid=model-chat-1]')).not.toBeNull();
+    const labels = [...el.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(labels).not.toContain('Use this model');
+    expect(labels).not.toContain('Use for research');
+  });
+
+  it('auto-selects a finished research download when none is set', async () => {
+    const { el, t } = await render(AiModelsPageComponent, handlers());
+    (el.querySelector('[data-testid=model-chat-1] button') as HTMLButtonElement).click();
+    await flush();
+    expect(t.callsTo('set_research_model')[0]).toEqual({ id: 'chat-1' });
   });
 });

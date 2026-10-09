@@ -11,7 +11,7 @@ import { emptyInput, LibraryStore } from '../../core/stores/library.store';
 import { ModelsStore } from '../../core/stores/models.store';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { cleanInput, EntryFormComponent, entryErrors } from '../library/entry-form.component';
-import { ModelCardsComponent } from '../models/model-cards.component';
+import { ModelCardsComponent } from '../ai/model-cards.component';
 import { cleanProfile, ProfileFormComponent, profileErrors } from '../profile/profile-form.component';
 import { FirstRunService } from './first-run.service';
 

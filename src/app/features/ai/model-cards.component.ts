@@ -13,7 +13,7 @@ export function eta(remaining: number, rate: number): string {
   return s < 60 ? `${s}s left` : s < 3600 ? `${Math.round(s / 60)} min left` : `${(s / 3600).toFixed(1)} h left`;
 }
 
-/** Model cards: RAM fit, download with pause/resume, and activation. */
+/** Model cards: RAM fit, download with pause/resume; a finished download fills an empty role. */
 @Component({
   selector: 'app-model-cards',
   imports: [ZardButtonComponent, ZardBadgeComponent, ZardProgressComponent],
@@ -54,23 +54,17 @@ export function eta(remaining: number, rate: number): string {
           @if (d?.status === 'error') {
             <p class="text-destructive text-xs" role="alert">{{ d!.error }}</p>
           }
-          <div class="flex gap-2">
-            @if (m.installed) {
-              @if (m.spec.kind === 'chat') {
-                @if (m.spec.id !== models.researchModel()) {
-                  <button z-button zSize="sm" (click)="models.useForResearch(m.spec.id)">Use for research</button>
-                }
-              } @else if (m.spec.id !== activeId()) {
-                <button z-button zSize="sm" (click)="activate(m)">Use this model</button>
+          @if (!m.installed) {
+            <div class="flex gap-2">
+              @if (d?.status === 'downloading') {
+                <button z-button zType="outline" zSize="sm" (click)="models.pause(m.spec.id)">Pause</button>
+              } @else {
+                <button z-button zSize="sm" [zDisabled]="!ok" (click)="download(m)">
+                  {{ d?.status === 'paused' ? 'Resume' : d?.status === 'error' ? 'Retry' : 'Download' }}
+                </button>
               }
-            } @else if (d?.status === 'downloading') {
-              <button z-button zType="outline" zSize="sm" (click)="models.pause(m.spec.id)">Pause</button>
-            } @else {
-              <button z-button zSize="sm" [zDisabled]="!ok" (click)="download(m)">
-                {{ d?.status === 'paused' ? 'Resume' : d?.status === 'error' ? 'Retry' : 'Download' }}
-              </button>
-            }
-          </div>
+            </div>
+          }
         </div>
       }
     </div>
