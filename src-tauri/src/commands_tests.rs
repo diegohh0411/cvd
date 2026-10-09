@@ -342,7 +342,7 @@ mod provider_keys {
         let server = exa_server("exa-good").await;
         let (st, _) = state().await;
         let st = st.with_exa_base(server.uri());
-        assert_eq!(st.search().err().map(|e| e.to_string()).as_deref(), Some("Add your Exa key in Settings."));
+        assert_eq!(st.search().err().map(|e| e.to_string()).as_deref(), Some("Add your Exa key in AI → Providers."));
         assert_eq!(set_provider_key(&st, "exa", "bad").await.unwrap_err().kind(), "ProviderAuth");
         assert_eq!(st.store.get_secret("exa").await.unwrap(), None);
         let status = set_provider_key(&st, "exa", " exa-good ").await.unwrap();
@@ -358,7 +358,7 @@ mod provider_keys {
         let st = keyed_state(&server).await;
         let err = st.research_endpoint().await.unwrap_err();
         assert_eq!(err.kind(), "ModelMissing");
-        assert_eq!(err.to_string(), "Choose a Company research model in Settings.");
+        assert_eq!(err.to_string(), "Choose a Company research model in AI → Roles.");
         assert_eq!(set_research_model(&st, "clef-flash").await.unwrap_err().kind(), "NotFound");
         assert_eq!(set_active_model(&st, "lfm2.5-2.6b").await.unwrap_err().kind(), "NotFound");
         assert_eq!(set_research_model(&st, "openrouter:deepseek/x").await.unwrap_err().kind(), "ModelMissing");
@@ -543,7 +543,7 @@ mod company_flow {
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
         let failed = events.lock().unwrap().iter().any(|(n, v)| {
             n == crate::company::coordinator::RESEARCH_EVENT
-                && v["event"]["error"] == "Choose a Company research model in Settings."
+                && v["event"]["error"] == "Choose a Company research model in AI → Roles."
         });
         assert!(failed);
         assert_eq!(get_job_company(&st, jd).await.unwrap().unwrap().fail_count, 0);

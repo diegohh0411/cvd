@@ -25,7 +25,7 @@ pub struct ProviderRegistry {
 
 fn missing_key(provider: &str) -> ProviderError {
     let name = if provider == OPENROUTER { "OpenRouter" } else { provider };
-    ProviderError::Missing(format!("Add your {name} key in Settings."))
+    ProviderError::Missing(format!("Add your {name} key in AI → Providers."))
 }
 
 impl ProviderRegistry {

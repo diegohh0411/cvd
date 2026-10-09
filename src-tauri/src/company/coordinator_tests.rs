@@ -136,9 +136,9 @@ async fn failure_sets_backoff() {
 async fn unavailable_does_not_back_off() {
     let (s, id) = store_with("Acme").await;
     let (c, _) = coordinator(1);
-    let f = scripted(Arc::default(), Duration::ZERO, Err(ResearchError::Unavailable("Add your Exa key in Settings.".into())));
+    let f = scripted(Arc::default(), Duration::ZERO, Err(ResearchError::Unavailable("Add your Exa key in AI → Providers.".into())));
     let err = c.ensure(&s, s.get_company(id).await.unwrap(), input("Acme"), f).await.unwrap_err();
-    assert_eq!(err.to_string(), "Add your Exa key in Settings.");
+    assert_eq!(err.to_string(), "Add your Exa key in AI → Providers.");
     let got = s.get_company(id).await.unwrap();
     assert_eq!(got.fail_count, 0);
     assert_eq!(got.retry_after, None);
