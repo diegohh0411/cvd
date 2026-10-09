@@ -4,21 +4,25 @@ use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::{decide_checked, Answer, DecisionEngine, EngineError, Question, MAX_QUESTIONS};
+use crate::engine::{
+    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question, MAX_QUESTIONS,
+};
 use crate::store::types::*;
 use crate::store::{Store, StoreError};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatchConfig {
-    pub top_k: usize,
     pub score_floor: f64,
+    /// Estimated input tokens per request. Clef evaluates a request in one
+    /// 16,384-token physical batch, so this leaves headroom for estimate error.
+    pub token_budget: usize,
 }
 
 impl Default for MatchConfig {
     fn default() -> Self {
         Self {
-            top_k: 8,
             score_floor: 1.5,
+            token_budget: 12_000,
         }
     }
 }
@@ -27,8 +31,8 @@ impl Default for MatchConfig {
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
     ReadingJd,
-    ScoringEntries { done: usize, total: usize },
-    PickingBullets { done: usize, total: usize },
+    /// `done`/`total` count questions across the run's batched requests.
+    Scoring { done: usize, total: usize },
     Done,
 }
 
@@ -162,30 +166,93 @@ fn to_row(run_id: i64, key: &str, answer: &Answer, target: (TargetType, i64)) ->
     }
 }
 
-/// Calls the engine and persists every answer immediately.
+/// One question in a batch: the request id (unique within a run), the
+/// question name stored on the score row, and the row's target.
+struct Pending {
+    id: String,
+    stored: String,
+    question: Question,
+    target: (TargetType, i64),
+}
+
+impl Pending {
+    fn new(id: String, stored: &str, question: Question, target: (TargetType, i64)) -> Self {
+        Self {
+            id,
+            stored: stored.to_string(),
+            question,
+            target,
+        }
+    }
+}
+
+/// Rough input-token estimate. The model prompt wraps every question in a
+/// template (~80 tokens, measured in the spike) on top of its JSON text.
+fn estimate_tokens(text_len: usize) -> usize {
+    text_len / 3
+}
+
+fn question_tokens(p: &Pending) -> usize {
+    let one = BTreeMap::from([(p.id.clone(), p.question.clone())]);
+    80 + estimate_tokens(wire_request("", &one)["questions"].to_string().len())
+}
+
+/// Splits questions into requests under both the question cap and the token budget.
+fn batches(questions: Vec<Pending>, state: &str, budget: usize) -> Vec<Vec<Pending>> {
+    let base = 50 + estimate_tokens(state.len());
+    let mut out: Vec<Vec<Pending>> = Vec::new();
+    let mut cur: Vec<Pending> = Vec::new();
+    let mut used = base;
+    for p in questions {
+        let t = question_tokens(&p);
+        if !cur.is_empty() && (cur.len() == MAX_QUESTIONS || used + t > budget) {
+            out.push(std::mem::take(&mut cur));
+            used = base;
+        }
+        used += t;
+        cur.push(p);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Calls the engine and persists every answer immediately. A request the
+/// model reports as too large is split in half and retried.
 async fn ask(
     store: &Store,
     engine: &dyn DecisionEngine,
     run_id: i64,
     state: &str,
-    questions: Vec<(String, Question, (TargetType, i64))>,
+    mut batch: Vec<Pending>,
 ) -> Result<(), MatchError> {
-    let qs: BTreeMap<String, Question> = questions
+    let qs: BTreeMap<String, Question> = batch
         .iter()
-        .map(|(k, q, _)| (k.clone(), q.clone()))
+        .map(|p| (p.id.clone(), p.question.clone()))
         .collect();
-    let answers = decide_checked(engine, state, &qs).await?;
-    let mut rows = Vec::with_capacity(questions.len());
-    for (key, _, target) in &questions {
+    let answers = match decide_checked(engine, state, &qs).await {
+        Err(EngineError::ContextOverflow) if batch.len() > 1 => {
+            let rest = batch.split_off(batch.len() / 2);
+            Box::pin(ask(store, engine, run_id, state, batch)).await?;
+            return Box::pin(ask(store, engine, run_id, state, rest)).await;
+        }
+        other => other?,
+    };
+    let mut rows = Vec::with_capacity(batch.len());
+    for p in &batch {
         let a = answers
-            .get(key)
-            .ok_or_else(|| EngineError::BadResponse(format!("missing answer for {key}")))?;
-        rows.push(to_row(run_id, key, a, *target));
+            .get(&p.id)
+            .ok_or_else(|| EngineError::BadResponse(format!("missing answer for {}", p.id)))?;
+        rows.push(to_row(run_id, &p.stored, a, p.target));
     }
     store.insert_scores(&rows).await?;
     Ok(())
 }
 
+/// Asks every question about the JD in as few requests as fit: JD meta,
+/// skills, entry relevance and seniority fit, and every bullet. The JD is the
+/// shared state; each entry or bullet question carries its own data.
 async fn execute(
     store: &Store,
     engine: &dyn DecisionEngine,
@@ -200,131 +267,70 @@ async fn execute(
         .await?
         .ok_or(MatchError::JdNotFound(jd_id))?;
     let existing = store.scores_for_run(run_id).await?;
-
-    // 1. JD: seniority + role family + one noul per skill, batched.
     on_progress(Progress::ReadingJd);
-    let mut jd_qs = Vec::new();
-    for (key, q) in [
-        (questions::SENIORITY_KEY, questions::seniority_question()),
-        (
+
+    let mut all = vec![
+        Pending::new(
+            questions::SENIORITY_KEY.into(),
+            questions::SENIORITY_KEY,
+            questions::seniority_question(),
+            (TargetType::Meta, 0),
+        ),
+        Pending::new(
+            questions::ROLE_FAMILY_KEY.into(),
             questions::ROLE_FAMILY_KEY,
             questions::role_family_question(),
+            (TargetType::Meta, 0),
         ),
-    ] {
-        if !has(&existing, TargetType::Meta, 0, Some(key)) {
-            jd_qs.push((key.to_string(), q, (TargetType::Meta, 0)));
-        }
-    }
+    ];
     for s in store.list_skills().await? {
-        if !has(&existing, TargetType::Skill, s.id, None) {
-            jd_qs.push((
-                questions::skill_key(s.id),
-                questions::skill_question(&s.name),
-                (TargetType::Skill, s.id),
+        let key = questions::skill_key(s.id);
+        all.push(Pending::new(
+            key.clone(),
+            &key,
+            questions::skill_question(&s.name),
+            (TargetType::Skill, s.id),
+        ));
+    }
+    for e in &store.list_entries(false).await? {
+        let target = (TargetType::Entry, e.id);
+        all.push(Pending::new(
+            questions::relevance_key(e.id),
+            questions::RELEVANCE_KEY,
+            questions::entry_question(e),
+            target,
+        ));
+        all.push(Pending::new(
+            questions::seniority_fit_key(e.id),
+            questions::SENIORITY_FIT_KEY,
+            questions::seniority_fit_question(e),
+            target,
+        ));
+        for b in &e.bullets {
+            let key = questions::bullet_key(b.id);
+            all.push(Pending::new(
+                key.clone(),
+                &key,
+                questions::bullet_question(e, b),
+                (TargetType::Bullet, b.id),
             ));
         }
     }
-    let jd_state = questions::jd_state(&jd.raw_text);
-    while !jd_qs.is_empty() {
-        let rest = jd_qs.split_off(jd_qs.len().min(MAX_QUESTIONS));
-        check_cancel(cancel, run_id)?;
-        ask(
-            store,
-            engine,
-            run_id,
-            &jd_state,
-            std::mem::replace(&mut jd_qs, rest),
-        )
-        .await?;
-    }
-
-    // 2. Entries: relevance score + seniority-fit noul, one call each.
-    let entries = store.list_entries(false).await?;
-    let total = entries.len();
-    let mut done = entries
-        .iter()
-        .filter(|e| {
-            has(
-                &existing,
-                TargetType::Entry,
-                e.id,
-                Some(questions::RELEVANCE_KEY),
-            )
-        })
-        .count();
-    on_progress(Progress::ScoringEntries { done, total });
-    for e in &entries {
-        if has(
-            &existing,
-            TargetType::Entry,
-            e.id,
-            Some(questions::RELEVANCE_KEY),
-        ) {
-            continue;
-        }
-        check_cancel(cancel, run_id)?;
-        let target = (TargetType::Entry, e.id);
-        let qs = vec![
-            (
-                questions::RELEVANCE_KEY.to_string(),
-                questions::entry_question(),
-                target,
-            ),
-            (
-                questions::SENIORITY_FIT_KEY.to_string(),
-                questions::seniority_fit_question(),
-                target,
-            ),
-        ];
-        ask(
-            store,
-            engine,
-            run_id,
-            &questions::entry_state(&jd.raw_text, e),
-            qs,
-        )
-        .await?;
-        done += 1;
-        on_progress(Progress::ScoringEntries { done, total });
-    }
-
-    // 3. Bullets for the top-K entries; the score floor belongs to page-fit.
-    let scores = store.scores_for_run(run_id).await?;
-    let ranked = rank(&scores, &entries, &[]);
-    let picked: Vec<&RankedEntry> = ranked
-        .entries
-        .iter()
-        .take(cfg.top_k)
-        .filter(|r| !r.entry.bullets.is_empty())
+    let total = all.len();
+    let todo: Vec<Pending> = all
+        .into_iter()
+        .filter(|p| !has(&existing, p.target.0, p.target.1, Some(&p.stored)))
         .collect();
-    let total = picked.len();
-    on_progress(Progress::PickingBullets { done: 0, total });
-    for (i, r) in picked.iter().enumerate() {
-        let qs: Vec<_> = r
-            .entry
-            .bullets
-            .iter()
-            .filter(|b| !has(&scores, TargetType::Bullet, b.id, None))
-            .map(|b| {
-                (
-                    questions::bullet_key(b.id),
-                    questions::bullet_question(),
-                    (TargetType::Bullet, b.id),
-                )
-            })
-            .collect();
-        for chunk in qs.chunks(MAX_QUESTIONS) {
-            check_cancel(cancel, run_id)?;
-            ask(
-                store,
-                engine,
-                run_id,
-                &questions::entry_state(&jd.raw_text, &r.entry),
-                chunk.to_vec(),
-            )
-            .await?;
-        }
-        on_progress(Progress::PickingBullets { done: i + 1, total });
+    let mut done = total - todo.len();
+    on_progress(Progress::Scoring { done, total });
+
+    let state = questions::jd_state(&jd.raw_text);
+    for batch in batches(todo, &state, cfg.token_budget) {
+        check_cancel(cancel, run_id)?;
+        let n = batch.len();
+        ask(store, engine, run_id, &state, batch).await?;
+        done += n;
+        on_progress(Progress::Scoring { done, total });
     }
     on_progress(Progress::Done);
     Ok(())

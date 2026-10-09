@@ -1,19 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-#[tokio::test]
-async fn low_scoring_top_k_entry_still_gets_bullets() {
-    // Both entries score 0.5 (below the 1.5 floor) but are within top_k.
-    let (s, jd) = setup(2, 1, 0).await;
-    let e = Recorder::new(|_| 0.5);
-    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
-        .await
-        .unwrap();
-    assert_eq!(e.count(is_bullet_call), 2);
-    let rows = s.scores_for_run(run).await.unwrap();
-    let bullets = rows.iter().filter(|r| r.target_type == TargetType::Bullet).count();
-    assert_eq!(bullets, 2);
-}
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
@@ -27,6 +14,8 @@ use crate::engine::{Answer, EngineError, FakeDecisionEngine, Question};
 struct Recorder {
     inner: FakeDecisionEngine,
     requests: Mutex<Vec<Vec<String>>>,
+    /// Requests with more questions than this fail with `ContextOverflow`.
+    overflow_above: usize,
 }
 
 impl Recorder {
@@ -52,6 +41,7 @@ impl Recorder {
         Self {
             inner,
             requests: Mutex::new(Vec::new()),
+            overflow_above: usize::MAX,
         }
     }
 
@@ -75,6 +65,9 @@ impl DecisionEngine for Recorder {
             .lock()
             .unwrap()
             .push(questions.keys().cloned().collect());
+        if questions.len() > self.overflow_above {
+            return Err(EngineError::ContextOverflow);
+        }
         self.inner.decide(state, questions).await
     }
 }
@@ -84,9 +77,6 @@ fn is_skill_call(r: &[String]) -> bool {
 }
 fn is_bullet_call(r: &[String]) -> bool {
     r.iter().any(|k| k.starts_with("bullet:"))
-}
-fn is_entry_call(r: &[String]) -> bool {
-    r.iter().any(|k| k == RELEVANCE_KEY)
 }
 
 fn entry_input(title: &str, bullets: usize, skills: Vec<String>) -> EntryInput {
@@ -131,38 +121,100 @@ fn cfg() -> MatchConfig {
     MatchConfig::default()
 }
 
-#[tokio::test]
-async fn skills_batched_by_128() {
-    let (s, jd) = setup(1, 0, 200).await;
-    let e = Recorder::new(|_| 3.0);
-    run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
-        .await
-        .unwrap();
-    assert_eq!(e.count(is_skill_call), 2);
-    let reqs = e.requests();
-    assert!(reqs.iter().all(|r| r.len() <= 128));
-    // seniority + role family ride in the first JD batch
-    assert!(reqs[0].contains(&SENIORITY_KEY.to_string()));
-    assert!(reqs[0].contains(&ROLE_FAMILY_KEY.to_string()));
-    let skill_rows = s
-        .scores_for_run(1)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|r| r.target_type == TargetType::Skill)
-        .count();
-    assert_eq!(skill_rows, 200);
+fn unbounded() -> MatchConfig {
+    MatchConfig {
+        token_budget: usize::MAX,
+        ..cfg()
+    }
+}
+
+fn count(rows: &[ScoreRow], t: TargetType) -> usize {
+    rows.iter().filter(|r| r.target_type == t).count()
 }
 
 #[tokio::test]
-async fn bullets_only_for_top_k() {
-    let (s, jd) = setup(12, 2, 0).await;
-    let e = Recorder::new(|_| 3.0);
+async fn small_library_is_one_request() {
+    let (s, jd) = setup(12, 2, 3).await;
+    let e = Recorder::new(|_| 0.5);
     let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
         .await
         .unwrap();
-    assert_eq!(e.count(is_entry_call), 12);
-    assert_eq!(e.count(is_bullet_call), 8);
+    // 2 meta + 3 skills + 12 x (relevance + seniority fit) + 24 bullets
+    assert_eq!(e.requests().len(), 1);
+    assert_eq!(e.requests()[0].len(), 53);
+    let rows = s.scores_for_run(run).await.unwrap();
+    assert_eq!(count(&rows, TargetType::Meta), 2);
+    assert_eq!(count(&rows, TargetType::Skill), 3);
+    assert_eq!(count(&rows, TargetType::Entry), 24);
+    // Every bullet is scored, even for low-scoring entries.
+    assert_eq!(count(&rows, TargetType::Bullet), 24);
+    // Rows keep the plain question names the UI and `rank` read.
+    assert!(rows.iter().any(|r| r.question == RELEVANCE_KEY));
+    assert!(rows.iter().any(|r| r.question == SENIORITY_FIT_KEY));
+    assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
+}
+
+#[tokio::test]
+async fn requests_capped_at_128_questions() {
+    let (s, jd) = setup(1, 0, 200).await;
+    let e = Recorder::new(|_| 3.0);
+    run_match(&s, &e, jd, "m", unbounded(), CancellationToken::new(), |_| {})
+        .await
+        .unwrap();
+    let lens: Vec<usize> = e.requests().iter().map(Vec::len).collect();
+    assert_eq!(lens, vec![128, 76]);
+    let rows = s.scores_for_run(1).await.unwrap();
+    assert_eq!(count(&rows, TargetType::Skill), 200);
+}
+
+#[tokio::test]
+async fn requests_split_by_token_budget() {
+    let (s, jd) = setup(6, 3, 0).await;
+    let budget = 1_500;
+    let e = Recorder::new(|_| 3.0);
+    let c = MatchConfig {
+        token_budget: budget,
+        ..cfg()
+    };
+    let run = run_match(&s, &e, jd, "m", c, CancellationToken::new(), |_| {})
+        .await
+        .unwrap();
+    assert!(e.requests().len() > 1);
+    let rows = s.scores_for_run(run).await.unwrap();
+    assert_eq!(count(&rows, TargetType::Entry), 12);
+    assert_eq!(count(&rows, TargetType::Bullet), 18);
+}
+
+#[test]
+fn batches_respect_budget() {
+    let qs: Vec<Pending> = (0..40)
+        .map(|i| {
+            Pending::new(
+                skill_key(i),
+                "q",
+                skill_question("Rust"),
+                (TargetType::Skill, i),
+            )
+        })
+        .collect();
+    let per = question_tokens(&qs[0]);
+    let state = "x".repeat(300);
+    let base = 50 + estimate_tokens(state.len());
+    let out = batches(qs, &state, base + per * 10);
+    assert_eq!(out.iter().map(Vec::len).collect::<Vec<_>>(), vec![10; 4]);
+}
+
+#[tokio::test]
+async fn context_overflow_splits_and_retries() {
+    let (s, jd) = setup(4, 2, 0).await;
+    let mut e = Recorder::new(|_| 3.0);
+    e.overflow_above = 5;
+    let run = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {})
+        .await
+        .unwrap();
+    // 2 meta + 8 entry + 8 bullet questions, answered in pieces of <= 5.
+    let rows = s.scores_for_run(run).await.unwrap();
+    assert_eq!(rows.len(), 18);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
 }
 
@@ -253,9 +305,18 @@ async fn no_bullets_no_skills_ok() {
         .unwrap();
     assert_eq!(e.count(is_skill_call), 0);
     assert_eq!(e.count(is_bullet_call), 0);
-    // one JD call (seniority + role family) and one entry call
-    assert_eq!(e.requests().len(), 2);
+    // seniority + role family + relevance + seniority fit in one request
+    assert_eq!(e.requests().len(), 1);
+    assert_eq!(e.requests()[0].len(), 4);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
+}
+
+/// Budget that fits the two meta questions plus about one entry per request.
+fn small() -> MatchConfig {
+    MatchConfig {
+        token_budget: 700,
+        ..cfg()
+    }
 }
 
 #[tokio::test]
@@ -264,9 +325,11 @@ async fn cancel_keeps_partial() {
     let e = Recorder::new(|_| 3.0);
     let cancel = CancellationToken::new();
     let c2 = cancel.clone();
-    let res = run_match(&s, &e, jd, "m", cfg(), cancel, move |p| {
-        if let Progress::ScoringEntries { done: 3, .. } = p {
-            c2.cancel();
+    let res = run_match(&s, &e, jd, "m", small(), cancel, move |p| {
+        if let Progress::Scoring { done, .. } = p {
+            if done > 0 {
+                c2.cancel();
+            }
         }
     })
     .await;
@@ -275,72 +338,38 @@ async fn cancel_keeps_partial() {
         other => panic!("expected Cancelled, got {other:?}"),
     };
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Cancelled);
-    let entry_scores = |rows: &[ScoreRow]| {
-        rows.iter()
-            .filter(|r| r.target_type == TargetType::Entry && r.question == RELEVANCE_KEY)
-            .count()
-    };
-    assert_eq!(entry_scores(&s.scores_for_run(run).await.unwrap()), 3);
-    assert_eq!(e.count(is_bullet_call), 0);
+    assert_eq!(e.requests().len(), 1);
+    let first = e.requests()[0].len();
+    assert_eq!(s.scores_for_run(run).await.unwrap().len(), first);
 
     let e2 = Recorder::new(|_| 3.0);
-    let resumed = resume_match(&s, &e2, run, cfg(), CancellationToken::new(), |_| {})
+    let resumed = resume_match(&s, &e2, run, small(), CancellationToken::new(), |_| {})
         .await
         .unwrap();
     assert_eq!(resumed, run);
-    // No JD call (meta already scored), 3 remaining entries, 6 bullet calls.
-    assert_eq!(e2.count(is_entry_call), 3);
-    assert_eq!(e2.count(is_bullet_call), 6);
-    assert_eq!(e2.requests().len(), 9);
-    // 3 entries x 2 questions + 6 bullets x 1 question
-    assert_eq!(e2.inner.calls(), 12);
+    // Only the unanswered questions are asked again: 2 meta + 6 x 3 in total.
+    assert_eq!(e2.inner.calls(), 20 - first);
+    let asked: Vec<String> = e2.requests().concat();
+    assert!(e.requests()[0].iter().all(|k| !asked.contains(k)));
     let rows = s.scores_for_run(run).await.unwrap();
-    assert_eq!(entry_scores(&rows), 6);
-    assert_eq!(
-        rows.iter()
-            .filter(|r| r.target_type == TargetType::Meta)
-            .count(),
-        2
-    );
+    assert_eq!(rows.len(), 20);
+    assert_eq!(count(&rows, TargetType::Meta), 2);
     assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Done);
 }
 
 #[tokio::test]
-async fn engine_failure_marks_failed() {
-    // fail_on_call counts questions: JD batch = q1,q2; entry 1 = q3,q4 -> fails.
-    let (s, jd) = setup(3, 1, 0).await;
+async fn engine_failure_keeps_earlier_batches() {
+    let (s, jd) = setup(6, 1, 0).await;
     let e = Recorder::new(|_| 3.0);
-    e.inner.fail_on_call(4);
-    let res = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {}).await;
+    // fail_on_call counts questions; fail on the last one, in the final request.
+    e.inner.fail_on_call(20);
+    let res = run_match(&s, &e, jd, "m", small(), CancellationToken::new(), |_| {}).await;
     assert!(matches!(res, Err(MatchError::Engine(_))), "{res:?}");
-    let run = 1;
-    assert_eq!(s.get_run(run).await.unwrap().status, RunStatus::Failed);
-    let rows = s.scores_for_run(run).await.unwrap();
-    assert_eq!(
-        rows.iter()
-            .filter(|r| r.target_type == TargetType::Meta)
-            .count(),
-        2
-    );
-    assert!(rows.iter().all(|r| r.target_type == TargetType::Meta));
-}
-
-#[tokio::test]
-async fn engine_failure_later_keeps_entry_scores() {
-    // q1,q2 JD; q3..q8 entries 1-3; q9 = first bullet -> fails.
-    let (s, jd) = setup(3, 1, 0).await;
-    let e = Recorder::new(|_| 3.0);
-    e.inner.fail_on_call(9);
-    let res = run_match(&s, &e, jd, "m", cfg(), CancellationToken::new(), |_| {}).await;
-    assert!(matches!(res, Err(MatchError::Engine(_))));
     assert_eq!(s.get_run(1).await.unwrap().status, RunStatus::Failed);
-    let rows = s.scores_for_run(1).await.unwrap();
-    assert_eq!(
-        rows.iter()
-            .filter(|r| r.target_type == TargetType::Entry)
-            .count(),
-        6
-    );
+    let reqs = e.requests();
+    assert!(reqs.len() > 1);
+    let before_last: usize = reqs[..reqs.len() - 1].iter().map(Vec::len).sum();
+    assert_eq!(s.scores_for_run(1).await.unwrap().len(), before_last);
 }
 
 #[tokio::test]
