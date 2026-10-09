@@ -58,6 +58,7 @@ fn ranked(mut entries: Vec<RankedEntry>) -> Ranked {
         entries,
         skills: vec![(Skill { id: 1, name: "Rust".into(), category: String::new() }, 0.9)],
         seniority: String::new(),
+        tags: vec![],
     }
 }
 

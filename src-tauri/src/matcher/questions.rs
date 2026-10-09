@@ -23,6 +23,45 @@ pub const ROLE_FAMILY_OPTIONS: [&str; 7] = [
     "other",
 ];
 
+/// Fixed vocabulary the model picks the role's focus from.
+pub const JD_TAGS: [&str; 24] = [
+    "backend",
+    "frontend",
+    "full-stack",
+    "mobile",
+    "data engineering",
+    "machine learning",
+    "devops",
+    "cloud",
+    "security",
+    "embedded",
+    "distributed systems",
+    "performance",
+    "APIs",
+    "databases",
+    "testing/QA",
+    "UI/UX",
+    "leadership",
+    "mentoring",
+    "greenfield",
+    "legacy systems",
+    "startup",
+    "remote-friendly",
+    "on-call",
+    "cross-team collaboration",
+];
+pub const TAG_PREFIX: &str = "tag:";
+
+pub fn tag_key(tag: &str) -> String {
+    format!("{TAG_PREFIX}{tag}")
+}
+
+pub fn tag_question(tag: &str) -> Question {
+    Question::Noul {
+        instructions: format!("Is \"{tag}\" a main focus of this role?").into(),
+    }
+}
+
 pub const ENTRY_INSTRUCTION: &str = "How relevant is `entry` to the job description?";
 pub const BULLET_INSTRUCTION: &str =
     "How strongly does `bullet` (from `entry`) support a fit for the job description?";
