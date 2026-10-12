@@ -21,6 +21,7 @@ use crate::mail::account::{self, MailAccount};
 use crate::mail::imap::{ImapSource, MailSource};
 use crate::mail::scan::{self, ScanDeps};
 use crate::state::AppState;
+use crate::web::{self, FetchPolicy};
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
@@ -220,6 +221,14 @@ pub async fn update_job_tracking(st: &AppState, id: i64, status_id: Option<i64>,
         return Err(AppError::NotFound(format!("Job description {id} not found.")));
     }
     Ok(())
+}
+
+/// Longest posting read from a URL. Pasted text has no limit.
+const JOB_PAGE_CHARS: usize = 30_000;
+
+/// Reads a posting's text from its URL, for when the user didn't paste the description.
+pub async fn fetch_job_description(url: &str) -> Res<String> {
+    web::fetch_text(url, FetchPolicy::PublicOnly, JOB_PAGE_CHARS).await.map_err(|e| AppError::Io(e.to_string()))
 }
 
 // ---- job statuses ----
@@ -960,6 +969,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn update_job_tracking(st: S<'_>, id: i64, status_id: Option<i64>, url: String) -> Res<()> {
         super::update_job_tracking(&st, id, status_id, &url).await
+    }
+    #[tauri::command]
+    pub async fn fetch_job_description(url: String) -> Res<String> {
+        super::fetch_job_description(&url).await
     }
     #[tauri::command]
     pub async fn list_job_statuses(st: S<'_>) -> Res<Vec<JobStatus>> {

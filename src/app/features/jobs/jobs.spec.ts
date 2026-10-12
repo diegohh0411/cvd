@@ -81,6 +81,48 @@ describe('NewJobComponent', () => {
     expect(t.callsTo('create_job')).toEqual([{ title: '', company: '', rawText: 'We need Rust', url: '', statusId: null }]);
     expect(nav).toHaveBeenCalledWith(['/jobs', 42], { queryParams: { start: 1 } });
   });
+
+  it('reads the description from the posting URL when none is pasted, then matches', async () => {
+    const t = mockTauri({
+      list_entries: [RANKED.entries[0].entry],
+      list_skills: [],
+      engine_status: { model_id: 'x', state: 'idle', error: null },
+      fetch_job_description: 'We need Rust for payments.',
+      create_job: 42,
+      list_jobs: [],
+    });
+    TestBed.configureTestingModule({ providers: pageProviders() });
+    await TestBed.inject(LibraryStore).load();
+    await TestBed.inject(EngineStore).load();
+    const nav = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+    const f = TestBed.createComponent(NewJobComponent);
+    f.detectChanges();
+    await flush();
+    const el = f.nativeElement as HTMLElement;
+    const url = el.querySelector('#jd-url') as HTMLInputElement;
+    url.value = 'https://acme.com/careers/1';
+    url.dispatchEvent(new Event('input'));
+    await flush();
+    f.detectChanges();
+    expect(el.querySelector('button[type=submit]')!.textContent).toContain('Fetch description');
+
+    const cmp = f.componentInstance as unknown as { submit(): Promise<void> };
+    await cmp.submit();
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+
+    expect(t.callsTo('fetch_job_description')).toEqual([{ url: 'https://acme.com/careers/1' }]);
+    expect(t.callsTo('create_job')).toEqual([]);
+    expect((el.querySelector('#jd-text') as HTMLTextAreaElement).value).toBe('We need Rust for payments.');
+    expect(el.querySelector('button[type=submit]')!.textContent).toContain('Match');
+
+    await cmp.submit();
+    expect(t.callsTo('create_job')).toEqual([
+      { title: '', company: '', rawText: 'We need Rust for payments.', url: 'https://acme.com/careers/1', statusId: null },
+    ]);
+    expect(nav).toHaveBeenCalledWith(['/jobs', 42], { queryParams: { start: 1 } });
+  });
 });
 
 describe('JobsPageComponent scan controls', () => {
