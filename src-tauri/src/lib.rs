@@ -1,5 +1,7 @@
 mod commands;
 mod company;
+#[allow(dead_code)]
+mod mail;
 // Some items in these modules are only used by tests or by later plans.
 #[allow(dead_code)]
 mod engine;

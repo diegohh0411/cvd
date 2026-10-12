@@ -721,6 +721,14 @@ impl Store {
         Ok(())
     }
 
+    pub async fn delete_setting(&self, key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     // ---- secrets ----
 
     pub async fn get_secret(&self, provider: &str) -> Result<Option<String>> {
