@@ -75,7 +75,7 @@ pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, Ap
                     summary.failed as i64,
                 )
                 .await?;
-            (deps.emit)(FINISHED_EVENT, finished_payload(&summary, "failed", Some(&message)));
+            (deps.emit)(FINISHED_EVENT, finished_payload(&summary, "failed", Some(&e)));
             Err(e)
         }
     }
@@ -210,11 +210,12 @@ fn status_name(statuses: &[JobStatus], id: Option<i64>) -> Option<&str> {
     statuses.iter().find(|s| s.id == id).map(|s| s.name.as_str())
 }
 
-fn finished_payload(summary: &ScanSummary, status: &str, error: Option<&str>) -> Value {
+fn finished_payload(summary: &ScanSummary, status: &str, error: Option<&AppError>) -> Value {
     json!({
         "run_id": summary.run_id,
         "status": status,
-        "error": error,
+        "error": error.map(AppError::to_string),
+        "error_kind": error.map(AppError::kind),
         "checked": summary.checked,
         "job_related": summary.job_related,
         "applied": summary.applied,
