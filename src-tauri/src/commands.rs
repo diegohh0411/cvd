@@ -55,6 +55,10 @@ pub enum AppError {
     ProviderCredits(String),
     #[error("{0}")]
     ProviderUnavailable(String),
+    #[error("{0}")]
+    MailAuth(String),
+    #[error("{0}")]
+    MailUnavailable(String),
 }
 
 impl AppError {
@@ -70,6 +74,18 @@ impl AppError {
             Self::ProviderAuth(_) => "ProviderAuth",
             Self::ProviderCredits(_) => "ProviderCredits",
             Self::ProviderUnavailable(_) => "ProviderUnavailable",
+            Self::MailAuth(_) => "MailAuth",
+            Self::MailUnavailable(_) => "MailUnavailable",
+        }
+    }
+}
+
+impl From<crate::mail::imap::MailError> for AppError {
+    fn from(e: crate::mail::imap::MailError) -> Self {
+        use crate::mail::imap::MailError;
+        match e {
+            MailError::Auth(_) => Self::MailAuth(e.to_string()),
+            MailError::Connection(_) | MailError::Protocol(_) => Self::MailUnavailable(e.to_string()),
         }
     }
 }
