@@ -20,7 +20,7 @@ async fn save_then_load_round_trips() {
     let store = store().await;
     let expected = account();
     account::save(&store, &expected).await.unwrap();
-    assert_eq!(account::load(&store).await.unwrap(), Some(expected));
+    assert!(account::load(&store).await.unwrap() == Some(expected));
 }
 
 #[tokio::test]
@@ -42,7 +42,7 @@ async fn load_is_none_when_incomplete() {
         .set_setting("mail.address", "user@gmail.com")
         .await
         .unwrap();
-    assert_eq!(account::load(&store).await.unwrap(), None);
+    assert!(account::load(&store).await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -50,7 +50,7 @@ async fn remove_clears_everything() {
     let store = store().await;
     account::save(&store, &account()).await.unwrap();
     account::remove(&store).await.unwrap();
-    assert_eq!(account::load(&store).await.unwrap(), None);
+    assert!(account::load(&store).await.unwrap().is_none());
     assert_eq!(store.get_setting("mail.host").await.unwrap(), None);
     assert_eq!(store.get_setting("mail.port").await.unwrap(), None);
     assert_eq!(store.get_setting("mail.address").await.unwrap(), None);

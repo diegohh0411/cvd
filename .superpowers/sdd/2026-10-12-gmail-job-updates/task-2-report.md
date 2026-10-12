@@ -11,3 +11,10 @@ The account persistence methods are async because the existing `Store` methods a
 - `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`: reports formatting differences across existing unrelated files; no repository-wide formatting changes were applied.
 
 The successful Cargo test build emitted an existing linker warning that the `__eh_frame` section is too large for compact unwind offsets.
+
+## Follow-up: keep app passwords out of Debug output
+
+Removed `Debug` from `MailAccount` so its plaintext password cannot be exposed by derived formatting. Updated the equality assertions to avoid requiring `Debug` on the account type.
+
+- `cargo test --manifest-path src-tauri/Cargo.toml mail::tests`: 5 passed (using and removing a temporary placeholder for the missing ignored Tauri sidecar).
+- `rustfmt --edition 2021 --check src-tauri/src/mail/account.rs src-tauri/src/mail/tests.rs src-tauri/src/mail/mod.rs`: passed.

@@ -5,7 +5,7 @@ const PORT_KEY: &str = "mail.port";
 const ADDRESS_KEY: &str = "mail.address";
 const SECRET_PROVIDER: &str = "gmail";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MailAccount {
     pub host: String,
     pub port: u16,
