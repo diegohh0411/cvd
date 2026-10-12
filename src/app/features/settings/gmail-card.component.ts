@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
@@ -10,7 +10,10 @@ const DEFAULT_HOST = 'imap.gmail.com';
 const DEFAULT_PORT = 993;
 const DEFAULT_FOLDER = '[Gmail]/All Mail';
 
-/** Gmail over IMAP: address and app password, used to read job update emails. */
+/**
+ * Gmail over IMAP. Steps: enter the address and app password, test the
+ * connection (which lists the mailboxes), choose one, then save.
+ */
 @Component({
   selector: 'app-gmail-card',
   imports: [ZardButtonComponent],
@@ -33,28 +36,6 @@ const DEFAULT_FOLDER = '[Gmail]/All Mail';
         }
       </div>
 
-      <div class="grid max-w-md grid-cols-[1fr_6rem] gap-2">
-        <label class="grid gap-1.5">
-          <span class="font-medium">IMAP host</span>
-          <input
-            class="border-input h-8 rounded-md border bg-transparent px-2"
-            aria-label="IMAP host"
-            [value]="host()"
-            (input)="host.set($any($event.target).value)"
-          />
-        </label>
-        <label class="grid gap-1.5">
-          <span class="font-medium">Port</span>
-          <input
-            type="number"
-            class="border-input h-8 rounded-md border bg-transparent px-2"
-            aria-label="IMAP port"
-            [value]="port()"
-            (input)="port.set(+$any($event.target).value)"
-          />
-        </label>
-      </div>
-
       <label class="grid max-w-md gap-1.5">
         <span class="font-medium">Gmail address</span>
         <input
@@ -65,22 +46,6 @@ const DEFAULT_FOLDER = '[Gmail]/All Mail';
           [value]="address()"
           (input)="address.set($any($event.target).value)"
         />
-      </label>
-
-      <label class="grid max-w-md gap-1.5">
-        <span class="font-medium">Mailbox to scan</span>
-        <select
-          class="border-input h-8 rounded-md border bg-transparent px-2"
-          aria-label="Mailbox to scan"
-          (change)="folder.set($any($event.target).value)"
-        >
-          @for (f of folderOptions(); track f) {
-            <option [value]="f" [selected]="f === folder()">{{ f }}</option>
-          }
-        </select>
-        <span class="text-muted-foreground"
-          >Gmail's All Mail holds every message once. Test the connection to load your mailboxes.</span
-        >
       </label>
 
       <div class="grid max-w-md gap-1.5">
@@ -104,13 +69,64 @@ const DEFAULT_FOLDER = '[Gmail]/All Mail';
         </p>
       </div>
 
+      <details class="max-w-md">
+        <summary class="text-muted-foreground cursor-pointer">Server settings</summary>
+        <div class="mt-2 grid grid-cols-[1fr_6rem] gap-2">
+          <label class="grid gap-1.5">
+            <span class="font-medium">IMAP host</span>
+            <input
+              class="border-input h-8 rounded-md border bg-transparent px-2"
+              aria-label="IMAP host"
+              [value]="host()"
+              (input)="host.set($any($event.target).value)"
+            />
+          </label>
+          <label class="grid gap-1.5">
+            <span class="font-medium">Port</span>
+            <input
+              type="number"
+              class="border-input h-8 rounded-md border bg-transparent px-2"
+              aria-label="IMAP port"
+              [value]="port()"
+              (input)="port.set(+$any($event.target).value)"
+            />
+          </label>
+        </div>
+      </details>
+
       <div class="flex flex-wrap gap-2">
         <button z-button zType="outline" zSize="sm" [zLoading]="busy()" (click)="test()">Test connection</button>
-        <button z-button zSize="sm" [zLoading]="busy()" (click)="save()">Save</button>
-        @if (account()) {
-          <button z-button zType="outline" zSize="sm" [zLoading]="busy()" (click)="remove()">Remove</button>
-        }
       </div>
+
+      @if (folders().length) {
+        <label class="grid max-w-md gap-1.5">
+          <span class="font-medium">Mailbox to scan</span>
+          <select
+            class="border-input h-8 rounded-md border bg-transparent px-2"
+            aria-label="Mailbox to scan"
+            (change)="folder.set($any($event.target).value)"
+          >
+            <option value="" [selected]="!folder()" disabled>Choose a mailbox</option>
+            @for (f of folders(); track f) {
+              <option [value]="f" [selected]="f === folder()">{{ f }}</option>
+            }
+          </select>
+          <span class="text-muted-foreground"
+            >Gmail's All Mail holds every message once. Pick the mailbox where your job emails arrive.</span
+          >
+        </label>
+
+        <div class="flex flex-wrap gap-2">
+          <button z-button zSize="sm" [zLoading]="busy()" [zDisabled]="!folder()" (click)="save()">Save</button>
+          @if (account()) {
+            <button z-button zType="outline" zSize="sm" [zLoading]="busy()" (click)="remove()">Remove</button>
+          }
+        </div>
+      } @else if (account()) {
+        <div class="flex flex-wrap gap-2">
+          <button z-button zType="outline" zSize="sm" [zLoading]="busy()" (click)="remove()">Remove</button>
+        </div>
+      }
     </section>
   `,
 })
@@ -120,18 +136,18 @@ export class GmailCardComponent implements OnInit {
   protected readonly host = signal(DEFAULT_HOST);
   protected readonly port = signal(DEFAULT_PORT);
   protected readonly address = signal('');
-  protected readonly folder = signal(DEFAULT_FOLDER);
-  protected readonly folders = signal<string[]>([]);
-  /** The saved mailbox stays selectable even before the list loads. */
-  protected readonly folderOptions = computed(() => [...new Set([this.folder(), ...this.folders()])]);
   protected readonly password = signal('');
   protected readonly showPassword = signal(false);
+  /** Mailboxes from the last successful test; empty until the test succeeds. */
+  protected readonly folders = signal<string[]>([]);
+  /** The chosen mailbox; empty until one is picked. */
+  protected readonly folder = signal('');
   protected readonly busy = signal(false);
 
   ngOnInit(): void {
     void api.getMailAccount().then((a) => {
       this.load(a);
-      if (a) void this.refreshFolders(false);
+      if (a) void this.loadMailboxes(false);
     }, () => undefined);
   }
 
@@ -149,29 +165,29 @@ export class GmailCardComponent implements OnInit {
     this.folder.set(a.folder);
   }
 
-  /** Loads the mailboxes from the typed values. `toast` surfaces failures. */
-  private async refreshFolders(toast: boolean): Promise<void> {
+  /** Lists the mailboxes; keeps the chosen one only if the account still has it. */
+  private async loadMailboxes(toast: boolean): Promise<void> {
     try {
-      this.folders.set(await api.listMailFolders(this.host(), this.port(), this.address(), this.passwordArg()));
+      const list = await api.testMailAccount(this.host(), this.port(), this.address(), this.passwordArg());
+      this.folders.set(list);
+      if (!list.includes(this.folder())) this.folder.set(list.includes(DEFAULT_FOLDER) ? DEFAULT_FOLDER : '');
     } catch (e) {
-      if (toast) this.toast.error('Could not load mailboxes', { description: messageFor(e) });
+      if (toast) this.toast.error('Could not connect to Gmail', { description: messageFor(e) });
     }
   }
 
   protected async test(): Promise<void> {
     this.busy.set(true);
     try {
-      await api.testMailAccount(this.host(), this.port(), this.address(), this.passwordArg());
-      this.toast.success('Gmail connection works');
-      await this.refreshFolders(true);
-    } catch (e) {
-      this.toast.error('Could not connect to Gmail', { description: messageFor(e) });
+      await this.loadMailboxes(true);
+      if (this.folders().length) this.toast.success('Connected. Choose a mailbox to scan.');
     } finally {
       this.busy.set(false);
     }
   }
 
   protected async save(): Promise<void> {
+    if (!this.folder()) return;
     this.busy.set(true);
     try {
       const saved = await api.saveMailAccount(this.host(), this.port(), this.address(), this.passwordArg(), this.folder());
@@ -192,6 +208,8 @@ export class GmailCardComponent implements OnInit {
       await api.deleteMailAccount();
       this.account.set(null);
       this.password.set('');
+      this.folders.set([]);
+      this.folder.set('');
     } catch (e) {
       this.toast.error('Could not remove Gmail', { description: messageFor(e) });
     } finally {

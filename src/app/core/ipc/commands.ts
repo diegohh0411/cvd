@@ -112,12 +112,10 @@ export const getMailAccount = () => call<MailAccountView | null>('get_mail_accou
 /** `password: null` keeps the stored app password. */
 export const saveMailAccount = (host: string, port: number, address: string, password: string | null, folder: string | null) =>
   call<MailAccountView>('save_mail_account', { host, port, address, password, folder });
-/** Mailboxes the account can open, from the typed values (works before saving). */
-export const listMailFolders = (host: string, port: number, address: string, password: string | null) =>
-  call<string[]>('list_mail_folders', { host, port, address, password });
 export const deleteMailAccount = () => call<void>('delete_mail_account');
+/** Logs in and returns the mailboxes the account can open. */
 export const testMailAccount = (host: string, port: number, address: string, password: string | null) =>
-  call<void>('test_mail_account', { host, port, address, password });
+  call<string[]>('test_mail_account', { host, port, address, password });
 export const startScan = () => call<number>('start_scan');
 export const getScanStatus = () => call<ScanState>('get_scan_status');
 export const listScanResults = (runId: number) => call<ProcessedEmail[]>('list_scan_results', { runId });
