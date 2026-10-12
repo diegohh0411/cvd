@@ -5,7 +5,7 @@ import { flush, mockTauri, type TauriMock } from '../../../testing/tauri-mock';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { GmailCardComponent } from './gmail-card.component';
 
-const ACCOUNT = { host: 'imap.gmail.com', port: 993, address: 'diego@gmail.com', has_password: true };
+const ACCOUNT = { host: 'imap.gmail.com', port: 993, address: 'diego@gmail.com', has_password: true, folder: '[Gmail]/All Mail' };
 
 async function render(handlers: Record<string, unknown>): Promise<{ t: TauriMock; f: ComponentFixture<GmailCardComponent>; el: HTMLElement }> {
   const t = mockTauri(handlers);
@@ -48,8 +48,30 @@ describe('GmailCardComponent', () => {
     await flush();
 
     expect(t.callsTo('save_mail_account')).toEqual([
-      { host: 'imap.gmail.com', port: 993, address: 'diego@gmail.com', password: null },
+      { host: 'imap.gmail.com', port: 993, address: 'diego@gmail.com', password: null, folder: '[Gmail]/All Mail' },
     ]);
+  });
+
+  it('loads the mailboxes after a successful test and saves the chosen one', async () => {
+    const { t, el } = await render({
+      get_mail_account: null,
+      test_mail_account: null,
+      list_mail_folders: ['INBOX', '[Gmail]/Todos'],
+      save_mail_account: { ...ACCOUNT, folder: 'INBOX' },
+    });
+    type(el, 'Gmail address', 'diego@gmail.com');
+
+    button(el, 'Test connection').click();
+    await flush();
+    const select = el.querySelector('select[aria-label="Mailbox to scan"]') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['[Gmail]/All Mail', 'INBOX', '[Gmail]/Todos']);
+
+    select.value = 'INBOX';
+    select.dispatchEvent(new Event('change'));
+    button(el, 'Save').click();
+    await flush();
+
+    expect(t.callsTo('save_mail_account')[0]).toMatchObject({ folder: 'INBOX' });
   });
 
   it('shows the server message in an error toast when the connection test fails', async () => {

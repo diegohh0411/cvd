@@ -110,8 +110,11 @@ export const listRemoteModels = (refresh: boolean, role: ModelRole = 'decision')
 // ---- Gmail job updates ----
 export const getMailAccount = () => call<MailAccountView | null>('get_mail_account');
 /** `password: null` keeps the stored app password. */
-export const saveMailAccount = (host: string, port: number, address: string, password: string | null) =>
-  call<MailAccountView>('save_mail_account', { host, port, address, password });
+export const saveMailAccount = (host: string, port: number, address: string, password: string | null, folder: string | null) =>
+  call<MailAccountView>('save_mail_account', { host, port, address, password, folder });
+/** Mailboxes the account can open, from the typed values (works before saving). */
+export const listMailFolders = (host: string, port: number, address: string, password: string | null) =>
+  call<string[]>('list_mail_folders', { host, port, address, password });
 export const deleteMailAccount = () => call<void>('delete_mail_account');
 export const testMailAccount = (host: string, port: number, address: string, password: string | null) =>
   call<void>('test_mail_account', { host, port, address, password });

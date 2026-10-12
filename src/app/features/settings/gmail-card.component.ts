@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
@@ -8,6 +8,7 @@ import type { MailAccountView } from '../../core/ipc/types';
 
 const DEFAULT_HOST = 'imap.gmail.com';
 const DEFAULT_PORT = 993;
+const DEFAULT_FOLDER = '[Gmail]/All Mail';
 
 /** Gmail over IMAP: address and app password, used to read job update emails. */
 @Component({
@@ -66,6 +67,22 @@ const DEFAULT_PORT = 993;
         />
       </label>
 
+      <label class="grid max-w-md gap-1.5">
+        <span class="font-medium">Mailbox to scan</span>
+        <select
+          class="border-input h-8 rounded-md border bg-transparent px-2"
+          aria-label="Mailbox to scan"
+          (change)="folder.set($any($event.target).value)"
+        >
+          @for (f of folderOptions(); track f) {
+            <option [value]="f" [selected]="f === folder()">{{ f }}</option>
+          }
+        </select>
+        <span class="text-muted-foreground"
+          >Gmail's All Mail holds every message once. Test the connection to load your mailboxes.</span
+        >
+      </label>
+
       <div class="grid max-w-md gap-1.5">
         <span class="font-medium">App password</span>
         <div class="flex gap-2">
@@ -103,12 +120,19 @@ export class GmailCardComponent implements OnInit {
   protected readonly host = signal(DEFAULT_HOST);
   protected readonly port = signal(DEFAULT_PORT);
   protected readonly address = signal('');
+  protected readonly folder = signal(DEFAULT_FOLDER);
+  protected readonly folders = signal<string[]>([]);
+  /** The saved mailbox stays selectable even before the list loads. */
+  protected readonly folderOptions = computed(() => [...new Set([this.folder(), ...this.folders()])]);
   protected readonly password = signal('');
   protected readonly showPassword = signal(false);
   protected readonly busy = signal(false);
 
   ngOnInit(): void {
-    void api.getMailAccount().then((a) => this.load(a), () => undefined);
+    void api.getMailAccount().then((a) => {
+      this.load(a);
+      if (a) void this.refreshFolders(false);
+    }, () => undefined);
   }
 
   /** An empty password field sends `null`, which keeps the stored one. */
@@ -122,6 +146,16 @@ export class GmailCardComponent implements OnInit {
     this.host.set(a.host);
     this.port.set(a.port);
     this.address.set(a.address);
+    this.folder.set(a.folder);
+  }
+
+  /** Loads the mailboxes from the typed values. `toast` surfaces failures. */
+  private async refreshFolders(toast: boolean): Promise<void> {
+    try {
+      this.folders.set(await api.listMailFolders(this.host(), this.port(), this.address(), this.passwordArg()));
+    } catch (e) {
+      if (toast) this.toast.error('Could not load mailboxes', { description: messageFor(e) });
+    }
   }
 
   protected async test(): Promise<void> {
@@ -129,6 +163,7 @@ export class GmailCardComponent implements OnInit {
     try {
       await api.testMailAccount(this.host(), this.port(), this.address(), this.passwordArg());
       this.toast.success('Gmail connection works');
+      await this.refreshFolders(true);
     } catch (e) {
       this.toast.error('Could not connect to Gmail', { description: messageFor(e) });
     } finally {
@@ -139,7 +174,7 @@ export class GmailCardComponent implements OnInit {
   protected async save(): Promise<void> {
     this.busy.set(true);
     try {
-      const saved = await api.saveMailAccount(this.host(), this.port(), this.address(), this.passwordArg());
+      const saved = await api.saveMailAccount(this.host(), this.port(), this.address(), this.passwordArg(), this.folder());
       this.account.set(saved);
       this.password.set('');
       this.toast.success('Gmail connected');

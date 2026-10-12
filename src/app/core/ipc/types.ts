@@ -305,6 +305,8 @@ export interface MailAccountView {
   port: number;
   address: string;
   has_password: boolean;
+  /** The mailbox the scan reads. */
+  folder: string;
 }
 
 export type ScanOutcome = 'ignored' | 'no_change' | 'applied' | 'pending_review' | 'dismissed';
