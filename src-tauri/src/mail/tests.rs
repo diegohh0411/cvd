@@ -2,7 +2,13 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 
+use serde_json::json;
+use wiremock::matchers::{header, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+use crate::commands::AppError;
 use crate::engine::{Answer, DecisionEngine, EngineError, FakeDecisionEngine, Question};
+use crate::providers::ChatEndpoint;
 use crate::store::types::{JobStatus, StatusColor};
 use crate::store::Store;
 
@@ -12,6 +18,7 @@ use super::classify::{
 };
 use super::decide::{decide, Classified, Decision};
 use super::imap::{chunk_uids, extract_text, gmail_link, parse_header, ImapSource, MailSource};
+use super::summary::summarize;
 
 fn classified(
     job_related: f64,
@@ -371,4 +378,73 @@ async fn missing_answer_is_bad_response() {
     let got = classify(&NoAnswers, &email, &[job(12, "Acme", "Engineer")], &statuses()).await;
 
     assert!(matches!(got, Err(EngineError::BadResponse(_))), "{got:?}");
+}
+
+async fn chat_endpoint(server: &MockServer) -> ChatEndpoint {
+    ChatEndpoint {
+        base_url: format!("{}/v1", server.uri()),
+        api_key: Some("sk-test".into()),
+        model: "chat-model".into(),
+    }
+}
+
+fn completion(content: &str) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "choices": [{ "message": { "role": "assistant", "content": content } }]
+    }))
+}
+
+async fn summarize_fixture(server: &MockServer) -> Result<String, AppError> {
+    summarize(
+        &reqwest::Client::new(),
+        &chat_endpoint(server).await,
+        &EmailInput::new("Interview", "recruiter@acme.com", "Let's talk."),
+        &job(12, "Acme", "Engineer"),
+        Some("Applied"),
+        "Interview",
+    )
+    .await
+}
+
+#[tokio::test]
+async fn returns_trimmed_content() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer sk-test"))
+        .respond_with(completion("  Recruiter confirmed your interview.  "))
+        .mount(&server)
+        .await;
+
+    let got = summarize_fixture(&server).await.unwrap();
+
+    assert_eq!(got, "Recruiter confirmed your interview.");
+}
+
+#[tokio::test]
+async fn unauthorized_maps_to_provider_auth() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    let got = summarize_fixture(&server).await;
+
+    assert!(matches!(got, Err(AppError::ProviderAuth(_))), "{got:?}");
+}
+
+#[tokio::test]
+async fn empty_content_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(completion("   "))
+        .mount(&server)
+        .await;
+
+    let got = summarize_fixture(&server).await;
+
+    assert!(matches!(got, Err(AppError::EngineUnavailable(_))), "{got:?}");
 }
