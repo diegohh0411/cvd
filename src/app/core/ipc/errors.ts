@@ -10,6 +10,8 @@ const KINDS: readonly AppErrorKind[] = [
   'ProviderAuth',
   'ProviderCredits',
   'ProviderUnavailable',
+  'MailAuth',
+  'MailUnavailable',
 ];
 
 export function isAppError(e: unknown): e is AppError {

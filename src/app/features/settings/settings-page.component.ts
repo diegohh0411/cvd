@@ -4,10 +4,11 @@ import { type DarkModeOptions, ZardDarkMode } from '@/shared/services/dark-mode'
 import * as api from '../../core/ipc/commands';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BUDGET_SETTING } from '../workspace/workspace.store';
+import { GmailCardComponent } from './gmail-card.component';
 
 @Component({
   selector: 'app-settings-page',
-  imports: [PageHeaderComponent],
+  imports: [PageHeaderComponent, GmailCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Settings' }]" />
@@ -31,6 +32,11 @@ import { BUDGET_SETTING } from '../workspace/workspace.store';
           <option value="dark">Dark</option>
         </select>
       </label>
+      <div class="mt-4">
+        <h2 class="font-semibold">Integrations</h2>
+        <p class="text-muted-foreground text-sm">Connect outside accounts that feed the Jobs page.</p>
+      </div>
+      <app-gmail-card />
     </div>
   `,
 })

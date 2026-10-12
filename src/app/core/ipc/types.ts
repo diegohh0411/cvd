@@ -191,7 +191,9 @@ export type AppErrorKind =
   | 'Io'
   | 'ProviderAuth'
   | 'ProviderCredits'
-  | 'ProviderUnavailable';
+  | 'ProviderUnavailable'
+  | 'MailAuth'
+  | 'MailUnavailable';
 
 export type ProviderId = 'openrouter' | 'exa';
 
@@ -294,3 +296,55 @@ export interface ResearchEvent {
 
 export type SkipMode = 'cancel' | 'background';
 export type ModelRole = 'decision' | 'chat';
+
+// ---- Gmail job updates (src-tauri/src/mail, store/email.rs) ----
+
+/** The app password never reaches the webview; `has_password` only says one is stored. */
+export interface MailAccountView {
+  host: string;
+  port: number;
+  address: string;
+  has_password: boolean;
+}
+
+export type ScanOutcome = 'ignored' | 'no_change' | 'applied' | 'pending_review' | 'dismissed';
+
+export interface ProcessedEmail {
+  message_id: string;
+  run_id: number;
+  processed_at: string;
+  received_at: string;
+  subject: string;
+  sender: string;
+  matched_job_id: number | null;
+  previous_status_id: number | null;
+  suggested_status_id: number | null;
+  confidence: number | null;
+  summary: string | null;
+  outcome: ScanOutcome;
+  /** Computed by the backend so the webview never builds Gmail links. */
+  gmail_url: string;
+}
+
+export interface ScanState {
+  running: boolean;
+}
+
+export interface ScanProgress {
+  checked: number;
+  total: number;
+}
+
+/** Payload of `scan://finished`. */
+export interface ScanFinished {
+  run_id: number;
+  status: 'done' | 'failed';
+  error: string | null;
+  error_kind: AppErrorKind | null;
+  checked: number;
+  job_related: number;
+  applied: number;
+  pending: number;
+  no_change: number;
+  failed: number;
+}

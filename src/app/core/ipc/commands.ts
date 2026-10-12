@@ -14,13 +14,16 @@ import type {
   JobDescription,
   JobStatus,
   KeyStatus,
+  MailAccountView,
   MatchRun,
   ModelInfo,
   Override,
   Profile,
+  ProcessedEmail,
   ProviderId,
   ProviderModels,
   Ranked,
+  ScanState,
   ScoreRow,
   Selection,
   Skill,
@@ -103,3 +106,18 @@ export const deleteProviderKey = (provider: ProviderId) => call<void>('delete_pr
 export const providerKeyStatus = (provider: ProviderId) => call<KeyStatus>('provider_key_status', { provider });
 export const listRemoteModels = (refresh: boolean, role: ModelRole = 'decision') =>
   call<ProviderModels[]>('list_remote_models', { refresh, role });
+
+// ---- Gmail job updates ----
+export const getMailAccount = () => call<MailAccountView | null>('get_mail_account');
+/** `password: null` keeps the stored app password. */
+export const saveMailAccount = (host: string, port: number, address: string, password: string | null) =>
+  call<MailAccountView>('save_mail_account', { host, port, address, password });
+export const deleteMailAccount = () => call<void>('delete_mail_account');
+export const testMailAccount = (host: string, port: number, address: string, password: string | null) =>
+  call<void>('test_mail_account', { host, port, address, password });
+export const startScan = () => call<number>('start_scan');
+export const getScanStatus = () => call<ScanState>('get_scan_status');
+export const listScanResults = (runId: number) => call<ProcessedEmail[]>('list_scan_results', { runId });
+export const listPendingReviews = () => call<ProcessedEmail[]>('list_pending_reviews');
+export const applySuggestion = (messageId: string) => call<ProcessedEmail>('apply_suggestion', { messageId });
+export const dismissSuggestion = (messageId: string) => call<void>('dismiss_suggestion', { messageId });
