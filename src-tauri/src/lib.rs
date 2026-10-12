@@ -13,6 +13,7 @@ mod providers;
 #[allow(dead_code)]
 mod render;
 mod search;
+mod web;
 mod state;
 #[allow(dead_code)]
 pub mod store;
@@ -59,6 +60,7 @@ pub fn run() {
             ipc::list_skills,
             ipc::create_job,
             ipc::update_job_tracking,
+            ipc::fetch_job_description,
             ipc::list_job_statuses,
             ipc::create_job_status,
             ipc::update_job_status,
