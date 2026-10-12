@@ -16,19 +16,29 @@ When the user presses "Read emails for updates" on the Jobs page, CVD reads the 
 
 ## Flow and UI
 
-- **Button:** "Read emails for updates" on the Jobs page. While a scan runs it is disabled and shows a spinner with a live count ("Reading emails 14 / 60"). The disabled state comes from a shared store, so it holds on every page.
+- **Button:** "Read emails for updates" on the Jobs page. While a scan runs it is disabled and shows a spinner with a live count ("Reading emails 14 / 60"). The disabled state comes from a shared store, so it holds on every page. It is also disabled until Gmail is connected, with the hint "Connect Gmail in Settings › Integrations."
 - **Review badge:** "N to review" sits next to the button. It is always clickable and reopens the popup with pending reviews.
 - **Popup:** opens over the current page when the scan ends. Closing it returns the user to where they were.
   - **Header:** totals, for example "60 emails from the last 30 days · 4 job-related · 2 need review."
   - **Applied:** this run's auto-applied changes. Each row shows the job, the one-sentence summary, the status change (old → new, using the existing status pill colors), and a link icon to the original email.
   - **Needs review:** every `pending_review` row across all runs, until handled. Each row has the summary, the suggested status, the confidence, Apply, Dismiss, and the link icon.
+  - **No change:** this run's `no_change` rows. Each row has the summary, the job's current status pill, a plain "No change" text label, and the link icon. No Apply or Dismiss.
   - Each job is a row in a divided list, not a card. Status labels use the same classes as the jobs list (`PILL_CLASSES` in `status-pill.component.ts`).
 - **Empty state:** if nothing job-related was found, the popup says so.
 - **Errors:** a fatal error opens the popup with the error and the next step.
 
+## Settings: Integrations
+
+A new **Integrations** section sits on the Settings page, below Preferences. The settings redesign moved credentials off Settings, so this section is the one place Settings holds one. It has a Gmail card:
+
+- **Fields:** IMAP host (default `imap.gmail.com`), port (default 993), Gmail address, and app password (masked, with a "Show" toggle).
+- **Storage:** host, port, and address in the `settings` table. The app password goes in the `secrets` table under the provider key `gmail`.
+- **Test connection:** logs in, confirms `[Gmail]/All Mail` exists, and reports "Connected as <address>." A failed test shows the server's reason.
+- **Status:** "Not connected" or "Connected." Save stores the values; Remove deletes the password and the settings.
+
 ## Mail retrieval
 
-- Connect with the settings in the mail account section (IMAP host, port, address), and read the app password from the existing secrets storage.
+- Connect with the Gmail settings under Settings › Integrations (see below).
 - Select `[Gmail]/All Mail` and run `UID SEARCH SINCE <today − 30 days>`.
 - For each UID, fetch `X-GM-MSGID` and `Message-ID`. If `X-GM-MSGID` is already in `processed_email`, skip the message. Do not fetch the body.
 - For unprocessed messages, fetch headers and the text body with `BODY.PEEK[]`, so nothing is marked as read.
