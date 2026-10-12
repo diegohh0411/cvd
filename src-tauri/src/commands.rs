@@ -17,11 +17,14 @@ use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
 use crate::render::fit::{self, Override, Selection};
 use crate::render::{self, Compiled, RenderError, StyleStep};
+use crate::mail::account::{self, MailAccount};
+use crate::mail::imap::{ImapSource, MailSource};
+use crate::mail::scan::{self, ScanDeps};
 use crate::state::AppState;
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
-use crate::store::Store;
+use crate::store::{ProcessedEmail, Store};
 
 pub const MATCH_EVENT: &str = "match://progress";
 pub const DOWNLOAD_EVENT: &str = "model://download";
@@ -55,6 +58,10 @@ pub enum AppError {
     ProviderCredits(String),
     #[error("{0}")]
     ProviderUnavailable(String),
+    #[error("{0}")]
+    MailAuth(String),
+    #[error("{0}")]
+    MailUnavailable(String),
 }
 
 impl AppError {
@@ -70,6 +77,18 @@ impl AppError {
             Self::ProviderAuth(_) => "ProviderAuth",
             Self::ProviderCredits(_) => "ProviderCredits",
             Self::ProviderUnavailable(_) => "ProviderUnavailable",
+            Self::MailAuth(_) => "MailAuth",
+            Self::MailUnavailable(_) => "MailUnavailable",
+        }
+    }
+}
+
+impl From<crate::mail::imap::MailError> for AppError {
+    fn from(e: crate::mail::imap::MailError) -> Self {
+        use crate::mail::imap::MailError;
+        match e {
+            MailError::Auth(_) => Self::MailAuth(e.to_string()),
+            MailError::Connection(_) | MailError::Protocol(_) => Self::MailUnavailable(e.to_string()),
         }
     }
 }
@@ -77,7 +96,7 @@ impl AppError {
 impl From<StoreError> for AppError {
     fn from(e: StoreError) -> Self {
         match &e {
-            StoreError::Db(sqlx::Error::RowNotFound) => Self::NotFound("Not found.".into()),
+            StoreError::Db(sqlx::Error::RowNotFound) | StoreError::NotFound => Self::NotFound("Not found.".into()),
             StoreError::Invalid(m) if m.starts_with("no ") => Self::NotFound(m.clone()),
             StoreError::Invalid(m) => Self::Io(m.clone()),
             _ => Self::Io(e.to_string()),
@@ -726,6 +745,175 @@ pub async fn list_remote_models(st: &AppState, refresh: bool, role: &str) -> Res
     })
 }
 
+// ---- Gmail account and scan ----
+
+/// The password never leaves Rust; the view only says whether one is stored.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MailAccountView {
+    pub host: String,
+    pub port: u16,
+    pub address: String,
+    pub has_password: bool,
+    /// The mailbox the scan reads.
+    pub folder: String,
+}
+
+fn mail_view(a: &MailAccount, folder: &str) -> MailAccountView {
+    MailAccountView {
+        host: a.host.clone(),
+        port: a.port,
+        address: a.address.clone(),
+        has_password: !a.password.is_empty(),
+        folder: folder.to_string(),
+    }
+}
+
+/// A scan result plus the Gmail link, so the frontend never builds URLs.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessedEmailView {
+    #[serde(flatten)]
+    pub email: ProcessedEmail,
+    pub gmail_url: String,
+}
+
+fn scan_view(email: ProcessedEmail) -> ProcessedEmailView {
+    let gmail_url = crate::mail::imap::gmail_link(&email.message_id);
+    ProcessedEmailView { email, gmail_url }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ScanState {
+    pub running: bool,
+}
+
+/// `None` keeps the stored password; a new one is required when none is stored.
+async fn resolve_password(st: &AppState, password: Option<&str>) -> Res<String> {
+    match password.map(account::normalize_password).filter(|p| !p.is_empty()) {
+        Some(p) => Ok(p),
+        None => account::load(&st.store)
+            .await?
+            .map(|a| a.password)
+            .ok_or_else(|| AppError::Io("Enter your Gmail app password.".into())),
+    }
+}
+
+fn mail_account(host: &str, port: u16, address: &str, password: String) -> Res<MailAccount> {
+    let (host, address) = (host.trim(), address.trim());
+    account::validate(host, port, address).map_err(AppError::Io)?;
+    Ok(MailAccount {
+        host: host.to_string(),
+        port,
+        address: address.to_string(),
+        password,
+    })
+}
+
+pub async fn get_mail_account(st: &AppState) -> Res<Option<MailAccountView>> {
+    let Some(account) = account::load(&st.store).await? else {
+        return Ok(None);
+    };
+    let folder = account::folder(&st.store).await?;
+    Ok(Some(mail_view(&account, &folder)))
+}
+
+/// `None` keeps the stored mailbox (or the default); an empty one is ignored.
+pub async fn save_mail_account(
+    st: &AppState,
+    host: &str,
+    port: u16,
+    address: &str,
+    password: Option<&str>,
+    folder: Option<&str>,
+) -> Res<MailAccountView> {
+    let password = resolve_password(st, password).await?;
+    let account = mail_account(host, port, address, password)?;
+    account::save(&st.store, &account).await?;
+    if let Some(folder) = folder.map(str::trim).filter(|f| !f.is_empty()) {
+        account::set_folder(&st.store, folder).await?;
+    }
+    let folder = account::folder(&st.store).await?;
+    Ok(mail_view(&account, &folder))
+}
+
+
+pub async fn delete_mail_account(st: &AppState) -> Res<()> {
+    Ok(account::remove(&st.store).await?)
+}
+
+/// Logs in with the typed values and returns the mailboxes the account can
+/// open. It does not open any folder, so it works before a mailbox is chosen.
+pub async fn test_mail_account(
+    st: &AppState,
+    host: &str,
+    port: u16,
+    address: &str,
+    password: Option<&str>,
+) -> Res<Vec<String>> {
+    let password = resolve_password(st, password).await?;
+    let account = mail_account(host, port, address, password)?;
+    Ok(ImapSource::new(account, account::DEFAULT_FOLDER.into())
+        .list_mailboxes()
+        .await?)
+}
+
+/// Claims the scan slot, creates the run, and scans in the background.
+/// Progress and the final result arrive as `scan://` events.
+pub async fn start_scan(st: &AppState) -> Res<i64> {
+    let guard = st
+        .begin_scan()
+        .ok_or_else(|| AppError::Io("A scan is already running.".into()))?;
+    let account = account::load(&st.store)
+        .await?
+        .ok_or_else(|| AppError::Io("Connect Gmail in Settings › Integrations first.".into()))?;
+    let folder = account::folder(&st.store).await?;
+    let model = st.active_model().await?;
+    let engine = st.engine_for(&model)?;
+    let chat = st.research_endpoint().await?;
+    let run_id = scan::begin_run(&st.store).await?;
+
+    let store = st.store.clone();
+    let emit = st.emitter();
+    let mail = ImapSource::new(account, folder);
+    tauri::async_runtime::spawn(async move {
+        let _guard = guard;
+        let http = reqwest::Client::new();
+        let deps = ScanDeps {
+            store: &store,
+            mail: &mail,
+            engine: engine.as_ref(),
+            chat: &chat,
+            http: &http,
+            emit: &emit,
+            today: chrono::Local::now().date_naive(),
+        };
+        // The outcome reaches the UI through `scan://finished`.
+        let _ = scan::run_scan(deps, run_id).await;
+    });
+    Ok(run_id)
+}
+
+pub fn get_scan_status(st: &AppState) -> ScanState {
+    ScanState {
+        running: st.scan_running(),
+    }
+}
+
+pub async fn list_scan_results(st: &AppState, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st.store.list_run_results(run_id).await?.into_iter().map(scan_view).collect())
+}
+
+pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st.store.list_pending_reviews().await?.into_iter().map(scan_view).collect())
+}
+
+pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
+    Ok(scan_view(st.store.apply_suggestion(message_id).await?))
+}
+
+pub async fn dismiss_suggestion(st: &AppState, message_id: &str) -> Res<()> {
+    Ok(st.store.dismiss_suggestion(message_id).await?)
+}
+
 pub mod ipc {
     //! `#[tauri::command]` wrappers; names are the IPC contract.
     use tauri::State;
@@ -916,6 +1104,59 @@ pub mod ipc {
     #[tauri::command]
     pub async fn get_research_model(st: S<'_>) -> Res<Option<String>> {
         st.research_model().await
+    }
+    #[tauri::command]
+    pub async fn get_mail_account(st: S<'_>) -> Res<Option<MailAccountView>> {
+        super::get_mail_account(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_mail_account(
+        st: S<'_>,
+        host: String,
+        port: u16,
+        address: String,
+        password: Option<String>,
+        folder: Option<String>,
+    ) -> Res<MailAccountView> {
+        super::save_mail_account(&st, &host, port, &address, password.as_deref(), folder.as_deref()).await
+    }
+    #[tauri::command]
+    pub async fn delete_mail_account(st: S<'_>) -> Res<()> {
+        super::delete_mail_account(&st).await
+    }
+    #[tauri::command]
+    pub async fn test_mail_account(
+        st: S<'_>,
+        host: String,
+        port: u16,
+        address: String,
+        password: Option<String>,
+    ) -> Res<Vec<String>> {
+        super::test_mail_account(&st, &host, port, &address, password.as_deref()).await
+    }
+    #[tauri::command]
+    pub async fn start_scan(st: S<'_>) -> Res<i64> {
+        super::start_scan(&st).await
+    }
+    #[tauri::command]
+    pub async fn get_scan_status(st: S<'_>) -> Res<ScanState> {
+        Ok(super::get_scan_status(&st))
+    }
+    #[tauri::command]
+    pub async fn list_scan_results(st: S<'_>, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
+        super::list_scan_results(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn list_pending_reviews(st: S<'_>) -> Res<Vec<ProcessedEmailView>> {
+        super::list_pending_reviews(&st).await
+    }
+    #[tauri::command]
+    pub async fn apply_suggestion(st: S<'_>, message_id: String) -> Res<ProcessedEmailView> {
+        super::apply_suggestion(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn dismiss_suggestion(st: S<'_>, message_id: String) -> Res<()> {
+        super::dismiss_suggestion(&st, &message_id).await
     }
 }
 

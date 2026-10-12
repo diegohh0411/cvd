@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::types::*;
-use super::Store;
+use super::{NewProcessed, Outcome, Store};
 
 async fn store() -> Store {
     Store::open("sqlite::memory:").await.unwrap()
@@ -338,4 +338,148 @@ async fn run_records_company_researched_at() {
     assert_eq!(s.get_run(run).await.unwrap().company_researched_at, None);
     s.set_run_company(run, Some("2026-10-08 10:00:00")).await.unwrap();
     assert_eq!(s.get_run(run).await.unwrap().company_researched_at.as_deref(), Some("2026-10-08 10:00:00"));
+}
+
+fn processed(message_id: &str, run_id: i64, outcome: Outcome) -> NewProcessed {
+    NewProcessed {
+        message_id: message_id.into(),
+        run_id,
+        received_at: "2026-10-12 09:00:00".into(),
+        subject: "Application update".into(),
+        sender: "jobs@example.com".into(),
+        matched_job_id: None,
+        previous_status_id: None,
+        suggested_status_id: None,
+        confidence: Some(0.9),
+        summary: Some("The application was received.".into()),
+        outcome,
+    }
+}
+
+#[tokio::test]
+async fn record_then_list_run_results_round_trips_fields() {
+    let s = store().await;
+    let run = s.create_scan_run().await.unwrap();
+    let row = processed("msg-applied", run, Outcome::Applied);
+    s.record_processed(&row, None).await.unwrap();
+
+    let got = s.list_run_results(run).await.unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].subject, row.subject);
+    assert_eq!(got[0].summary, row.summary);
+    assert_eq!(got[0].outcome, Outcome::Applied);
+}
+
+#[tokio::test]
+async fn processed_ids_contains_every_recorded_message() {
+    let s = store().await;
+    let run = s.create_scan_run().await.unwrap();
+    for id in ["msg-one", "msg-two"] {
+        s.record_processed(&processed(id, run, Outcome::Ignored), None)
+            .await
+            .unwrap();
+    }
+
+    let ids = s.processed_ids().await.unwrap();
+    assert!(ids.contains("msg-one"));
+    assert!(ids.contains("msg-two"));
+}
+
+#[tokio::test]
+async fn record_with_apply_status_updates_the_job() {
+    let s = store().await;
+    let statuses = s.list_job_statuses().await.unwrap();
+    let status_a = statuses[0].id;
+    let status_b = statuses[1].id;
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(status_a))
+        .await
+        .unwrap();
+    let run = s.create_scan_run().await.unwrap();
+    let mut row = processed("msg-record-apply", run, Outcome::Applied);
+    row.matched_job_id = Some(job);
+    s.record_processed(&row, Some(status_b)).await.unwrap();
+
+    assert_eq!(
+        s.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(status_b)
+    );
+}
+
+#[tokio::test]
+async fn apply_suggestion_sets_status_and_outcome() {
+    let s = store().await;
+    let statuses = s.list_job_statuses().await.unwrap();
+    let previous = statuses[0].id;
+    let suggested = statuses[1].id;
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(previous))
+        .await
+        .unwrap();
+    let run = s.create_scan_run().await.unwrap();
+    let mut row = processed("msg-suggestion", run, Outcome::PendingReview);
+    row.matched_job_id = Some(job);
+    row.previous_status_id = Some(previous);
+    row.suggested_status_id = Some(suggested);
+    s.record_processed(&row, None).await.unwrap();
+
+    let got = s.apply_suggestion("msg-suggestion").await.unwrap();
+    assert_eq!(
+        s.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(suggested)
+    );
+    assert_eq!(got.outcome, Outcome::Applied);
+}
+
+#[tokio::test]
+async fn dismiss_keeps_the_row_processed() {
+    let s = store().await;
+    let run = s.create_scan_run().await.unwrap();
+    s.record_processed(&processed("msg-dismiss", run, Outcome::PendingReview), None)
+        .await
+        .unwrap();
+
+    s.dismiss_suggestion("msg-dismiss").await.unwrap();
+    assert!(s.processed_ids().await.unwrap().contains("msg-dismiss"));
+    assert!(s.list_pending_reviews().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn pending_reviews_span_runs() {
+    let s = store().await;
+    let first_run = s.create_scan_run().await.unwrap();
+    let second_run = s.create_scan_run().await.unwrap();
+    s.record_processed(
+        &processed("msg-review-one", first_run, Outcome::PendingReview),
+        None,
+    )
+    .await
+    .unwrap();
+    s.record_processed(
+        &processed("msg-review-two", second_run, Outcome::PendingReview),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let rows = s.list_pending_reviews().await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().any(|row| row.message_id == "msg-review-one"));
+    assert!(rows.iter().any(|row| row.message_id == "msg-review-two"));
+}
+
+#[tokio::test]
+async fn processed_email_serializes_outcomes_in_snake_case() {
+    let s = store().await;
+    let run = s.create_scan_run().await.unwrap();
+    s.record_processed(
+        &processed("msg-serialized", run, Outcome::PendingReview),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let row = s.get_processed("msg-serialized").await.unwrap().unwrap();
+    let value = serde_json::to_value(row).unwrap();
+    assert_eq!(value["outcome"], "pending_review");
 }

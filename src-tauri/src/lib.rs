@@ -1,5 +1,7 @@
 mod commands;
 mod company;
+#[allow(dead_code)]
+mod mail;
 // Some items in these modules are only used by tests or by later plans.
 #[allow(dead_code)]
 mod engine;
@@ -89,6 +91,16 @@ pub fn run() {
             ipc::edit_company,
             ipc::refresh_company,
             ipc::get_research_model,
+            ipc::get_mail_account,
+            ipc::save_mail_account,
+            ipc::delete_mail_account,
+            ipc::test_mail_account,
+            ipc::start_scan,
+            ipc::get_scan_status,
+            ipc::list_scan_results,
+            ipc::list_pending_reviews,
+            ipc::apply_suggestion,
+            ipc::dismiss_suggestion,
             ipc::set_provider_key,
             ipc::delete_provider_key,
             ipc::provider_key_status,

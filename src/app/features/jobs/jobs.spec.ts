@@ -1,13 +1,17 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 
 import { pageProviders } from '../../../testing/providers';
 import { flush, mockTauri } from '../../../testing/tauri-mock';
 import { EngineStore } from '../../core/stores/engine.store';
 import { LibraryStore } from '../../core/stores/library.store';
+import { ScanStore } from '../../core/stores/scan.store';
 import { RANKED } from '../workspace/fixtures';
 import { NewJobComponent, wordCount } from './new-job.component';
+import { JobsPageComponent } from './jobs-page.component';
 import { MatchReadiness } from './match-readiness';
+import { ScanResultsDialogComponent } from './scan-results-dialog.component';
 
 describe('match readiness', () => {
   function setup(entries: unknown[], state: string) {
@@ -76,5 +80,81 @@ describe('NewJobComponent', () => {
     await (f.componentInstance as unknown as { match(): Promise<void> }).match();
     expect(t.callsTo('create_job')).toEqual([{ title: '', company: '', rawText: 'We need Rust', url: '', statusId: null }]);
     expect(nav).toHaveBeenCalledWith(['/jobs', 42], { queryParams: { start: 1 } });
+  });
+});
+
+describe('JobsPageComponent scan controls', () => {
+  const ACCOUNT = { host: 'imap.gmail.com', port: 993, address: 'diego@gmail.com', has_password: true };
+
+  async function render(handlers: Record<string, unknown> = {}) {
+    mockTauri({
+      list_jobs: [],
+      list_job_statuses: [],
+      list_pending_reviews: [],
+      list_scan_results: [],
+      get_scan_status: { running: false },
+      get_mail_account: ACCOUNT,
+      ...handlers,
+    });
+    TestBed.configureTestingModule({ providers: pageProviders() });
+    const f = TestBed.createComponent(JobsPageComponent);
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+    return { f, el: f.nativeElement as HTMLElement, scan: TestBed.inject(ScanStore) };
+  }
+
+  const isDisabled = (b: HTMLElement) =>
+    (b as HTMLButtonElement).disabled || b.getAttribute('aria-disabled') === 'true' || b.hasAttribute('data-disabled');
+
+  it('disables the button while running and shows the count', async () => {
+    const { f, el, scan } = await render();
+    scan.running.set(true);
+    scan.progress.set({ checked: 4, total: 10 });
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+
+    const button = el.querySelector('[data-testid="scan-button"]') as HTMLElement;
+    expect(button.textContent).toContain('Reading emails 4 / 10');
+    expect(isDisabled(button)).toBe(true);
+  });
+
+  it('disables the button with a connect hint when no account exists', async () => {
+    const { f, el } = await render({ get_mail_account: null });
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+
+    const button = el.querySelector('[data-testid="scan-button"]') as HTMLElement;
+    expect(isDisabled(button)).toBe(true);
+    expect(el.textContent).toContain('Connect Gmail in Settings › Integrations');
+  });
+
+  it('shows the pending count on the badge, enabled even while a scan runs', async () => {
+    const { f, el, scan } = await render();
+    scan.pendingCount.set(2);
+    scan.running.set(true);
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+
+    const badge = el.querySelector('[data-testid="review-badge"]') as HTMLElement;
+    expect(badge.textContent).toContain('2 to review');
+    expect(isDisabled(badge)).toBe(false);
+  });
+
+  it('opens the results dialog once when a scan finishes', async () => {
+    const { f, scan } = await render();
+    scan.finishedRunId.set(5);
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+
+    const page = f.componentInstance as unknown as { dialogOpen: () => boolean; dialogRunId: () => number | null };
+    expect(page.dialogOpen()).toBe(true);
+    expect(page.dialogRunId()).toBe(5);
+    expect(scan.finishedRunId()).toBeNull();
+    expect(f.debugElement.query(By.directive(ScanResultsDialogComponent))).toBeTruthy();
   });
 });

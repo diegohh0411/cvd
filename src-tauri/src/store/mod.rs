@@ -1,5 +1,7 @@
 pub mod types;
 mod companies;
+mod email;
+pub use email::{Outcome, ProcessedEmail, NewProcessed, ScanStatus, ScanRun};
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +23,8 @@ pub enum StoreError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("not found")]
+    NotFound,
     #[error("invalid stored value: {0}")]
     Invalid(String),
 }
@@ -714,6 +718,14 @@ impl Store {
         .bind(value)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    pub async fn delete_setting(&self, key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

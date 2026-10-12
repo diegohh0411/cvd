@@ -580,4 +580,80 @@ mod company_flow {
         assert_eq!(refreshed.profile.industry, "Fintech");
         assert_eq!(refreshed.edited_at, None);
     }
+
+    #[tokio::test]
+    async fn save_mail_account_rejects_bad_port() {
+        let (st, _) = state().await;
+
+        let err = save_mail_account(&st, "imap.gmail.com", 0, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), "Io");
+    }
+
+    #[tokio::test]
+    async fn save_mail_account_keeps_password_when_none() {
+        let (st, _) = state().await;
+        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
+            .await
+            .unwrap();
+
+        save_mail_account(&st, "imap.gmail.com", 993, "other@gmail.com", None, None)
+            .await
+            .unwrap();
+
+        let stored = crate::mail::account::load(&st.store).await.unwrap().unwrap();
+        assert_eq!(stored.address, "other@gmail.com");
+        assert_eq!(stored.password, "abcdefghijklmnop");
+    }
+
+    #[tokio::test]
+    async fn get_mail_account_never_returns_the_password() {
+        let (st, _) = state().await;
+        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
+            .await
+            .unwrap();
+
+        let view = get_mail_account(&st).await.unwrap().unwrap();
+
+        assert!(view.has_password);
+        let json = serde_json::to_value(&view).unwrap();
+        assert!(json.get("password").is_none());
+        assert!(!json.to_string().contains("abcdefghijklmnop"));
+    }
+
+    #[tokio::test]
+    async fn start_scan_refuses_second_concurrent_start() {
+        let (st, _) = state().await;
+        let _held = st.begin_scan().unwrap();
+
+        let err = start_scan(&st).await.unwrap_err();
+
+        assert_eq!(err.kind(), "Io");
+        assert_eq!(err.to_string(), "A scan is already running.");
+    }
+
+    #[tokio::test]
+    async fn apply_suggestion_unknown_message_is_not_found() {
+        let (st, _) = state().await;
+
+        let err = apply_suggestion(&st, "<missing@example.com>").await.unwrap_err();
+
+        assert_eq!(err.kind(), "NotFound");
+    }
+}
+
+#[tokio::test]
+async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
+    let (st, _) = state().await;
+    let view = save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), Some("INBOX"))
+        .await
+        .unwrap();
+    assert_eq!(view.folder, "INBOX");
+
+    let kept = save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", None, None).await.unwrap();
+
+    assert_eq!(kept.folder, "INBOX");
+    assert_eq!(get_mail_account(&st).await.unwrap().unwrap().folder, "INBOX");
 }

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use tokio_util::sync::CancellationToken;
@@ -63,6 +64,17 @@ pub struct AppState {
     skips: Skips,
     /// Company research runs (single-flight per company, one at a time).
     pub coordinator: Arc<ResearchCoordinator>,
+    /// Set while a Gmail scan runs; see `begin_scan`.
+    scan_running: Arc<AtomicBool>,
+}
+
+/// Holds the single Gmail scan slot; the slot frees when the guard drops.
+pub struct ScanGuard(Arc<AtomicBool>);
+
+impl Drop for ScanGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// What the sidebar footer shows about the decision engine.
@@ -99,6 +111,7 @@ impl AppState {
             research: ResearchSlot::default(),
             research_fn: None,
             skips: Skips::default(),
+            scan_running: Arc::default(),
         }
     }
 
@@ -319,6 +332,18 @@ impl AppState {
         self.runs.clone()
     }
 
+    /// Claims the Gmail scan slot; `None` while another scan holds it.
+    pub fn begin_scan(&self) -> Option<ScanGuard> {
+        self.scan_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| ScanGuard(self.scan_running.clone()))
+    }
+
+    pub fn scan_running(&self) -> bool {
+        self.scan_running.load(Ordering::SeqCst)
+    }
+
     /// Registers a fresh token for `run_id`; `None` if it is already running.
     pub fn register_run(&self, run_id: i64) -> Option<CancellationToken> {
         let mut runs = lock(&self.runs);
@@ -434,5 +459,32 @@ impl ResearchEnv {
                 Ok((out, model))
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod scan_slot_tests {
+    use super::*;
+    use crate::engine::FakeDecisionEngine;
+
+    #[tokio::test]
+    async fn begin_scan_is_single_flight() {
+        let store = Store::open("sqlite::memory:").await.unwrap();
+        let st = AppState::new(
+            store,
+            std::env::temp_dir().join("cvd-test-models-scan"),
+            EngineSource::Fixed(Arc::new(FakeDecisionEngine::new(|_, _, _| {
+                crate::engine::Answer::Noul { p: 0.0 }
+            }))),
+            Arc::new(|_, _| {}),
+        );
+
+        let first = st.begin_scan().expect("first claim succeeds");
+        assert!(st.scan_running());
+        assert!(st.begin_scan().is_none());
+
+        drop(first);
+        assert!(!st.scan_running());
+        assert!(st.begin_scan().is_some());
     }
 }

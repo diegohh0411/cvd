@@ -1,12 +1,21 @@
 import { DestroyRef } from '@angular/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
-import type { DownloadEvent, MatchProgressEvent, MatchStage, ResearchEvent } from './types';
+import type {
+  DownloadEvent,
+  MatchProgressEvent,
+  MatchStage,
+  ResearchEvent,
+  ScanFinished,
+  ScanProgress,
+} from './types';
 
 export const MATCH_EVENT = 'match://progress';
 export const DOWNLOAD_EVENT = 'model://download';
 export const ENGINE_EVENT = 'engine://status';
 export const RESEARCH_EVENT = 'company://research';
+export const SCAN_PROGRESS_EVENT = 'scan://progress';
+export const SCAN_FINISHED_EVENT = 'scan://finished';
 
 /** Progress for one run. Subscribe before starting the run so nothing is missed. */
 export function onMatchProgress(runId: number | (() => number | null), cb: (e: MatchStage) => void): Promise<UnlistenFn> {
@@ -22,6 +31,14 @@ export function onAnyMatchProgress(cb: (e: MatchProgressEvent) => void): Promise
 
 export function onResearch(cb: (e: ResearchEvent) => void): Promise<UnlistenFn> {
   return listen<ResearchEvent>(RESEARCH_EVENT, ({ payload }) => cb(payload));
+}
+
+export function onScanProgress(cb: (e: ScanProgress) => void): Promise<UnlistenFn> {
+  return listen<ScanProgress>(SCAN_PROGRESS_EVENT, ({ payload }) => cb(payload));
+}
+
+export function onScanFinished(cb: (e: ScanFinished) => void): Promise<UnlistenFn> {
+  return listen<ScanFinished>(SCAN_FINISHED_EVENT, ({ payload }) => cb(payload));
 }
 
 export function onDownload(cb: (e: DownloadEvent) => void): Promise<UnlistenFn> {

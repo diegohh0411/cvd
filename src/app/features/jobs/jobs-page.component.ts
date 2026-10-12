@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucidePlus } from '@ng-icons/lucide';
@@ -7,25 +7,48 @@ import { ZardButtonComponent } from '@/shared/components/button/button.component
 import { ZardSkeletonComponent } from '@/shared/components/skeleton/skeleton.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { formatTimestamp } from '../../core/format';
+import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { JobDescription } from '../../core/ipc/types';
 import { JobStatusesStore } from '../../core/stores/job-statuses.store';
 import { jobLabel, JobsStore } from '../../core/stores/jobs.store';
+import { ScanStore } from '../../core/stores/scan.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { openJobUrl, urlHost } from './job-url';
 import { RunStatusBadgeComponent } from './run-status-badge.component';
+import { ScanResultsDialogComponent } from './scan-results-dialog.component';
 import { StatusPickerComponent } from './status-picker.component';
 import { StatusPillComponent } from './status-pill.component';
 
 @Component({
   selector: 'app-jobs-page',
-  imports: [PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, RunStatusBadgeComponent, NgIcon, StatusPickerComponent, StatusPillComponent],
+  imports: [PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, RunStatusBadgeComponent, NgIcon, StatusPickerComponent, StatusPillComponent, ScanResultsDialogComponent],
   viewProviders: [provideIcons({ lucidePlus })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Jobs' }]">
+      @if (scanStore.pendingCount() > 0) {
+        <button z-button zType="outline" zSize="sm" data-testid="review-badge" (click)="openReview()">
+          {{ scanStore.pendingCount() }} to review
+        </button>
+      }
+      <button
+        z-button
+        zType="outline"
+        zSize="sm"
+        data-testid="scan-button"
+        [zLoading]="scanStore.running()"
+        [zDisabled]="scanDisabled()"
+        (click)="scan()"
+      >
+        {{ scanLabel() }}
+      </button>
+      @if (mailConnected() === false) {
+        <a routerLink="/settings" class="text-muted-foreground text-xs underline">Connect Gmail in Settings › Integrations</a>
+      }
       <a z-button zSize="sm" routerLink="/jobs/new"><ng-icon name="lucidePlus" /> New job</a>
     </app-page-header>
+    <app-scan-results-dialog [runId]="dialogRunId()" [(open)]="dialogOpen" />
     <div class="flex flex-1 flex-col gap-4 p-4">
       @if (jobs.jobs().length) {
         <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
@@ -101,9 +124,51 @@ export class JobsPageComponent implements OnInit {
     return f === 'all' ? this.jobs.sorted() : this.jobs.sorted().filter((j) => j.status_id === f);
   });
 
+  protected readonly scanStore = inject(ScanStore);
+  protected readonly mailConnected = signal<boolean | null>(null);
+  protected readonly dialogOpen = signal(false);
+  protected readonly dialogRunId = signal<number | null>(null);
+  protected readonly scanDisabled = computed(() => this.scanStore.running() || this.mailConnected() !== true);
+  protected readonly scanLabel = computed(() => {
+    if (!this.scanStore.running()) return 'Read emails for updates';
+    const p = this.scanStore.progress();
+    return p ? `Reading emails ${p.checked} / ${p.total}` : 'Reading emails…';
+  });
+
+  constructor() {
+    // A finished scan opens its results once, then is acknowledged.
+    effect(() => {
+      const runId = this.scanStore.finishedRunId();
+      if (runId === null) return;
+      this.dialogRunId.set(runId);
+      this.dialogOpen.set(true);
+      untracked(() => this.scanStore.acknowledgeFinished());
+    });
+  }
+
   ngOnInit(): void {
     void this.jobs.load();
     void this.statuses.ensureLoaded();
+    void this.scanStore.ensureReady();
+    void this.scanStore.refreshPending();
+    void api.getMailAccount().then(
+      (a) => this.mailConnected.set(a !== null),
+      () => this.mailConnected.set(false),
+    );
+  }
+
+  protected async scan(): Promise<void> {
+    try {
+      await this.scanStore.start();
+    } catch (e) {
+      this.toast.error('Could not start the scan', { description: messageFor(e) });
+    }
+  }
+
+  /** Opens the review queue (no run) from the badge. */
+  protected openReview(): void {
+    this.dialogRunId.set(null);
+    this.dialogOpen.set(true);
   }
 
   protected async setStatus(j: JobDescription, statusId: number | null): Promise<void> {
