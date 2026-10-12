@@ -39,14 +39,18 @@ pub struct ScanSummary {
     pub failed: usize,
 }
 
-pub async fn run_scan(deps: ScanDeps<'_>) -> Result<ScanSummary, AppError> {
-    let jobs = deps.store.list_jds().await?;
-    let statuses = deps.store.list_job_statuses().await?;
+/// Refuses to start without a job and a status, otherwise creates the run row.
+pub async fn begin_run(store: &Store) -> Result<i64, AppError> {
+    let jobs = store.list_jds().await?;
+    let statuses = store.list_job_statuses().await?;
     if jobs.is_empty() || statuses.is_empty() {
         return Err(AppError::Io("Add a job and a status first.".into()));
     }
+    Ok(store.create_scan_run().await?)
+}
 
-    let run_id = deps.store.create_scan_run().await?;
+/// Runs the scan for a run created by `begin_run`, and always finishes that run.
+pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, AppError> {
     let mut summary = ScanSummary {
         run_id,
         ..ScanSummary::default()

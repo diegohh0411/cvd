@@ -8,7 +8,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::imap::{MailError, MailHeader, MailSource};
-use super::scan::{run_scan, ScanDeps, ScanSummary};
+use super::scan::{begin_run, run_scan, ScanDeps, ScanSummary};
 use crate::commands::AppError;
 use crate::engine::{Answer, FakeDecisionEngine};
 use crate::providers::ChatEndpoint;
@@ -144,15 +144,19 @@ async fn run(
 ) -> Result<ScanSummary, AppError> {
     let emit: Emitter = Arc::new(|_: &str, _: serde_json::Value| {});
     let http = reqwest::Client::new();
-    run_scan(ScanDeps {
-        store,
-        mail,
-        engine,
-        chat,
-        http: &http,
-        emit: &emit,
-        today: today(),
-    })
+    let run_id = begin_run(store).await?;
+    run_scan(
+        ScanDeps {
+            store,
+            mail,
+            engine,
+            chat,
+            http: &http,
+            emit: &emit,
+            today: today(),
+        },
+        run_id,
+    )
     .await
 }
 
