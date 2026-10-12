@@ -835,9 +835,14 @@ pub async fn save_mail_account(
     Ok(mail_view(&account, &folder))
 }
 
-/// Mailboxes the account can open, for the folder dropdown. Uses the typed
-/// values, so it works before the account is saved.
-pub async fn list_mail_folders(
+
+pub async fn delete_mail_account(st: &AppState) -> Res<()> {
+    Ok(account::remove(&st.store).await?)
+}
+
+/// Logs in with the typed values and returns the mailboxes the account can
+/// open. It does not open any folder, so it works before a mailbox is chosen.
+pub async fn test_mail_account(
     st: &AppState,
     host: &str,
     port: u16,
@@ -846,25 +851,9 @@ pub async fn list_mail_folders(
 ) -> Res<Vec<String>> {
     let password = resolve_password(st, password).await?;
     let account = mail_account(host, port, address, password)?;
-    Ok(ImapSource::new(account, account::DEFAULT_FOLDER.into()).list_mailboxes().await?)
-}
-
-pub async fn delete_mail_account(st: &AppState) -> Res<()> {
-    Ok(account::remove(&st.store).await?)
-}
-
-pub async fn test_mail_account(
-    st: &AppState,
-    host: &str,
-    port: u16,
-    address: &str,
-    password: Option<&str>,
-) -> Res<()> {
-    let password = resolve_password(st, password).await?;
-    let account = mail_account(host, port, address, password)?;
-    let folder = account::folder(&st.store).await?;
-    ImapSource::new(account, folder).check().await?;
-    Ok(())
+    Ok(ImapSource::new(account, account::DEFAULT_FOLDER.into())
+        .list_mailboxes()
+        .await?)
 }
 
 /// Claims the scan slot, creates the run, and scans in the background.
@@ -1132,16 +1121,6 @@ pub mod ipc {
         super::save_mail_account(&st, &host, port, &address, password.as_deref(), folder.as_deref()).await
     }
     #[tauri::command]
-    pub async fn list_mail_folders(
-        st: S<'_>,
-        host: String,
-        port: u16,
-        address: String,
-        password: Option<String>,
-    ) -> Res<Vec<String>> {
-        super::list_mail_folders(&st, &host, port, &address, password.as_deref()).await
-    }
-    #[tauri::command]
     pub async fn delete_mail_account(st: S<'_>) -> Res<()> {
         super::delete_mail_account(&st).await
     }
@@ -1152,7 +1131,7 @@ pub mod ipc {
         port: u16,
         address: String,
         password: Option<String>,
-    ) -> Res<()> {
+    ) -> Res<Vec<String>> {
         super::test_mail_account(&st, &host, port, &address, password.as_deref()).await
     }
     #[tauri::command]
