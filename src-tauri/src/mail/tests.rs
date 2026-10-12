@@ -1,7 +1,98 @@
 use crate::store::Store;
 
 use super::account::{self, MailAccount};
+use super::decide::{decide, Classified, Decision};
 use super::imap::{chunk_uids, extract_text, gmail_link, parse_header, ImapSource, MailSource};
+
+fn classified(
+    job_related: f64,
+    matched_job: Option<i64>,
+    status_changed: f64,
+    new_status: Option<(i64, f64)>,
+) -> Classified {
+    Classified {
+        job_related,
+        matched_job,
+        status_changed,
+        new_status,
+    }
+}
+
+#[test]
+fn job_related_exactly_half_counts() {
+    assert_eq!(
+        decide(&classified(0.5, Some(7), 0.9, Some((3, 0.9))), None),
+        Decision::Applied {
+            job_id: 7,
+            status_id: 3,
+            confidence: 0.9,
+        }
+    );
+}
+
+#[test]
+fn job_related_just_below_half_is_ignored() {
+    assert_eq!(
+        decide(&classified(0.499, Some(7), 0.9, Some((3, 0.9))), None),
+        Decision::Ignored
+    );
+}
+
+#[test]
+fn applies_at_exact_threshold() {
+    assert_eq!(
+        decide(&classified(0.9, Some(7), 0.85, Some((3, 0.85))), None),
+        Decision::Applied {
+            job_id: 7,
+            status_id: 3,
+            confidence: 0.85,
+        }
+    );
+}
+
+#[test]
+fn just_below_threshold_is_pending() {
+    assert_eq!(
+        decide(&classified(0.9, Some(7), 0.85, Some((3, 0.849))), None),
+        Decision::PendingReview {
+            job_id: 7,
+            status_id: 3,
+            confidence: 0.849,
+        }
+    );
+}
+
+#[test]
+fn same_status_is_no_change() {
+    assert_eq!(
+        decide(&classified(0.9, Some(7), 0.9, Some((3, 0.9))), Some(3)),
+        Decision::NoChange { job_id: 7 }
+    );
+}
+
+#[test]
+fn status_change_below_half_is_no_change() {
+    assert_eq!(
+        decide(&classified(0.9, Some(7), 0.499, Some((3, 0.9))), None),
+        Decision::NoChange { job_id: 7 }
+    );
+}
+
+#[test]
+fn missing_new_status_is_no_change() {
+    assert_eq!(
+        decide(&classified(0.9, Some(7), 0.9, None), None),
+        Decision::NoChange { job_id: 7 }
+    );
+}
+
+#[test]
+fn missing_match_is_ignored() {
+    assert_eq!(
+        decide(&classified(0.9, None, 0.9, Some((3, 0.9))), None),
+        Decision::Ignored
+    );
+}
 
 async fn store() -> Store {
     Store::open("sqlite::memory:").await.unwrap()
