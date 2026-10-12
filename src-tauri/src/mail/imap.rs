@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use async_imap::{types::Fetch, Client, Session};
+use async_imap::types::{Fetch, Name, NameAttribute};
+use async_imap::{Client, Session};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use futures::TryStreamExt;
@@ -11,7 +12,6 @@ use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use super::account::MailAccount;
 
-const GMAIL_ALL_MAIL: &str = "[Gmail]/All Mail";
 const UID_CHUNK_SIZE: usize = 200;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,11 +42,34 @@ pub trait MailSource: Send + Sync {
 
 pub struct ImapSource {
     account: MailAccount,
+    folder: String,
 }
 
 impl ImapSource {
-    pub fn new(account: MailAccount) -> Self {
-        Self { account }
+    pub fn new(account: MailAccount, folder: String) -> Self {
+        Self { account, folder }
+    }
+
+    /// Mailboxes the account can open, in server order. `\Noselect` folders are skipped.
+    pub async fn list_mailboxes(&self) -> Result<Vec<String>, MailError> {
+        let mut session = self.open_session().await?;
+        let names: Vec<Name> = session
+            .list(Some(""), Some("*"))
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?
+            .try_collect()
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?;
+        let mailboxes = names
+            .iter()
+            .filter(|name| !name.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)))
+            .map(|name| name.name().to_string())
+            .collect();
+        session
+            .logout()
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?;
+        Ok(mailboxes)
     }
 
     async fn open_session(&self) -> Result<Session<TlsStream<TcpStream>>, MailError> {
@@ -73,12 +96,12 @@ impl ImapSource {
         }
     }
 
-    async fn examine_all_mail(
+    async fn examine_folder(
         &self,
         session: &mut Session<TlsStream<TcpStream>>,
     ) -> Result<(), MailError> {
         session
-            .examine(GMAIL_ALL_MAIL)
+            .examine(self.folder.as_str())
             .await
             .map(|_| ())
             .map_err(|error| MailError::Protocol(error.to_string()))
@@ -101,7 +124,7 @@ pub(super) fn build_tls_config() -> rustls::ClientConfig {
 impl MailSource for ImapSource {
     async fn check(&self) -> Result<(), MailError> {
         let mut session = self.open_session().await?;
-        self.examine_all_mail(&mut session).await?;
+        self.examine_folder(&mut session).await?;
         session
             .logout()
             .await
@@ -110,7 +133,7 @@ impl MailSource for ImapSource {
 
     async fn recent_headers(&self, since: NaiveDate) -> Result<Vec<MailHeader>, MailError> {
         let mut session = self.open_session().await?;
-        self.examine_all_mail(&mut session).await?;
+        self.examine_folder(&mut session).await?;
         let date = since.format("%-d-%b-%Y").to_string();
         let mut uids: Vec<u32> = session
             .uid_search(format!("SINCE {date}"))
@@ -154,7 +177,7 @@ impl MailSource for ImapSource {
 
     async fn body_text(&self, uid: u32) -> Result<String, MailError> {
         let mut session = self.open_session().await?;
-        self.examine_all_mail(&mut session).await?;
+        self.examine_folder(&mut session).await?;
         let fetches = session
             .uid_fetch(uid.to_string(), "BODY.PEEK[]")
             .await

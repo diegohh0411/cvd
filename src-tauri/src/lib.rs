@@ -93,6 +93,7 @@ pub fn run() {
             ipc::get_research_model,
             ipc::get_mail_account,
             ipc::save_mail_account,
+            ipc::list_mail_folders,
             ipc::delete_mail_account,
             ipc::test_mail_account,
             ipc::start_scan,

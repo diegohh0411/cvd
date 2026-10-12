@@ -585,7 +585,7 @@ mod company_flow {
     async fn save_mail_account_rejects_bad_port() {
         let (st, _) = state().await;
 
-        let err = save_mail_account(&st, "imap.gmail.com", 0, "me@gmail.com", Some("abcd efgh ijkl mnop"))
+        let err = save_mail_account(&st, "imap.gmail.com", 0, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
             .await
             .unwrap_err();
 
@@ -595,11 +595,11 @@ mod company_flow {
     #[tokio::test]
     async fn save_mail_account_keeps_password_when_none() {
         let (st, _) = state().await;
-        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"))
+        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
             .await
             .unwrap();
 
-        save_mail_account(&st, "imap.gmail.com", 993, "other@gmail.com", None)
+        save_mail_account(&st, "imap.gmail.com", 993, "other@gmail.com", None, None)
             .await
             .unwrap();
 
@@ -611,7 +611,7 @@ mod company_flow {
     #[tokio::test]
     async fn get_mail_account_never_returns_the_password() {
         let (st, _) = state().await;
-        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"))
+        save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), None)
             .await
             .unwrap();
 
@@ -642,4 +642,18 @@ mod company_flow {
 
         assert_eq!(err.kind(), "NotFound");
     }
+}
+
+#[tokio::test]
+async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
+    let (st, _) = state().await;
+    let view = save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", Some("abcd efgh ijkl mnop"), Some("INBOX"))
+        .await
+        .unwrap();
+    assert_eq!(view.folder, "INBOX");
+
+    let kept = save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", None, None).await.unwrap();
+
+    assert_eq!(kept.folder, "INBOX");
+    assert_eq!(get_mail_account(&st).await.unwrap().unwrap().folder, "INBOX");
 }

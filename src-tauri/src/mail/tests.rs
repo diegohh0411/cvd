@@ -232,7 +232,7 @@ async fn live_gmail_headers() {
         password: std::env::var("CVD_TEST_GMAIL_APP_PASSWORD")
             .expect("test Gmail app password is required"),
     };
-    let source = ImapSource::new(account);
+    let source = ImapSource::new(account, account::DEFAULT_FOLDER.into());
     source.check().await.unwrap();
     let since = chrono::Utc::now().date_naive() - chrono::Duration::days(30);
     let headers = source.recent_headers(since).await.unwrap();
@@ -447,4 +447,14 @@ async fn empty_content_is_an_error() {
     let got = summarize_fixture(&server).await;
 
     assert!(matches!(got, Err(AppError::EngineUnavailable(_))), "{got:?}");
+}
+
+#[tokio::test]
+async fn folder_defaults_to_all_mail_and_round_trips() {
+    let store = store().await;
+    assert_eq!(account::folder(&store).await.unwrap(), "[Gmail]/All Mail");
+
+    account::set_folder(&store, " INBOX ").await.unwrap();
+
+    assert_eq!(account::folder(&store).await.unwrap(), "INBOX");
 }

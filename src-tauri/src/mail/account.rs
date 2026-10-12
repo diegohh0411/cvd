@@ -3,7 +3,10 @@ use crate::store::{Store, StoreError};
 const HOST_KEY: &str = "mail.host";
 const PORT_KEY: &str = "mail.port";
 const ADDRESS_KEY: &str = "mail.address";
+const FOLDER_KEY: &str = "mail.folder";
 const SECRET_PROVIDER: &str = "gmail";
+/// Gmail's All Mail, the one place each message appears once. Name is English-only.
+pub const DEFAULT_FOLDER: &str = "[Gmail]/All Mail";
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct MailAccount {
@@ -51,10 +54,28 @@ pub async fn save(store: &Store, account: &MailAccount) -> Result<(), StoreError
     Ok(())
 }
 
+/// The mailbox the scan reads; `DEFAULT_FOLDER` until the user picks another.
+pub async fn folder(store: &Store) -> Result<String, StoreError> {
+    Ok(store
+        .get_setting(FOLDER_KEY)
+        .await?
+        .filter(|folder| !folder.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_FOLDER.to_string()))
+}
+
+pub async fn set_folder(store: &Store, folder: &str) -> Result<(), StoreError> {
+    let folder = folder.trim();
+    if folder.is_empty() {
+        return Err(StoreError::Invalid("mailbox must not be empty".into()));
+    }
+    store.set_setting(FOLDER_KEY, folder).await
+}
+
 pub async fn remove(store: &Store) -> Result<(), StoreError> {
     store.delete_setting(HOST_KEY).await?;
     store.delete_setting(PORT_KEY).await?;
     store.delete_setting(ADDRESS_KEY).await?;
+    store.delete_setting(FOLDER_KEY).await?;
     store.delete_secret(SECRET_PROVIDER).await?;
     Ok(())
 }

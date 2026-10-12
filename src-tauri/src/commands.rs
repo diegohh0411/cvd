@@ -754,14 +754,17 @@ pub struct MailAccountView {
     pub port: u16,
     pub address: String,
     pub has_password: bool,
+    /// The mailbox the scan reads.
+    pub folder: String,
 }
 
-fn mail_view(a: &MailAccount) -> MailAccountView {
+fn mail_view(a: &MailAccount, folder: &str) -> MailAccountView {
     MailAccountView {
         host: a.host.clone(),
         port: a.port,
         address: a.address.clone(),
         has_password: !a.password.is_empty(),
+        folder: folder.to_string(),
     }
 }
 
@@ -806,20 +809,44 @@ fn mail_account(host: &str, port: u16, address: &str, password: String) -> Res<M
 }
 
 pub async fn get_mail_account(st: &AppState) -> Res<Option<MailAccountView>> {
-    Ok(account::load(&st.store).await?.as_ref().map(mail_view))
+    let Some(account) = account::load(&st.store).await? else {
+        return Ok(None);
+    };
+    let folder = account::folder(&st.store).await?;
+    Ok(Some(mail_view(&account, &folder)))
 }
 
+/// `None` keeps the stored mailbox (or the default); an empty one is ignored.
 pub async fn save_mail_account(
     st: &AppState,
     host: &str,
     port: u16,
     address: &str,
     password: Option<&str>,
+    folder: Option<&str>,
 ) -> Res<MailAccountView> {
     let password = resolve_password(st, password).await?;
     let account = mail_account(host, port, address, password)?;
     account::save(&st.store, &account).await?;
-    Ok(mail_view(&account))
+    if let Some(folder) = folder.map(str::trim).filter(|f| !f.is_empty()) {
+        account::set_folder(&st.store, folder).await?;
+    }
+    let folder = account::folder(&st.store).await?;
+    Ok(mail_view(&account, &folder))
+}
+
+/// Mailboxes the account can open, for the folder dropdown. Uses the typed
+/// values, so it works before the account is saved.
+pub async fn list_mail_folders(
+    st: &AppState,
+    host: &str,
+    port: u16,
+    address: &str,
+    password: Option<&str>,
+) -> Res<Vec<String>> {
+    let password = resolve_password(st, password).await?;
+    let account = mail_account(host, port, address, password)?;
+    Ok(ImapSource::new(account, account::DEFAULT_FOLDER.into()).list_mailboxes().await?)
 }
 
 pub async fn delete_mail_account(st: &AppState) -> Res<()> {
@@ -835,7 +862,8 @@ pub async fn test_mail_account(
 ) -> Res<()> {
     let password = resolve_password(st, password).await?;
     let account = mail_account(host, port, address, password)?;
-    ImapSource::new(account).check().await?;
+    let folder = account::folder(&st.store).await?;
+    ImapSource::new(account, folder).check().await?;
     Ok(())
 }
 
@@ -848,6 +876,7 @@ pub async fn start_scan(st: &AppState) -> Res<i64> {
     let account = account::load(&st.store)
         .await?
         .ok_or_else(|| AppError::Io("Connect Gmail in Settings › Integrations first.".into()))?;
+    let folder = account::folder(&st.store).await?;
     let model = st.active_model().await?;
     let engine = st.engine_for(&model)?;
     let chat = st.research_endpoint().await?;
@@ -855,7 +884,7 @@ pub async fn start_scan(st: &AppState) -> Res<i64> {
 
     let store = st.store.clone();
     let emit = st.emitter();
-    let mail = ImapSource::new(account);
+    let mail = ImapSource::new(account, folder);
     tauri::async_runtime::spawn(async move {
         let _guard = guard;
         let http = reqwest::Client::new();
@@ -1098,8 +1127,19 @@ pub mod ipc {
         port: u16,
         address: String,
         password: Option<String>,
+        folder: Option<String>,
     ) -> Res<MailAccountView> {
-        super::save_mail_account(&st, &host, port, &address, password.as_deref()).await
+        super::save_mail_account(&st, &host, port, &address, password.as_deref(), folder.as_deref()).await
+    }
+    #[tauri::command]
+    pub async fn list_mail_folders(
+        st: S<'_>,
+        host: String,
+        port: u16,
+        address: String,
+        password: Option<String>,
+    ) -> Res<Vec<String>> {
+        super::list_mail_folders(&st, &host, port, &address, password.as_deref()).await
     }
     #[tauri::command]
     pub async fn delete_mail_account(st: S<'_>) -> Res<()> {
