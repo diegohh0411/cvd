@@ -1,12 +1,14 @@
 //! Gmail scan lifecycle and deduplicated processed-message records.
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
 
 use super::{Result, Store, StoreError};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Outcome {
     Ignored,
     NoChange,
@@ -55,7 +57,7 @@ pub struct NewProcessed {
     pub outcome: Outcome,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessedEmail {
     pub message_id: String,
     pub run_id: i64,

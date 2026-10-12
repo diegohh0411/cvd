@@ -467,3 +467,19 @@ async fn pending_reviews_span_runs() {
     assert!(rows.iter().any(|row| row.message_id == "msg-review-one"));
     assert!(rows.iter().any(|row| row.message_id == "msg-review-two"));
 }
+
+#[tokio::test]
+async fn processed_email_serializes_outcomes_in_snake_case() {
+    let s = store().await;
+    let run = s.create_scan_run().await.unwrap();
+    s.record_processed(
+        &processed("msg-serialized", run, Outcome::PendingReview),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let row = s.get_processed("msg-serialized").await.unwrap().unwrap();
+    let value = serde_json::to_value(row).unwrap();
+    assert_eq!(value["outcome"], "pending_review");
+}
