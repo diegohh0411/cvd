@@ -25,7 +25,7 @@ pub enum EngineError {
     ContextOverflow,
     #[error("bad response from decision engine: {0}")]
     BadResponse(String),
-    #[error("too many questions in one request (max 128)")]
+    #[error("too many questions in one request")]
     TooManyQuestions,
     #[error("Check your {0} key")]
     Unauthorized(&'static str),

@@ -71,6 +71,18 @@ async fn rejects_129_questions() {
     assert_eq!(decide_checked(&fake, "s", &qs).await.unwrap().len(), 128);
 }
 
+#[tokio::test]
+async fn provider_cap_is_enforced_before_the_request() {
+    let engine = HttpSystemOneEngine::new("SubQ", "http://127.0.0.1:1".into(), "k".into(), "m".into())
+        .with_max_questions(Some(16));
+    let qs = |n: usize| -> BTreeMap<String, Question> {
+        (0..n).map(|i| (format!("q{i:03}"), Question::Noul { instructions: "x".into() })).collect()
+    };
+    assert_eq!(decide_checked(&engine, "s", &qs(17)).await, Err(EngineError::TooManyQuestions));
+    // 16 is within the cap, so it reaches the (unreachable) network.
+    assert!(matches!(decide_checked(&engine, "s", &qs(16)).await, Err(EngineError::Network(_))));
+}
+
 #[test]
 fn context_overflow_mapped() {
     let body = json!({"error":{"code":500,"message":"input (1921 tokens) is too large to process. increase the physical batch size (current batch size: 512)","type":"server_error"}});

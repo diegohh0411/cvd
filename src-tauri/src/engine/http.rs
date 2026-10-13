@@ -19,13 +19,20 @@ pub struct HttpSystemOneEngine {
     base_url: String,
     api_key: String,
     model: String,
+    /// The provider's per-request question cap, if it has one.
+    max_questions: Option<usize>,
     http: reqwest::Client,
 }
 
 impl HttpSystemOneEngine {
     pub fn new(provider: &'static str, base_url: String, api_key: String, model: String) -> Self {
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("reqwest client");
-        Self { provider, base_url, api_key, model, http }
+        Self { provider, base_url, api_key, model, max_questions: None, http }
+    }
+
+    pub fn with_max_questions(mut self, cap: Option<usize>) -> Self {
+        self.max_questions = cap;
+        self
     }
 
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
@@ -59,6 +66,10 @@ fn error_message(v: &Value) -> String {
 
 #[async_trait]
 impl DecisionEngine for HttpSystemOneEngine {
+    fn max_questions(&self) -> Option<usize> {
+        self.max_questions
+    }
+
     async fn decide(
         &self,
         state: &str,
