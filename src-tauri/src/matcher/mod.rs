@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{
-    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question, MAX_QUESTIONS,
+    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question,
 };
 use crate::store::types::*;
 use crate::store::{Store, StoreError};
@@ -207,15 +207,17 @@ fn question_tokens(p: &Pending) -> usize {
     80 + estimate_tokens(wire_request("", &one)["questions"].to_string().len())
 }
 
-/// Splits questions into requests under both the question cap and the token budget.
-fn batches(questions: Vec<Pending>, state: &str, budget: usize) -> Vec<Vec<Pending>> {
+/// Splits questions into requests under both the question cap and the token
+/// budget. With a cap of `n`, `q` questions take `ceil(q / n)` requests unless
+/// the token budget splits them further.
+fn batches(questions: Vec<Pending>, state: &str, budget: usize, cap: usize) -> Vec<Vec<Pending>> {
     let base = 50 + estimate_tokens(state.len());
     let mut out: Vec<Vec<Pending>> = Vec::new();
     let mut cur: Vec<Pending> = Vec::new();
     let mut used = base;
     for p in questions {
         let t = question_tokens(&p);
-        if !cur.is_empty() && (cur.len() == MAX_QUESTIONS || used + t > budget) {
+        if !cur.is_empty() && (cur.len() == cap || used + t > budget) {
             out.push(std::mem::take(&mut cur));
             used = base;
         }
@@ -346,7 +348,8 @@ async fn execute(
     on_progress(Progress::Scoring { done, total });
 
     let state = questions::jd_state(&jd.raw_text, company);
-    for batch in batches(todo, &state, cfg.token_budget) {
+    let cap = engine.max_questions();
+    for batch in batches(todo, &state, cfg.token_budget, cap) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();
         ask(store, engine, run_id, &state, batch).await?;

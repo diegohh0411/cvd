@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::questions::*;
 use super::*;
-use crate::engine::{Answer, EngineError, FakeDecisionEngine, Question};
+use crate::engine::{Answer, EngineError, FakeDecisionEngine, Question, MAX_QUESTIONS};
 
 /// Wraps the fake and records the question keys of every `decide` call.
 /// (`FakeDecisionEngine::calls()` counts questions, not requests.)
@@ -202,8 +202,17 @@ fn batches_respect_budget() {
     let per = question_tokens(&qs[0]);
     let state = "x".repeat(300);
     let base = 50 + estimate_tokens(state.len());
-    let out = batches(qs, &state, base + per * 10);
+    let out = batches(qs, &state, base + per * 10, MAX_QUESTIONS);
     assert_eq!(out.iter().map(Vec::len).collect::<Vec<_>>(), vec![10; 4]);
+}
+
+#[test]
+fn provider_cap_gives_ceil_of_questions_over_cap() {
+    let qs: Vec<Pending> = (0..40)
+        .map(|i| Pending::new(skill_key(i), "q", skill_question("Rust"), (TargetType::Skill, i)))
+        .collect();
+    let out = batches(qs, "", usize::MAX, 16);
+    assert_eq!(out.iter().map(Vec::len).collect::<Vec<_>>(), vec![16, 16, 8]);
 }
 
 #[tokio::test]

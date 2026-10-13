@@ -19,6 +19,9 @@ const SNAP_CONTEXT_LENGTH: u32 = 393_216;
 /// `/v1/models` also lists chat-only models, which `/v1/systemone` rejects.
 const DECISION_MODELS: &[&str] = &[SUBQ_SNAP];
 
+/// SubQ accepts at most 16 questions per `/v1/systemone` request (docs.subq.ai).
+pub const SUBQ_MAX_QUESTIONS: Option<usize> = Some(16);
+
 pub struct SubQProvider {
     base_url: String,
     api_key: String,
@@ -92,7 +95,9 @@ impl Provider for SubQProvider {
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        Ok(Arc::new(HttpSystemOneEngine::new(SUBQ_NAME, self.base_url.clone(), self.api_key.clone(), model_id.into())))
+        let engine = HttpSystemOneEngine::new(SUBQ_NAME, self.base_url.clone(), self.api_key.clone(), model_id.into())
+            .with_max_questions(SUBQ_MAX_QUESTIONS);
+        Ok(Arc::new(engine))
     }
 
     fn chat_endpoint(&self, _model_id: &str) -> Result<ChatEndpoint, ProviderError> {

@@ -1,5 +1,11 @@
 use super::*;
 use wiremock::matchers::body_partial_json;
+
+#[test]
+fn subq_engine_caps_questions_at_16() {
+    let engine = SubQProvider::new(SUBQ_BASE.into(), "k".into()).engine("subq-snap-preview").unwrap();
+    assert_eq!(engine.max_questions(), 16);
+}
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

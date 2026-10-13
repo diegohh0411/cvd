@@ -65,10 +65,22 @@ async fn rejects_129_questions() {
     for i in 0..129 {
         qs.insert(format!("q{i:03}"), Question::Noul { instructions: "x".into() });
     }
-    assert_eq!(decide_checked(&fake, "s", &qs).await, Err(EngineError::TooManyQuestions));
+    assert_eq!(decide_checked(&fake, "s", &qs).await, Err(EngineError::TooManyQuestions { max: 128 }));
     assert_eq!(fake.calls(), 0);
     qs.remove("q000");
     assert_eq!(decide_checked(&fake, "s", &qs).await.unwrap().len(), 128);
+}
+
+#[tokio::test]
+async fn provider_cap_is_enforced_before_the_request() {
+    let engine = HttpSystemOneEngine::new("SubQ", "http://127.0.0.1:1".into(), "k".into(), "m".into())
+        .with_max_questions(Some(16));
+    let qs = |n: usize| -> BTreeMap<String, Question> {
+        (0..n).map(|i| (format!("q{i:03}"), Question::Noul { instructions: "x".into() })).collect()
+    };
+    assert_eq!(decide_checked(&engine, "s", &qs(17)).await, Err(EngineError::TooManyQuestions { max: 16 }));
+    // 16 is within the cap, so it reaches the (unreachable) network.
+    assert!(matches!(decide_checked(&engine, "s", &qs(16)).await, Err(EngineError::Network(_))));
 }
 
 #[test]
@@ -88,4 +100,15 @@ async fn fake_counts_and_fails_on_nth() {
     qs.insert("b".to_string(), Question::Noul { instructions: "y".into() });
     assert!(matches!(fake.decide("s", &qs).await, Err(EngineError::Unavailable(_))));
     assert_eq!(fake.calls(), 2);
+}
+
+#[test]
+fn provider_cap_is_clamped_to_valid_range() {
+    let engine = |cap| {
+        HttpSystemOneEngine::new("SubQ", "http://127.0.0.1:1".into(), "k".into(), "m".into())
+            .with_max_questions(cap)
+    };
+    assert_eq!(engine(Some(0)).max_questions(), 1);
+    assert_eq!(engine(Some(500)).max_questions(), MAX_QUESTIONS);
+    assert_eq!(engine(None).max_questions(), MAX_QUESTIONS);
 }

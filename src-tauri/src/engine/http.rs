@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use super::types::{Answer, EngineError, Question};
 use super::wire::{parse_wire_response, wire_request};
-use super::DecisionEngine;
+use super::{DecisionEngine, MAX_QUESTIONS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
@@ -19,13 +19,20 @@ pub struct HttpSystemOneEngine {
     base_url: String,
     api_key: String,
     model: String,
+    /// The provider's per-request question cap, if it has one.
+    max_questions: Option<usize>,
     http: reqwest::Client,
 }
 
 impl HttpSystemOneEngine {
     pub fn new(provider: &'static str, base_url: String, api_key: String, model: String) -> Self {
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("reqwest client");
-        Self { provider, base_url, api_key, model, http }
+        Self { provider, base_url, api_key, model, max_questions: None, http }
+    }
+
+    pub fn with_max_questions(mut self, cap: Option<usize>) -> Self {
+        self.max_questions = cap.map(|c| c.clamp(1, MAX_QUESTIONS));
+        self
     }
 
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
@@ -59,6 +66,10 @@ fn error_message(v: &Value) -> String {
 
 #[async_trait]
 impl DecisionEngine for HttpSystemOneEngine {
+    fn max_questions(&self) -> usize {
+        self.max_questions.unwrap_or(MAX_QUESTIONS)
+    }
+
     async fn decide(
         &self,
         state: &str,
