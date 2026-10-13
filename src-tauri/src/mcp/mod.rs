@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::types::{Entry, EntryInput, JobDescription, JobStatus, Profile, Skill, StatusColor};
 use crate::store::{Store, StoreError};
+use crate::web::{self, FetchPolicy};
 
 pub use validate::normalize_entry;
 
@@ -25,6 +26,13 @@ const APP_IDENTIFIER: &str = "com.diego.cvd";
 pub fn db_path_from(override_path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
     override_path.or_else(|| dirs::data_dir().map(|d| d.join(APP_IDENTIFIER).join("cv.db")))
 }
+
+/// Longest posting read from a URL; same cap as the desktop form.
+const JOB_PAGE_CHARS: usize = 30_000;
+
+/// Tests read from a local server; real runs only read public hosts.
+const FETCH_POLICY: FetchPolicy =
+    if cfg!(test) { FetchPolicy::LocalFirstHopOnly } else { FetchPolicy::PublicOnly };
 
 const INSTRUCTIONS: &str = "Stores the user's CV profile: experience, projects, education and volunteer entries. \
 Typical workflow: read the source (e.g. Notion pages), call list_entries and list_skills first, \
@@ -107,7 +115,8 @@ pub struct UpsertJobArgs {
     /// Company name. Used when creating.
     #[serde(default)]
     pub company: Option<String>,
-    /// Full job description text. Required when creating.
+    /// Full job description text. When creating, omit it to have the server read
+    /// the text from `url` instead (public http/https pages only).
     #[serde(default)]
     pub description: Option<String>,
     /// Link to the posting. Omit to keep the current one; "" clears it.
@@ -152,6 +161,9 @@ pub struct JobStatusList {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct UpsertJobResult {
     pub job: JobSummary,
+    /// Characters of description read from `url`; null when the description was
+    /// supplied or the job already existed.
+    pub description_fetched_chars: Option<usize>,
 }
 
 fn summarize(j: JobDescription, statuses: &[JobStatus]) -> JobSummary {
@@ -252,6 +264,11 @@ impl CvServer {
     }
 
     pub async fn upsert_job(&self, a: UpsertJobArgs) -> Result<JobSummary, ErrorData> {
+        Ok(self.upsert_job_fetching(a).await?.job)
+    }
+
+    pub async fn upsert_job_fetching(&self, a: UpsertJobArgs) -> Result<UpsertJobResult, ErrorData> {
+        let mut fetched_chars = None;
         let status_id = match &a.status {
             Some(name) => Some(self.resolve_status(name).await?),
             None => None,
@@ -277,12 +294,36 @@ impl CvServer {
             }
             None => {
                 let title = a.title.as_deref().map(str::trim).unwrap_or_default();
-                let text = a.description.as_deref().map(str::trim).unwrap_or_default();
-                if title.is_empty() || text.is_empty() {
-                    return Err(ErrorData::invalid_params("title and description are required to create a job", None));
+                let given = a.description.as_deref().map(str::trim).unwrap_or_default();
+                let url = a.url.as_deref().map(str::trim).unwrap_or_default();
+                if title.is_empty() {
+                    return Err(ErrorData::invalid_params("title is required to create a job", None));
                 }
+                let read;
+                let text = if !given.is_empty() {
+                    given
+                } else if !url.is_empty() {
+                    read = web::fetch_text(url, FETCH_POLICY, JOB_PAGE_CHARS).await.map_err(|e| {
+                        ErrorData::invalid_params(
+                            format!("could not read the description from the url: {e}; pass description instead"),
+                            None,
+                        )
+                    })?;
+                    if read.trim().is_empty() {
+                        return Err(ErrorData::invalid_params(
+                            "the page had no readable text; pass description instead",
+                            None,
+                        ));
+                    }
+                    fetched_chars = Some(read.chars().count());
+                    read.as_str()
+                } else {
+                    return Err(ErrorData::invalid_params(
+                        "description or url is required to create a job",
+                        None,
+                    ));
+                };
                 let company = a.company.as_deref().map(str::trim).unwrap_or_default();
-                let url = a.url.as_deref().unwrap_or_default();
                 let id = self
                     .store
                     .create_jd(title, company, text, url, status_id.flatten())
@@ -299,7 +340,7 @@ impl CvServer {
         let job = self.store.get_jd(id).await.map_err(internal)?.ok_or_else(|| {
             ErrorData::internal_error(format!("job {id} vanished"), None)
         })?;
-        Ok(summarize(job, &statuses))
+        Ok(UpsertJobResult { job: summarize(job, &statuses), description_fetched_chars: fetched_chars })
     }
 
     pub async fn upsert_job_status(&self, a: UpsertJobStatusArgs) -> Result<JobStatus, ErrorData> {
@@ -386,11 +427,12 @@ impl CvServer {
         Ok(Json(JobStatusList { statuses: self.store.list_job_statuses().await.map_err(internal)? }))
     }
 
-    /// Save a new job posting (title + description required), or update an existing
-    /// job's status and/or URL by id. Status is a name from list_job_statuses.
+    /// Save a new job posting (title required, plus description or a public url to
+    /// read it from), or update an existing job's status and/or URL by id. Status is
+    /// a name from list_job_statuses. `description_fetched_chars` reports a URL read.
     #[tool(name = "upsert_job")]
     async fn tool_upsert_job(&self, Parameters(a): Parameters<UpsertJobArgs>) -> Result<Json<UpsertJobResult>, ErrorData> {
-        Ok(Json(UpsertJobResult { job: self.upsert_job(a).await? }))
+        Ok(Json(self.upsert_job_fetching(a).await?))
     }
 
     /// Create a status label, or rename/recolor one by id. Colors: gray, brown,
