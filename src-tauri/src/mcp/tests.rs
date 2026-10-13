@@ -211,3 +211,71 @@ async fn delete_skill_unlinks_and_rejects_unknown() {
         .await
         .is_err());
 }
+
+async fn posting_server(body: &str) -> wiremock::MockServer {
+    use wiremock::matchers::any;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body.to_owned(), "text/html"))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn upsert_job_reads_description_from_url() {
+    let page = posting_server("<html><body><h1>Rust engineer</h1><p>Build compilers.</p></body></html>").await;
+    let s = server().await;
+    let r = s
+        .upsert_job_fetching(super::UpsertJobArgs {
+            title: Some("Rust engineer".into()),
+            url: Some(page.uri()),
+            ..job_args()
+        })
+        .await
+        .unwrap();
+    assert!(r.description_fetched_chars.unwrap() > 0);
+    let stored = s.store.get_jd(r.job.id).await.unwrap().unwrap();
+    assert!(stored.raw_text.contains("Build compilers."), "{}", stored.raw_text);
+}
+
+#[tokio::test]
+async fn upsert_job_pasted_description_skips_fetch() {
+    let s = server().await;
+    let r = s
+        .upsert_job_fetching(super::UpsertJobArgs {
+            title: Some("Dev".into()),
+            description: Some("Rust".into()),
+            url: Some("http://127.0.0.1:9/never-read".into()),
+            ..job_args()
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.description_fetched_chars, None);
+}
+
+#[tokio::test]
+async fn upsert_job_without_description_or_url_fails() {
+    let s = server().await;
+    let err = s
+        .upsert_job(super::UpsertJobArgs { title: Some("Dev".into()), ..job_args() })
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("description or url"), "{}", err.message);
+}
+
+#[tokio::test]
+async fn upsert_job_fetch_failure_is_an_error_and_saves_nothing() {
+    let s = server().await;
+    let err = s
+        .upsert_job(super::UpsertJobArgs {
+            title: Some("Dev".into()),
+            url: Some("file:///etc/passwd".into()),
+            ..job_args()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.message.contains("only http and https"), "{}", err.message);
+    assert!(s.list_jobs().await.unwrap().is_empty());
+}
