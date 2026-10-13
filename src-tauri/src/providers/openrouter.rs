@@ -85,7 +85,7 @@ impl Provider for OpenRouterProvider {
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        Ok(Arc::new(HttpSystemOneEngine::new(self.base_url.clone(), self.api_key.clone(), model_id.into())))
+        Ok(Arc::new(HttpSystemOneEngine::new(OPENROUTER, self.base_url.clone(), self.api_key.clone(), model_id.into())))
     }
 
     fn chat_endpoint(&self, model_id: &str) -> Result<ChatEndpoint, ProviderError> {

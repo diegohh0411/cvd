@@ -1,4 +1,5 @@
 use super::*;
+use wiremock::matchers::body_partial_json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -56,7 +57,7 @@ async fn keyed_store() -> crate::store::Store {
 #[tokio::test]
 async fn registry_hides_keyless_provider() {
     let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
-    let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1").await.unwrap();
+    let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1").await.unwrap();
     let err = reg.engine(&ModelRef::parse("openrouter:x")).err().unwrap();
     assert!(matches!(err, ProviderError::Missing(m) if m.contains("OpenRouter key")));
     assert!(reg.remote_models(false).await.is_empty());
@@ -66,7 +67,7 @@ async fn registry_hides_keyless_provider() {
 async fn registry_isolates_failures() {
     let server = MockServer::start().await;
     Mock::given(method("GET")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
-    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri()).await.unwrap();
+    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri(), "http://127.0.0.1:1").await.unwrap();
     let lists = reg.remote_models(false).await;
     assert_eq!(lists.len(), 1);
     assert_eq!(lists[0].provider, "openrouter");
@@ -82,12 +83,100 @@ async fn remote_models_cached() {
         .respond_with(ResponseTemplate::new(200).set_body_json(models_fixture()))
         .mount(&server)
         .await;
-    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri()).await.unwrap();
+    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri(), "http://127.0.0.1:1").await.unwrap();
     assert_eq!(reg.remote_models(false).await[0].models.len(), 4);
     reg.remote_models(false).await;
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
     reg.remote_models(true).await;
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+async fn keyed_subq_store() -> crate::store::Store {
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    s.set_secret(SUBQ, "sq").await.unwrap();
+    s
+}
+
+fn subq_models() -> serde_json::Value {
+    serde_json::json!({
+        "object": "list",
+        "data": [
+            {"id": "subq-preview", "name": "SubQ Preview", "object": "model", "created": 0, "owned_by": "subquadratic"},
+            {"id": "subq-snap-preview", "name": "SubQ Snap Preview", "object": "model", "created": 0, "owned_by": "subquadratic"}
+        ]
+    })
+}
+
+#[tokio::test]
+async fn subq_lists_only_decision_models() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(header("authorization", "Bearer sq"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(subq_models()))
+        .mount(&server)
+        .await;
+    let p = SubQProvider::new(server.uri(), "sq".into());
+    let models = p.list_models().await.unwrap();
+    assert_eq!(models.len(), 1);
+    let snap = &models[0];
+    assert_eq!((snap.provider.as_str(), snap.id.as_str(), snap.display_name.as_str()), ("subq", "subq-snap-preview", "SubQ Snap"));
+    assert_eq!(snap.context_length, Some(393_216));
+    assert_eq!(snap.price_per_mtok_in, Some(0.05));
+    assert!(p.list_chat_models().await.unwrap().is_empty());
+    assert!(p.chat_endpoint("subq-snap-preview").is_err());
+}
+
+#[tokio::test]
+async fn subq_401_is_key_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({"detail": {"error_type": "auth", "message": "bad key"}})))
+        .mount(&server)
+        .await;
+    let err = SubQProvider::new(server.uri(), "bad".into()).validate_key().await.unwrap_err();
+    assert_eq!(err, ProviderError::KeyRejected("SubQ"));
+    assert_eq!(err.to_string(), "Check your SubQ key");
+}
+
+#[tokio::test]
+async fn registry_routes_subq_decisions() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(subq_models()))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .and(header("authorization", "Bearer sq"))
+        .and(body_partial_json(serde_json::json!({"model": "subq-snap-preview"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::from_str::<serde_json::Value>(include_str!("../../tests/fixtures/openrouter_systemone_response.json")).unwrap()))
+        .mount(&server)
+        .await;
+    let reg = ProviderRegistry::load(&keyed_subq_store().await, "http://127.0.0.1:1", &server.uri()).await.unwrap();
+    let lists = reg.remote_models(false).await;
+    assert_eq!(lists.len(), 1);
+    assert_eq!(lists[0].provider, "subq");
+    assert_eq!(lists[0].models[0].id, "subq-snap-preview");
+    let r = ModelRef::parse("subq:subq-snap-preview");
+    assert_eq!(r.provider, "subq");
+    assert!(reg.check(&r).is_ok());
+    let engine = reg.engine(&r).unwrap();
+    let qs = std::collections::BTreeMap::from([(
+        "rust".to_string(),
+        crate::engine::Question::Noul { instructions: "Mentions Rust?".into() },
+    )]);
+    assert!(engine.decide("Rewrote the ledger in Rust.", &qs).await.is_ok());
+}
+
+#[tokio::test]
+async fn registry_hides_keyless_subq() {
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1").await.unwrap();
+    let err = reg.check(&ModelRef::parse("subq:subq-snap-preview")).unwrap_err();
+    assert!(matches!(err, ProviderError::Missing(m) if m.contains("SubQ key")));
 }
 
 /// Live smoke test: `OPENROUTER_API_KEY=... cargo test --lib live_openrouter -- --ignored`.
@@ -127,6 +216,6 @@ async fn openrouter_lists_tool_models_for_chat() {
         .respond_with(ResponseTemplate::new(200).set_body_json(models_fixture()))
         .mount(&server)
         .await;
-    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri()).await.unwrap();
+    let reg = ProviderRegistry::load(&keyed_store().await, &server.uri(), "http://127.0.0.1:1").await.unwrap();
     assert_eq!(reg.remote_chat_models(false).await[0].models.len(), 4);
 }

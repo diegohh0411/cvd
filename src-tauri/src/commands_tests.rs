@@ -325,6 +325,38 @@ mod provider_keys {
         assert_eq!(st.active_model().await.unwrap(), "openrouter:typesafe/jev-1.13");
     }
 
+    async fn subq_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"object": "list", "data": []})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({"detail": {"error_type": "auth", "message": "bad key"}})))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn subq_key_validates_and_routes() {
+        let server = subq_server("sq-good1234").await;
+        let (st, _) = state().await;
+        let st = st.with_subq_base(server.uri());
+        let err = set_provider_key(&st, "subq", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert!(err.to_string().contains("SubQ"), "{err}");
+        assert_eq!(set_provider_key(&st, "subq", " sq-good1234 ").await.unwrap(), KeyStatus { has_key: true, last4: Some("1234".into()) });
+        set_active_model(&st, "subq:subq-snap-preview").await.unwrap();
+        assert_eq!(st.active_model().await.unwrap(), "subq:subq-snap-preview");
+        assert!(st.engine_for("subq:subq-snap-preview").is_ok());
+        delete_provider_key(&st, "subq").await.unwrap();
+        assert!(st.engine_for("subq:subq-snap-preview").is_err());
+    }
+
     async fn exa_server(valid: &str) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -372,8 +404,8 @@ mod provider_keys {
 
     #[test]
     fn engine_errors_map_to_provider_kinds() {
-        assert_eq!(AppError::from(EngineError::Unauthorized).kind(), "ProviderAuth");
-        assert_eq!(AppError::from(EngineError::InsufficientCredits).kind(), "ProviderCredits");
+        assert_eq!(AppError::from(EngineError::Unauthorized("OpenRouter")).kind(), "ProviderAuth");
+        assert_eq!(AppError::from(EngineError::InsufficientCredits("OpenRouter")).kind(), "ProviderCredits");
         assert_eq!(AppError::from(EngineError::RateLimited).kind(), "ProviderUnavailable");
         assert_eq!(AppError::from(EngineError::Network("x".into())).kind(), "ProviderUnavailable");
         assert_eq!(AppError::from(EngineError::ModelUnavailable("m".into())).kind(), "ProviderUnavailable");

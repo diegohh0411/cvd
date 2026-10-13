@@ -11,7 +11,7 @@ use crate::state::ResearchEnv;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
 use tokio_util::sync::CancellationToken;
-use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
+use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, OPENROUTER, SUBQ};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
@@ -109,8 +109,8 @@ impl From<EngineError> for AppError {
     fn from(e: EngineError) -> Self {
         match e {
             EngineError::ContextOverflow => Self::ContextOverflow(e.to_string()),
-            EngineError::Unauthorized => Self::ProviderAuth(e.to_string()),
-            EngineError::InsufficientCredits => Self::ProviderCredits(e.to_string()),
+            EngineError::Unauthorized(_) => Self::ProviderAuth(e.to_string()),
+            EngineError::InsufficientCredits(_) => Self::ProviderCredits(e.to_string()),
             EngineError::RateLimited | EngineError::Network(_) | EngineError::ModelUnavailable(_) => {
                 Self::ProviderUnavailable(e.to_string())
             }
@@ -702,7 +702,7 @@ pub struct KeyStatus {
 }
 
 fn known_provider(provider: &str) -> Res<()> {
-    if provider == OPENROUTER || provider == EXA {
+    if provider == OPENROUTER || provider == SUBQ || provider == EXA {
         Ok(())
     } else {
         Err(AppError::NotFound(format!("Unknown provider {provider}.")))
@@ -722,6 +722,8 @@ pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<K
     let key = key.trim();
     if provider == EXA {
         ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
+    } else if provider == SUBQ {
+        SubQProvider::new(st.subq_base.clone(), key.into()).validate_key().await?;
     } else {
         OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
     }

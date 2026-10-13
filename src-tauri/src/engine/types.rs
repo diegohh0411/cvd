@@ -27,10 +27,10 @@ pub enum EngineError {
     BadResponse(String),
     #[error("too many questions in one request (max 128)")]
     TooManyQuestions,
-    #[error("Check your OpenRouter key")]
-    Unauthorized,
-    #[error("Out of OpenRouter credits")]
-    InsufficientCredits,
+    #[error("Check your {0} key")]
+    Unauthorized(&'static str),
+    #[error("Out of {0} credits")]
+    InsufficientCredits(&'static str),
     #[error("Rate limited by the provider; try again shortly")]
     RateLimited,
     #[error("Network error: {0}")]

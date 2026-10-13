@@ -41,10 +41,10 @@ describe('ProvidersPageComponent', () => {
     provider_key_status: { has_key: false, last4: null },
   };
 
-  it('shows the local card first, then OpenRouter and Exa', async () => {
+  it('shows the local card first, then OpenRouter, SubQ and Exa', async () => {
     const { el } = await render(ProvidersPageComponent, handlers);
     const titles = [...el.querySelectorAll('[data-testid=provider-title]')].map((e) => e.textContent?.trim());
-    expect(titles).toEqual(['Llama.cpp (local)', 'OpenRouter', 'Exa']);
+    expect(titles).toEqual(['Llama.cpp (local)', 'OpenRouter', 'SubQ', 'Exa']);
   });
 
   it('summarizes the local runtime', async () => {
@@ -77,6 +77,16 @@ describe('role options', () => {
 
   it('prefixes online ids with the provider', () => {
     expect(onlineOptions(remote)[0]).toEqual({ id: 'openrouter:deepseek/x', label: 'DeepSeek X', installed: true, detail: '' });
+    const subq: ProviderModels[] = [
+      { provider: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
+    ];
+    expect(onlineOptions(subq)[0]).toEqual({ id: 'subq:subq-snap-preview', label: 'SubQ Snap', installed: true, detail: '$0.05 / M tokens' });
+    expect(providerOf('subq:subq-snap-preview')).toBe('subq');
+  });
+
+  it('derives SubQ role status from its own key', () => {
+    expect(roleStatus({ active: 'subq:subq-snap-preview', installed: [], hasOpenRouterKey: true, hasSubQKey: false })).toBe('needs-setup');
+    expect(roleStatus({ active: 'subq:subq-snap-preview', installed: [], hasOpenRouterKey: false, hasSubQKey: true })).toBe('ready');
   });
 
   it('derives the role status', () => {
@@ -142,6 +152,24 @@ describe('RoleCardComponent', () => {
     const link = [...c.el.querySelectorAll('a')].find((a) => a.textContent?.includes('Add your OpenRouter key'))!;
     expect(link.getAttribute('href')).toBe('/ai/providers');
     expect(c.t.callsTo('list_remote_models')).toHaveLength(0);
+  });
+
+  const subqLists: ProviderModels[] = [
+    { provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }], error: null },
+    { provider: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
+  ];
+
+  it('shows SubQ models under the SubQ tab only', async () => {
+    const c = await card('system-one', { list_remote_models: subqLists });
+    c.segment('SubQ').click();
+    await c.settle();
+    expect(c.radio('subq:subq-snap-preview')).not.toBeNull();
+    expect(c.radio('openrouter:deepseek/x')).toBeNull();
+  });
+
+  it('offers no SubQ tab for research', async () => {
+    const c = await card('research', { list_remote_models: subqLists });
+    expect(c.segment('SubQ')).toBeUndefined();
   });
 
   it('needs setup when active local model is not installed', async () => {

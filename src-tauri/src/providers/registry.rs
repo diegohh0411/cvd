@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::openrouter::OPENROUTER;
-use super::{ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel};
+use super::{ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel, SubQProvider, SUBQ};
 use crate::engine::DecisionEngine;
 use crate::store::{Store, StoreError};
 
@@ -24,15 +24,22 @@ pub struct ProviderRegistry {
 }
 
 fn missing_key(provider: &str) -> ProviderError {
-    let name = if provider == OPENROUTER { "OpenRouter" } else { provider };
+    let name = match provider {
+        OPENROUTER => "OpenRouter",
+        SUBQ => "SubQ",
+        _ => provider,
+    };
     ProviderError::Missing(format!("Add your {name} key in Settings."))
 }
 
 impl ProviderRegistry {
-    pub async fn load(store: &Store, openrouter_base: &str) -> Result<Self, StoreError> {
+    pub async fn load(store: &Store, openrouter_base: &str, subq_base: &str) -> Result<Self, StoreError> {
         let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
         if let Some(key) = store.get_secret(OPENROUTER).await? {
             providers.push(Arc::new(OpenRouterProvider::new(openrouter_base.into(), key)));
+        }
+        if let Some(key) = store.get_secret(SUBQ).await? {
+            providers.push(Arc::new(SubQProvider::new(subq_base.into(), key)));
         }
         Ok(Self { providers, cache: Mutex::default() })
     }

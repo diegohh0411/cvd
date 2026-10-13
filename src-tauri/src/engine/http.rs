@@ -14,6 +14,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 
 pub struct HttpSystemOneEngine {
+    /// Display name for user-facing errors, e.g. "OpenRouter".
+    provider: &'static str,
     base_url: String,
     api_key: String,
     model: String,
@@ -21,9 +23,9 @@ pub struct HttpSystemOneEngine {
 }
 
 impl HttpSystemOneEngine {
-    pub fn new(base_url: String, api_key: String, model: String) -> Self {
+    pub fn new(provider: &'static str, base_url: String, api_key: String, model: String) -> Self {
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("reqwest client");
-        Self { base_url, api_key, model, http }
+        Self { provider, base_url, api_key, model, http }
     }
 
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
@@ -46,8 +48,13 @@ fn retry_after(resp: &reqwest::Response) -> Duration {
         .min(MAX_RETRY_AFTER)
 }
 
+/// OpenRouter errors live at `/error/message`; SubQ's at `/detail/message`.
 fn error_message(v: &Value) -> String {
-    v.pointer("/error/message").and_then(Value::as_str).unwrap_or("unknown error").to_string()
+    v.pointer("/error/message")
+        .or_else(|| v.pointer("/detail/message"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown error")
+        .to_string()
 }
 
 #[async_trait]
@@ -70,11 +77,13 @@ impl DecisionEngine for HttpSystemOneEngine {
         let json: Option<Value> = serde_json::from_slice(&bytes).ok();
         let msg = || json.as_ref().map(error_message).unwrap_or_else(|| String::from_utf8_lossy(&bytes).into());
         match status.as_u16() {
-            401 | 403 => Err(EngineError::Unauthorized),
-            402 => Err(EngineError::InsufficientCredits),
+            401 | 403 => Err(EngineError::Unauthorized(self.provider)),
+            402 => Err(EngineError::InsufficientCredits(self.provider)),
             429 => Err(EngineError::RateLimited),
             404 => Err(EngineError::ModelUnavailable(self.model.clone())),
             400 if msg().contains("does not exist") => Err(EngineError::ModelUnavailable(self.model.clone())),
+            400 if msg().contains("token limit") => Err(EngineError::ContextOverflow),
+            _ if !status.is_success() => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),
             _ => match json {
                 Some(v) => parse_wire_response(v),
                 None => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),

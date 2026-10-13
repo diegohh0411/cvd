@@ -5,7 +5,7 @@ import { onEngineStatus } from '../ipc/events';
 import type { EngineStatus } from '../ipc/types';
 import { ModelsStore } from './models.store';
 
-const REMOTE_PREFIX = 'openrouter:';
+const REMOTE_PREFIX = /^(openrouter|subq):/;
 
 const LABELS: Record<EngineStatus['state'], string> = {
   none: 'no model',
@@ -24,11 +24,12 @@ export class EngineStore {
   readonly modelLabel = computed(() => {
     const id = this.status().model_id;
     if (!id) return 'No model';
-    if (id.startsWith(REMOTE_PREFIX)) return `${id.slice(REMOTE_PREFIX.length)} (online)`;
+    const remote = REMOTE_PREFIX.exec(id);
+    if (remote) return `${id.slice(remote[0].length)} (online)`;
     const spec = this.models.models().find((m) => m.spec.id === id)?.spec;
     return spec ? spec.label.replace(/\s*\(.*\)$/, '') : id;
   });
-  readonly remote = computed(() => this.status().model_id?.startsWith(REMOTE_PREFIX) ?? false);
+  readonly remote = computed(() => REMOTE_PREFIX.test(this.status().model_id ?? ''));
   readonly stateLabel = computed(() => LABELS[this.status().state]);
   readonly ok = computed(() => this.status().state === 'idle' || this.status().state === 'ready');
 
