@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use super::types::{Answer, EngineError, Question};
 use super::wire::{parse_wire_response, wire_request};
-use super::DecisionEngine;
+use super::{DecisionEngine, MAX_QUESTIONS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
@@ -31,7 +31,7 @@ impl HttpSystemOneEngine {
     }
 
     pub fn with_max_questions(mut self, cap: Option<usize>) -> Self {
-        self.max_questions = cap;
+        self.max_questions = cap.map(|c| c.clamp(1, MAX_QUESTIONS));
         self
     }
 
@@ -66,8 +66,8 @@ fn error_message(v: &Value) -> String {
 
 #[async_trait]
 impl DecisionEngine for HttpSystemOneEngine {
-    fn max_questions(&self) -> Option<usize> {
-        self.max_questions
+    fn max_questions(&self) -> usize {
+        self.max_questions.unwrap_or(MAX_QUESTIONS)
     }
 
     async fn decide(

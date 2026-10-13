@@ -21,9 +21,9 @@ pub const MAX_QUESTIONS: usize = 128;
 
 #[async_trait]
 pub trait DecisionEngine: Send + Sync {
-    /// The provider's cap on questions per request. `None` means `MAX_QUESTIONS`.
-    fn max_questions(&self) -> Option<usize> {
-        None
+    /// The most questions this engine accepts per request, in `1..=MAX_QUESTIONS`.
+    fn max_questions(&self) -> usize {
+        MAX_QUESTIONS
     }
 
     async fn decide(
@@ -33,14 +33,15 @@ pub trait DecisionEngine: Send + Sync {
     ) -> Result<BTreeMap<String, Answer>, EngineError>;
 }
 
-/// Enforces the engine's question cap (or `MAX_QUESTIONS`) before calling it.
+/// Enforces the engine's question cap before calling it.
 pub async fn decide_checked(
     engine: &dyn DecisionEngine,
     state: &str,
     questions: &BTreeMap<String, Question>,
 ) -> Result<BTreeMap<String, Answer>, EngineError> {
-    if questions.len() > engine.max_questions().unwrap_or(MAX_QUESTIONS) {
-        return Err(EngineError::TooManyQuestions);
+    let max = engine.max_questions();
+    if questions.len() > max {
+        return Err(EngineError::TooManyQuestions { max });
     }
     engine.decide(state, questions).await
 }

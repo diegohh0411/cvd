@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{
-    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question, MAX_QUESTIONS,
+    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question,
 };
 use crate::store::types::*;
 use crate::store::{Store, StoreError};
@@ -348,7 +348,7 @@ async fn execute(
     on_progress(Progress::Scoring { done, total });
 
     let state = questions::jd_state(&jd.raw_text, company);
-    let cap = engine.max_questions().unwrap_or(MAX_QUESTIONS);
+    let cap = engine.max_questions();
     for batch in batches(todo, &state, cfg.token_budget, cap) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();
