@@ -15,10 +15,12 @@ import { ProfileStore } from '../../core/stores/profile.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { BlockerAlertComponent } from '../jobs/blocker-alert.component';
 import { JobPropertiesComponent } from '../jobs/job-properties.component';
+import { openJobUrl } from '../jobs/job-url';
 import { MatchReadiness } from '../jobs/match-readiness';
 import { WorkspaceCardsComponent } from './cards.component';
 import { defaultFileName, ExportService } from './export.service';
 import { ExportsTabComponent } from './exports-tab.component';
+import { renderJd } from './jd-markdown';
 import { CompanyPanelComponent, contextBadge } from '../companies/company-panel.component';
 import { MatchingStepperComponent } from './matching-stepper.component';
 import { PdfPreviewComponent } from './pdf-preview.component';
@@ -183,7 +185,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
               <div role="tabpanel" class="min-h-0 flex-1 overflow-y-auto">
                 @switch (tab()) {
                   @case ('jd') {
-                    <article class="text-sm leading-relaxed whitespace-pre-wrap">{{ ws.job()?.raw_text }}</article>
+                    <article class="jd-prose max-w-[66ch]" [innerHTML]="jdHtml()" (click)="openLink($event)"></article>
                   }
                   @case ('selection') {
                     <app-selection-list />
@@ -214,6 +216,15 @@ export class WorkspacePageComponent {
   readonly tabParam = input<string | undefined>(undefined, { alias: 'tab' });
 
   protected readonly ws = inject(WorkspaceStore);
+  protected readonly jdHtml = computed(() => renderJd(this.ws.job()?.raw_text ?? ''));
+
+  /** Opens JD links in the system browser instead of navigating the app webview. */
+  protected openLink(event: MouseEvent): void {
+    const link = event.target instanceof Element ? event.target.closest('a') : null;
+    if (!link) return;
+    event.preventDefault();
+    openJobUrl(link.href);
+  }
   protected readonly engine = inject(EngineStore);
   protected readonly readiness = inject(MatchReadiness);
   private readonly profile = inject(ProfileStore);
