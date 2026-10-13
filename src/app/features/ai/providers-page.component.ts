@@ -17,6 +17,7 @@ import { ProviderKeyComponent } from './provider-key.component';
       </div>
       <div class="rounded-lg border p-4"><app-local-provider /></div>
       <div class="rounded-lg border p-4"><app-provider-key provider="openrouter" /></div>
+      <div class="rounded-lg border p-4"><app-provider-key provider="subq" /></div>
       <div class="rounded-lg border p-4"><app-provider-key provider="exa" /></div>
     </div>
   `,

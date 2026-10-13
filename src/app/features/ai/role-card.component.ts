@@ -62,7 +62,7 @@ const STATUS = {
       }
 
       <div role="group" aria-label="Provider" class="bg-muted text-muted-foreground inline-flex w-fit rounded-lg p-1">
-        @for (p of providers; track p.id) {
+        @for (p of providers(); track p.id) {
           <button
             type="button"
             class="rounded-md px-3 py-1 font-medium"
@@ -77,7 +77,7 @@ const STATUS = {
 
       @if (pending(); as m) {
         <div class="grid gap-3 rounded-lg border p-4" role="alertdialog" aria-label="Online model notice">
-          <p>Your CV entries and job descriptions will be sent to OpenRouter and the model's provider.</p>
+          <p>Your CV entries and job descriptions will be sent to {{ keyName(providerOf(m.id)) }} and the model's provider.</p>
           <div class="flex gap-2">
             <button z-button zSize="sm" (click)="confirm(m)">Use {{ m.label }}</button>
             <button z-button zType="outline" zSize="sm" (click)="pending.set(null)">Cancel</button>
@@ -85,11 +85,11 @@ const STATUS = {
         </div>
       }
 
-      @if (viewing() === 'openrouter' && !hasOpenRouter()) {
+      @if (viewing() !== 'local' && !hasKey(viewing())) {
         <div class="text-muted-foreground rounded-lg border border-dashed p-6 text-center">
-          <a routerLink="/ai/providers" class="underline">Add your OpenRouter key →</a> to use online models.
+          <a routerLink="/ai/providers" class="underline">Add your {{ keyName(viewing()) }} key →</a> to use online models.
         </div>
-      } @else if (viewing() === 'openrouter' && onlineError(); as err) {
+      } @else if (viewing() !== 'local' && onlineError(); as err) {
         <div class="grid justify-items-start gap-2 rounded-lg border p-4">
           <p class="text-destructive" role="alert">{{ err }}</p>
           <button z-button zType="outline" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Retry</button>
@@ -103,7 +103,7 @@ const STATUS = {
           }
         </div>
       } @else {
-        @if (viewing() === 'openrouter') {
+        @if (viewing() !== 'local') {
           <div class="-mb-2 flex justify-end">
             <button z-button zType="ghost" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Refresh</button>
           </div>
@@ -150,7 +150,7 @@ const STATUS = {
         <div class="grid gap-2 border-t pt-3">
           <div class="flex flex-wrap items-center gap-3">
             <span class="text-muted-foreground">
-              {{ engine.remote() ? 'OpenRouter (online)' : 'llama.cpp on 127.0.0.1, started on the first match' }} ·
+              {{ engine.remote() ? 'Online model' : 'llama.cpp on 127.0.0.1, started on the first match' }} ·
               {{ engine.stateLabel() }}
             </span>
             <button z-button zType="outline" zSize="sm" (click)="restart()">Restart</button>
@@ -172,10 +172,13 @@ export class RoleCardComponent implements OnInit {
   protected readonly engine = inject(EngineStore);
   private readonly toast = inject(ZardSonnerService);
 
-  protected readonly providers: { id: ProviderKind; label: string }[] = [
-    { id: 'local', label: 'Llama.cpp (local)' },
-    { id: 'openrouter', label: 'OpenRouter (online)' },
+  private readonly tabs: { id: ProviderKind; label: string; roles: Role[] }[] = [
+    { id: 'local', label: 'Llama.cpp (local)', roles: ['system-one', 'research'] },
+    { id: 'openrouter', label: 'OpenRouter (online)', roles: ['system-one', 'research'] },
+    { id: 'subq', label: 'SubQ (online)', roles: ['system-one'] },
   ];
+  protected readonly providerOf = providerOf;
+  protected readonly providers = computed(() => this.tabs.filter((t) => t.roles.includes(this.role())));
   protected readonly copy = computed(() => COPY[this.role()]);
   /** A pick in flight; the store's value wins again once it settles. */
   private readonly picking = signal<string | null>(null);
@@ -184,20 +187,26 @@ export class RoleCardComponent implements OnInit {
   );
   protected readonly viewing = signal<ProviderKind>('local');
   protected readonly hasOpenRouter = signal(false);
+  protected readonly hasSubQ = signal(false);
   protected readonly hasExa = signal(false);
   protected readonly online = signal<ProviderModels[] | null>(null);
   protected readonly loading = signal(false);
   protected readonly pending = signal<RoleOption | null>(null);
 
-  protected readonly onlineError = computed(() => this.online()?.find((p) => p.error)?.error ?? null);
+  protected readonly onlineError = computed(
+    () => this.online()?.find((p) => p.provider === this.viewing() && p.error)?.error ?? null,
+  );
   protected readonly options = computed(() =>
-    this.viewing() === 'local' ? localOptions(this.role(), this.models.models()) : onlineOptions(this.online() ?? []),
+    this.viewing() === 'local'
+      ? localOptions(this.role(), this.models.models())
+      : onlineOptions((this.online() ?? []).filter((p) => p.provider === this.viewing())),
   );
   private readonly status = computed(() =>
     roleStatus({
       active: this.active(),
       installed: this.models.installed(),
       hasOpenRouterKey: this.hasOpenRouter(),
+      hasSubQKey: this.hasSubQ(),
       hasExaKey: this.role() === 'research' ? this.hasExa() : undefined,
       engineError: this.role() === 'system-one' && this.engine.status().state === 'error',
     }),
@@ -207,28 +216,40 @@ export class RoleCardComponent implements OnInit {
     if (this.status() !== 'needs-setup') return null;
     const a = this.active();
     if (!a) return 'Choose a model below.';
-    if (providerOf(a) === 'openrouter' && !this.hasOpenRouter()) return 'The selected online model needs an OpenRouter key.';
+    if (providerOf(a) !== 'local' && !this.hasKey(providerOf(a))) return `The selected online model needs the ${this.keyName(providerOf(a))} key.`;
     if (providerOf(a) === 'local' && !this.models.installed().some((m) => m.spec.id === a)) return 'The selected model is not installed.';
     return null;
   });
 
   async ngOnInit(): Promise<void> {
     const research = this.role() === 'research';
-    const [or, exa] = await Promise.all([
+    const [or, subq, exa] = await Promise.all([
       api.providerKeyStatus('openrouter').catch(() => null),
+      api.providerKeyStatus('subq').catch(() => null),
       research ? api.providerKeyStatus('exa').catch(() => null) : null,
       research ? this.models.loadResearchModel() : null,
       this.models.load(),
       this.engine.load(),
     ]);
     this.hasOpenRouter.set(or?.has_key ?? false);
+    this.hasSubQ.set(subq?.has_key ?? false);
     this.hasExa.set(exa?.has_key ?? false);
     this.view(providerOf(this.active()));
   }
 
+  protected hasKey(p: ProviderKind): boolean {
+    if (p === 'openrouter') return this.hasOpenRouter();
+    if (p === 'subq') return this.hasSubQ();
+    return true;
+  }
+
+  protected keyName(p: ProviderKind): string {
+    return p === 'subq' ? 'SubQ' : 'OpenRouter';
+  }
+
   protected view(p: ProviderKind): void {
     this.viewing.set(p);
-    if (p === 'openrouter' && this.hasOpenRouter() && !this.online()) void this.loadOnline(false);
+    if (p !== 'local' && this.hasKey(p) && !this.online()) void this.loadOnline(false);
   }
 
   protected async loadOnline(refresh: boolean): Promise<void> {
@@ -236,7 +257,7 @@ export class RoleCardComponent implements OnInit {
     try {
       this.online.set(await api.listRemoteModels(refresh, this.role() === 'research' ? 'chat' : 'decision'));
     } catch (e) {
-      this.online.set([{ provider: 'openrouter', models: [], error: messageFor(e) }]);
+      this.online.set([{ provider: this.viewing(), models: [], error: messageFor(e) }]);
     } finally {
       this.loading.set(false);
     }
@@ -244,7 +265,7 @@ export class RoleCardComponent implements OnInit {
 
   protected async pick(o: RoleOption): Promise<void> {
     if (this.picking() || o.id === this.active() || !o.installed) return;
-    if (providerOf(o.id) === 'openrouter') {
+    if (providerOf(o.id) !== 'local') {
       const ack = await api.getUiSetting(REMOTE_NOTICE_SETTING).catch(() => null);
       if (ack !== '1') {
         this.pending.set(o);

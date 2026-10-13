@@ -2,6 +2,7 @@
 //! through `AppState`'s sidecar path; remote providers implement `Provider`.
 mod openrouter;
 mod registry;
+mod subq;
 
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use crate::engine::DecisionEngine;
 
 pub use openrouter::{OpenRouterProvider, OPENROUTER, OPENROUTER_BASE};
 pub use registry::{ProviderModels, ProviderRegistry};
+pub use subq::{SubQProvider, SUBQ, SUBQ_BASE};
 
 pub const LOCAL: &str = "local";
 

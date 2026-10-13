@@ -12,7 +12,7 @@ use crate::company::agent::ResearchError;
 use crate::company::coordinator::{ResearchCoordinator, ResearchFn};
 use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
 use crate::models::{self, ModelKind, REGISTRY};
-use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE};
+use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE, SUBQ_BASE};
 use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
 use crate::store::Store;
 
@@ -52,6 +52,7 @@ pub struct AppState {
     /// Remote providers with keys; rebuilt by `reload_providers`.
     providers: RwLock<Arc<ProviderRegistry>>,
     pub openrouter_base: String,
+    pub subq_base: String,
     /// Web search for company research; `None` until an Exa key is stored.
     search: RwLock<Option<Arc<dyn SearchProvider>>>,
     pub exa_base: String,
@@ -106,6 +107,7 @@ impl AppState {
             emit,
             providers: RwLock::default(),
             openrouter_base: OPENROUTER_BASE.into(),
+            subq_base: SUBQ_BASE.into(),
             search: RwLock::default(),
             exa_base: EXA_BASE.into(),
             research: ResearchSlot::default(),
@@ -121,6 +123,11 @@ impl AppState {
         self
     }
 
+    pub fn with_subq_base(mut self, base: String) -> Self {
+        self.subq_base = base;
+        self
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_exa_base(mut self, base: String) -> Self {
         self.exa_base = base;
@@ -129,7 +136,7 @@ impl AppState {
 
     /// Rebuilds the provider registry and search backend from the stored keys.
     pub async fn reload_providers(&self) -> Result<(), AppError> {
-        let reg = ProviderRegistry::load(&self.store, &self.openrouter_base).await?;
+        let reg = ProviderRegistry::load(&self.store, &self.openrouter_base, &self.subq_base).await?;
         *self.providers.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(reg);
         let search = self
             .store

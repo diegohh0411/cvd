@@ -3,7 +3,7 @@
 A local-first desktop app that tailors your CV to each job. Keep one library of your real experience, paste a job description, and CVD ranks your entries and bullets against the role, then exports a one-page, ATS-friendly PDF.
 
 - **Truthful:** it only selects and orders your own content. It never writes or rewrites it.
-- **Private:** your data lives in a local SQLite database. Matching runs on a local model by default; the only network use is downloading the model, plus optional OpenRouter models if you add a key.
+- **Private:** your data lives in a local SQLite database. Matching runs on a local model by default; the only network use is downloading the model, plus optional online models (OpenRouter, or SubQ Snap for decisions) if you add a key.
 - **Explainable:** you can see why each item was picked, override any choice, and watch the page fill live.
 
 ## How it works

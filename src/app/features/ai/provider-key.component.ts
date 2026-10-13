@@ -12,6 +12,11 @@ const COPY: Record<ProviderId, { name: string; placeholder: string; hint: string
     placeholder: 'sk-or-...',
     hint: 'Lets you run online models. Matching or researching with them sends your CV and job text to OpenRouter.',
   },
+  subq: {
+    name: 'SubQ',
+    placeholder: 'SubQ API key',
+    hint: 'Lets you run SubQ Snap for decisions. Matching with it sends your CV and job text to SubQ.',
+  },
   exa: {
     name: 'Exa',
     placeholder: 'Exa API key',

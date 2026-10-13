@@ -195,7 +195,7 @@ export type AppErrorKind =
   | 'MailAuth'
   | 'MailUnavailable';
 
-export type ProviderId = 'openrouter' | 'exa';
+export type ProviderId = 'openrouter' | 'subq' | 'exa';
 
 export interface KeyStatus {
   has_key: boolean;
