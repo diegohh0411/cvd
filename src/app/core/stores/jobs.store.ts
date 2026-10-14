@@ -44,6 +44,12 @@ export class JobsStore {
     this.jobs.update((js) => js.map((j) => (j.id === id ? { ...j, status_id: statusId, url: url.trim() } : j)));
   }
 
+  /** Saves the description text and patches the cached job. */
+  async setDescription(id: number, rawText: string): Promise<void> {
+    await api.updateJobDescription(id, rawText);
+    this.jobs.update((js) => js.map((j) => (j.id === id ? { ...j, raw_text: rawText } : j)));
+  }
+
   /** A status was deleted server-side (ON DELETE SET NULL); mirror it. */
   clearStatus(statusId: number): void {
     this.jobs.update((js) => js.map((j) => (j.status_id === statusId ? { ...j, status_id: null } : j)));

@@ -53,6 +53,7 @@ export const createJob = (title: string, company: string, rawText: string, url =
   call<number>('create_job', { title, company, rawText, url, statusId });
 export const updateJobTracking = (id: number, statusId: number | null, url: string) =>
   call<void>('update_job_tracking', { id, statusId, url });
+export const updateJobDescription = (id: number, rawText: string) => call<void>('update_job_description', { id, rawText });
 export const fetchJobDescription = (url: string) => call<string>('fetch_job_description', { url });
 export const listJobs = () => call<JobDescription[]>('list_jobs');
 export const getJob = (id: number) => call<JobDescription>('get_job', { id });
