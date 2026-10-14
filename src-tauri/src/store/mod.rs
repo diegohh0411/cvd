@@ -531,6 +531,16 @@ impl Store {
         Ok(done.rows_affected() > 0)
     }
 
+    /// Replaces a job's description text. Returns false when the job does not exist.
+    pub async fn update_jd_text(&self, id: i64, raw_text: &str) -> Result<bool> {
+        let done = sqlx::query("UPDATE job_description SET raw_text = ? WHERE id = ?")
+            .bind(raw_text)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
     // ---- job statuses ----
 
     pub async fn list_job_statuses(&self) -> Result<Vec<JobStatus>> {

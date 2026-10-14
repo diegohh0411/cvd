@@ -223,6 +223,13 @@ pub async fn update_job_tracking(st: &AppState, id: i64, status_id: Option<i64>,
     Ok(())
 }
 
+pub async fn update_job_description(st: &AppState, id: i64, raw_text: &str) -> Res<()> {
+    if !st.store.update_jd_text(id, raw_text).await? {
+        return Err(AppError::NotFound(format!("Job description {id} not found.")));
+    }
+    Ok(())
+}
+
 /// Longest posting read from a URL. Pasted text has no limit.
 const JOB_PAGE_CHARS: usize = 30_000;
 
@@ -971,6 +978,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn update_job_tracking(st: S<'_>, id: i64, status_id: Option<i64>, url: String) -> Res<()> {
         super::update_job_tracking(&st, id, status_id, &url).await
+    }
+    #[tauri::command]
+    pub async fn update_job_description(st: S<'_>, id: i64, raw_text: String) -> Res<()> {
+        super::update_job_description(&st, id, &raw_text).await
     }
     #[tauri::command]
     pub async fn fetch_job_description(url: String) -> Res<String> {

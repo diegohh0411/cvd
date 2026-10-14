@@ -247,6 +247,15 @@ async fn job_tracking_defaults_and_status_delete_clears() {
 }
 
 #[tokio::test]
+async fn job_description_text_is_editable() {
+    let s = store().await;
+    let jd = s.create_jd("Dev", "Acme", "old", "", None).await.unwrap();
+    assert!(s.update_jd_text(jd, "## New\n\nBuild compilers.").await.unwrap());
+    assert_eq!(s.get_jd(jd).await.unwrap().unwrap().raw_text, "## New\n\nBuild compilers.");
+    assert!(!s.update_jd_text(9999, "x").await.unwrap());
+}
+
+#[tokio::test]
 async fn secret_roundtrip() {
     let s = store().await;
     assert_eq!(s.get_secret("openrouter").await.unwrap(), None);

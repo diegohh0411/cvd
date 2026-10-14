@@ -60,6 +60,7 @@ pub fn run() {
             ipc::list_skills,
             ipc::create_job,
             ipc::update_job_tracking,
+            ipc::update_job_description,
             ipc::fetch_job_description,
             ipc::list_job_statuses,
             ipc::create_job_status,
