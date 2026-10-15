@@ -1,0 +1,35 @@
+name: Backend
+
+on:
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - ".github/workflows/backend.yml"
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Rust checks
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # tauri-build requires the externalBin sidecar to exist at compile time.
+      - run: bash src-tauri/scripts/fetch-llama-server.sh
+
+      - name: Build
+        run: cargo check --all-targets --locked
+        working-directory: src-tauri
+
+      - name: Test
+        run: cargo test --locked
+        working-directory: src-tauri
