@@ -11,7 +11,10 @@ use crate::state::ResearchEnv;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
 use tokio_util::sync::CancellationToken;
-use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, OPENROUTER, SUBQ};
+use crate::providers::{
+    kind_of, load_rows, next_id, save_rows, Connection, ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, TypeSafeProvider,
+    OPENROUTER, SUBQ, TYPESAFE,
+};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
@@ -708,11 +711,14 @@ pub struct KeyStatus {
     pub last4: Option<String>,
 }
 
-fn known_provider(provider: &str) -> Res<()> {
-    if provider == OPENROUTER || provider == SUBQ || provider == EXA {
+/// Accepts a provider id or a connection id (`openrouter~2`); Exa has a single key.
+fn known_provider(id: &str) -> Res<()> {
+    let kind = kind_of(id);
+    let extra = kind != id;
+    if kind == OPENROUTER || kind == SUBQ || kind == TYPESAFE || (kind == EXA && !extra) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Unknown provider {provider}.")))
+        Err(AppError::NotFound(format!("Unknown provider {id}.")))
     }
 }
 
@@ -723,30 +729,108 @@ fn key_status(key: Option<&str>) -> KeyStatus {
     }
 }
 
-/// Validates, stores and activates a provider key. Leading/trailing whitespace is dropped.
-pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
-    known_provider(provider)?;
-    let key = key.trim();
-    if provider == EXA {
+/// Checks `key` against the provider's own API.
+async fn validate_key(st: &AppState, kind: &str, key: &str) -> Res<()> {
+    if kind == EXA {
         ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
-    } else if provider == SUBQ {
+    } else if kind == SUBQ {
         SubQProvider::new(st.subq_base.clone(), key.into()).validate_key().await?;
+    } else if kind == TYPESAFE {
+        TypeSafeProvider::new(st.typesafe_base.clone(), key.into()).validate_key().await?;
     } else {
         OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
     }
-    st.store.set_secret(provider, key).await?;
+    Ok(())
+}
+
+async fn providers_changed(st: &AppState) -> Res<()> {
     st.reload_providers().await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    Ok(())
+}
+
+/// Validates, stores and activates a key under `provider`, a provider or connection id.
+/// Leading/trailing whitespace is dropped.
+pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
+    known_provider(provider)?;
+    let key = key.trim();
+    validate_key(st, kind_of(provider), key).await?;
+    st.store.set_secret(provider, key).await?;
+    providers_changed(st).await?;
     Ok(key_status(Some(key)))
 }
 
 pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
     known_provider(provider)?;
     st.store.delete_secret(provider).await?;
+    let rows = load_rows(&st.store).await?;
+    // A removed extra key takes its label with it; a default key's row (just a rename) goes too.
+    let kept: Vec<Connection> = rows.into_iter().filter(|r| r.id != provider).collect();
+    save_rows(&st.store, &kept).await?;
+    providers_changed(st).await
+}
+
+/// A saved key as the UI lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConnectionView {
+    pub id: String,
+    pub provider: String,
+    pub label: String,
+    pub last4: Option<String>,
+}
+
+/// Every saved model-provider key (Exa excluded), defaults first.
+pub async fn list_connections(st: &AppState) -> Res<Vec<ConnectionView>> {
+    let rows = load_rows(&st.store).await?;
+    let mut out = Vec::new();
+    for kind in [OPENROUTER, SUBQ, TYPESAFE] {
+        let extras = rows.iter().filter(|r| r.provider == kind && r.id != kind).map(|r| r.id.clone());
+        for id in std::iter::once(kind.to_string()).chain(extras) {
+            let Some(key) = st.store.get_secret(&id).await? else { continue };
+            let label = rows.iter().find(|r| r.id == id).map_or_else(|| kind.to_string(), |r| r.label.clone());
+            out.push(ConnectionView { last4: key_status(Some(&key)).last4, id, provider: kind.into(), label });
+        }
+    }
+    Ok(out)
+}
+
+/// Saves another key for `provider` under a fresh connection id and a label such as "Work".
+pub async fn add_connection(st: &AppState, provider: &str, label: &str, key: &str) -> Res<ConnectionView> {
+    if provider != OPENROUTER && provider != SUBQ && provider != TYPESAFE {
+        return Err(AppError::NotFound(format!("Unknown provider {provider}.")));
+    }
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    let key = key.trim();
+    validate_key(st, provider, key).await?;
+    let mut rows = load_rows(&st.store).await?;
+    // The first key of a provider keeps the bare id, so refs stored before connections still resolve.
+    let id = if st.store.get_secret(provider).await?.is_none() { provider.to_string() } else { next_id(provider, &rows) };
+    st.store.set_secret(&id, key).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection { id: id.clone(), provider: provider.into(), label: label.into() });
+    save_rows(&st.store, &rows).await?;
+    providers_changed(st).await?;
+    Ok(ConnectionView { id, provider: provider.into(), label: label.into(), last4: key_status(Some(key)).last4 })
+}
+
+pub async fn rename_connection(st: &AppState, id: &str, label: &str) -> Res<()> {
+    known_provider(id)?;
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    if st.store.get_secret(id).await?.is_none() {
+        return Err(AppError::NotFound(format!("No saved key for {id}.")));
+    }
+    let mut rows = load_rows(&st.store).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection { id: id.into(), provider: kind_of(id).into(), label: label.into() });
+    save_rows(&st.store, &rows).await?;
     st.reload_providers().await?;
-    st.reset_engine();
-    (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
 }
 
@@ -1046,6 +1130,18 @@ pub mod ipc {
     #[tauri::command]
     pub async fn delete_provider_key(st: S<'_>, provider: String) -> Res<()> {
         super::delete_provider_key(&st, &provider).await
+    }
+    #[tauri::command]
+    pub async fn list_connections(st: S<'_>) -> Res<Vec<ConnectionView>> {
+        super::list_connections(&st).await
+    }
+    #[tauri::command]
+    pub async fn add_connection(st: S<'_>, provider: String, label: String, key: String) -> Res<ConnectionView> {
+        super::add_connection(&st, &provider, &label, &key).await
+    }
+    #[tauri::command]
+    pub async fn rename_connection(st: S<'_>, id: String, label: String) -> Res<()> {
+        super::rename_connection(&st, &id, &label).await
     }
     #[tauri::command]
     pub async fn provider_key_status(st: S<'_>, provider: String) -> Res<KeyStatus> {

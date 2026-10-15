@@ -100,3 +100,18 @@ async fn subq_token_limit_is_context_overflow() {
     let err = status_error(400, serde_json::json!({"detail": {"error_type": "validation_error", "message": "input is over the token limit"}})).await;
     assert_eq!(err, EngineError::ContextOverflow);
 }
+
+#[tokio::test]
+async fn max_tokens_exceeded_is_context_overflow() {
+    let e = status_error(400, serde_json::json!({"code": "max_tokens_exceeded", "message": "request too long"})).await;
+    assert_eq!(e, EngineError::ContextOverflow);
+}
+
+#[tokio::test]
+async fn overloaded_529_is_retried_once_then_rate_limited() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).respond_with(ResponseTemplate::new(529)).mount(&server).await;
+    let err = engine(&server).decide("s", &questions()).await.unwrap_err();
+    assert_eq!(err, EngineError::RateLimited);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}

@@ -3,7 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::openrouter::OPENROUTER;
-use super::{ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel, SubQProvider, SUBQ};
+use super::{kind_of, load_rows};
+use super::{
+    ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel, SubQProvider, TypeSafeProvider, SUBQ, TYPESAFE,
+    TYPESAFE_BASE,
+};
 use crate::engine::DecisionEngine;
 use crate::store::{Store, StoreError};
 
@@ -11,7 +15,9 @@ const CACHE_TTL: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ProviderModels {
+    /// The connection id (`openrouter`, `openrouter~2`): what model refs carry.
     pub provider: String,
+    pub label: String,
     pub models: Vec<RemoteModel>,
     pub error: Option<String>,
 }
@@ -19,33 +25,70 @@ pub struct ProviderModels {
 /// The remote providers the user has keys for.
 #[derive(Default)]
 pub struct ProviderRegistry {
-    providers: Vec<Arc<dyn Provider>>,
+    providers: Vec<Connected>,
     cache: Mutex<HashMap<String, (Instant, Vec<RemoteModel>)>>,
 }
 
+struct Connected {
+    id: String,
+    label: String,
+    provider: Arc<dyn Provider>,
+}
+
+fn kind_name(kind: &str) -> &str {
+    match kind {
+        OPENROUTER => "OpenRouter",
+        SUBQ => "SubQ",
+        TYPESAFE => "TypeSafe",
+        _ => kind,
+    }
+}
+
 fn missing_key(provider: &str) -> ProviderError {
+    let provider = kind_of(provider);
     let name = match provider {
         OPENROUTER => "OpenRouter",
         SUBQ => "SubQ",
+        TYPESAFE => "TypeSafe",
         _ => provider,
     };
     ProviderError::Missing(format!("Add your {name} key in Settings."))
 }
 
 impl ProviderRegistry {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn load(store: &Store, openrouter_base: &str, subq_base: &str) -> Result<Self, StoreError> {
-        let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
-        if let Some(key) = store.get_secret(OPENROUTER).await? {
-            providers.push(Arc::new(OpenRouterProvider::new(openrouter_base.into(), key)));
-        }
-        if let Some(key) = store.get_secret(SUBQ).await? {
-            providers.push(Arc::new(SubQProvider::new(subq_base.into(), key)));
+        Self::load_with(store, openrouter_base, subq_base, TYPESAFE_BASE).await
+    }
+
+    pub async fn load_with(
+        store: &Store,
+        openrouter_base: &str,
+        subq_base: &str,
+        typesafe_base: &str,
+    ) -> Result<Self, StoreError> {
+        let rows = load_rows(store).await?;
+        let mut providers = Vec::new();
+        for kind in [OPENROUTER, SUBQ, TYPESAFE] {
+            // The bare id first, then extra keys in creation order.
+            let ids = std::iter::once(kind.to_string()).chain(rows.iter().filter(|r| r.provider == kind && r.id != kind).map(|r| r.id.clone()));
+            for id in ids {
+                let Some(key) = store.get_secret(&id).await? else { continue };
+                let provider: Arc<dyn Provider> = match kind {
+                    OPENROUTER => Arc::new(OpenRouterProvider::new(openrouter_base.into(), key)),
+                    SUBQ => Arc::new(SubQProvider::new(subq_base.into(), key)),
+                    _ => Arc::new(TypeSafeProvider::new(typesafe_base.into(), key)),
+                };
+                debug_assert_eq!(provider.id(), kind);
+                let label = rows.iter().find(|r| r.id == id).map_or_else(|| kind_name(kind).to_string(), |r| r.label.clone());
+                providers.push(Connected { id, label, provider });
+            }
         }
         Ok(Self { providers, cache: Mutex::default() })
     }
 
-    fn get(&self, provider: &str) -> Option<&Arc<dyn Provider>> {
-        self.providers.iter().find(|p| p.id() == provider)
+    fn get(&self, connection: &str) -> Option<&Arc<dyn Provider>> {
+        self.providers.iter().find(|c| c.id == connection).map(|c| &c.provider)
     }
 
     /// Why `r` can't be used right now, if it can't.
@@ -73,8 +116,8 @@ impl ProviderRegistry {
 
     async fn collect(&self, refresh: bool, chat: bool) -> Vec<ProviderModels> {
         let mut out = Vec::new();
-        for p in &self.providers {
-            let id = p.id().to_string();
+        for c in &self.providers {
+            let (id, p) = (c.id.clone(), &c.provider);
             let cache_key = if chat { format!("{id}#chat") } else { id.clone() };
             let cached = self
                 .cache
@@ -91,9 +134,9 @@ impl ProviderRegistry {
             out.push(match result {
                 Ok(models) => {
                     self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(cache_key, (Instant::now(), models.clone()));
-                    ProviderModels { provider: id, models, error: None }
+                    ProviderModels { provider: id, label: c.label.clone(), models, error: None }
                 }
-                Err(e) => ProviderModels { provider: id, models: vec![], error: Some(e.to_string()) },
+                Err(e) => ProviderModels { provider: id, label: c.label.clone(), models: vec![], error: Some(e.to_string()) },
             });
         }
         out

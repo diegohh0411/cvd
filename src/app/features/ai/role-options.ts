@@ -1,10 +1,11 @@
 import type { ModelInfo, ProviderModels } from '../../core/ipc/types';
 import { formatBytes } from '../../core/stores/models.store';
 
-/** The job a model does. */
-export type Role = 'system-one' | 'research';
-/** Where a model runs. */
-export type ProviderKind = 'local' | 'openrouter' | 'subq';
+import type { Role } from './provider-registry';
+
+export type { Role };
+/** Where a model runs: `local`, or a provider id from the registry. */
+export type ProviderKind = string;
 export type RoleStatus = 'ready' | 'needs-setup' | 'error';
 
 export interface RoleOption {
@@ -14,8 +15,6 @@ export interface RoleOption {
   detail: string;
 }
 
-export const REMOTE_PREFIX = 'openrouter:';
-export const SUBQ_PREFIX = 'subq:';
 /** Set to '1' once the user has acknowledged that online models receive their data. */
 export const REMOTE_NOTICE_SETTING = 'ui.remote_notice_ack';
 
@@ -25,10 +24,10 @@ export function formatPrice(perMtok: number | null): string {
   return `$${Number(perMtok.toPrecision(3))} / M tokens`;
 }
 
+/** Remote ids are `<provider>:<model>`; local ids never contain a colon. */
 export function providerOf(id: string | null): ProviderKind {
-  if (id?.startsWith(REMOTE_PREFIX)) return 'openrouter';
-  if (id?.startsWith(SUBQ_PREFIX)) return 'subq';
-  return 'local';
+  const i = id?.indexOf(':') ?? -1;
+  return id && i > 0 ? id.slice(0, i) : 'local';
 }
 
 const KIND: Record<Role, 'decision' | 'chat'> = { 'system-one': 'decision', research: 'chat' };
@@ -50,15 +49,15 @@ export function onlineOptions(lists: ProviderModels[]): RoleOption[] {
 export function roleStatus(i: {
   active: string | null;
   installed: ModelInfo[];
-  hasOpenRouterKey: boolean;
-  hasSubQKey?: boolean;
+  /** Which providers have a saved key, by provider id. */
+  keys: Record<string, boolean>;
   /** Research only; undefined means the role needs no Exa key. */
   hasExaKey?: boolean;
   engineError?: boolean;
 }): RoleStatus {
   if (i.engineError) return 'error';
   if (!i.active || i.hasExaKey === false) return 'needs-setup';
-  if (providerOf(i.active) === 'openrouter') return i.hasOpenRouterKey ? 'ready' : 'needs-setup';
-  if (providerOf(i.active) === 'subq') return i.hasSubQKey ? 'ready' : 'needs-setup';
+  const provider = providerOf(i.active);
+  if (provider !== 'local') return i.keys[provider] ? 'ready' : 'needs-setup';
   return i.installed.some((m) => m.spec.id === i.active) ? 'ready' : 'needs-setup';
 }

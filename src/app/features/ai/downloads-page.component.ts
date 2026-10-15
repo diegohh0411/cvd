@@ -7,27 +7,27 @@ import { PageHeaderComponent } from '../../shell/page-header.component';
 import { ModelCardsComponent } from './model-cards.component';
 
 @Component({
-  selector: 'app-ai-models-page',
+  selector: 'app-downloads-page',
   imports: [PageHeaderComponent, ModelCardsComponent, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <app-page-header [crumbs]="[{ label: 'AI' }, { label: 'Models' }]" />
+    <app-page-header [crumbs]="[{ label: 'AI' }, { label: 'Downloads' }]" />
     <div class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4">
       <div>
-        <h2 class="font-semibold">Local models</h2>
+        <h2 class="font-semibold">Downloads</h2>
         <p class="text-muted-foreground text-sm">
           Models run entirely on this computer; downloading is the only time the app goes online.
           @if (models.ramGb(); as ram) {
             This computer has {{ ram }} GB of RAM.
           }
-          Choose which one does each job on <a routerLink="/ai/roles" class="underline">Roles</a>.
+          Choose which one does each job on <a routerLink="/ai" class="underline">AI Models</a>.
         </p>
       </div>
       <app-model-cards />
     </div>
   `,
 })
-export class AiModelsPageComponent implements OnInit {
+export class DownloadsPageComponent implements OnInit {
   protected readonly models = inject(ModelsStore);
   private readonly engine = inject(EngineStore);
 

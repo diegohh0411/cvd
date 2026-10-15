@@ -109,6 +109,9 @@ pub fn run() {
             ipc::set_provider_key,
             ipc::delete_provider_key,
             ipc::provider_key_status,
+            ipc::list_connections,
+            ipc::add_connection,
+            ipc::rename_connection,
             ipc::list_remote_models,
         ])
         .build(tauri::generate_context!())

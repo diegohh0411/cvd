@@ -4,7 +4,7 @@ import { ShellComponent } from './shell/shell.component';
 
 /** Where an old `/models?tab=` link lands now. */
 export function modelsRedirect(tab: string | undefined): string {
-  return tab === 'engine' ? '/ai/roles' : '/ai/models';
+  return tab === 'engine' ? '/ai' : '/ai/downloads';
 }
 
 export const routes: Routes = [
@@ -29,10 +29,11 @@ export const routes: Routes = [
         loadComponent: () => import('./features/library/library-page.component').then((m) => m.LibraryPageComponent),
       },
       { path: 'profile', loadComponent: () => import('./features/profile/profile-page.component').then((m) => m.ProfilePageComponent) },
-      { path: 'ai', pathMatch: 'full', redirectTo: 'ai/roles' },
-      { path: 'ai/roles', loadComponent: () => import('./features/ai/roles-page.component').then((m) => m.RolesPageComponent) },
-      { path: 'ai/models', loadComponent: () => import('./features/ai/models-page.component').then((m) => m.AiModelsPageComponent) },
-      { path: 'ai/providers', loadComponent: () => import('./features/ai/providers-page.component').then((m) => m.ProvidersPageComponent) },
+      { path: 'ai', pathMatch: 'full', loadComponent: () => import('./features/ai/ai-models-page.component').then((m) => m.AiModelsPageComponent) },
+      { path: 'ai/downloads', loadComponent: () => import('./features/ai/downloads-page.component').then((m) => m.DownloadsPageComponent) },
+      { path: 'ai/roles', redirectTo: 'ai' },
+      { path: 'ai/providers', redirectTo: 'ai' },
+      { path: 'ai/models', redirectTo: 'ai/downloads' },
       { path: 'models', redirectTo: ({ queryParams }) => modelsRedirect(queryParams['tab']) },
       {
         path: 'settings',

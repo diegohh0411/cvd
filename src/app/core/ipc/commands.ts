@@ -20,6 +20,7 @@ import type {
   Override,
   Profile,
   ProcessedEmail,
+  Connection,
   ProviderId,
   ProviderModels,
   Ranked,
@@ -106,6 +107,10 @@ export const engineStatus = () => call<EngineStatus>('engine_status');
 export const setProviderKey = (provider: ProviderId, key: string) => call<KeyStatus>('set_provider_key', { provider, key });
 export const deleteProviderKey = (provider: ProviderId) => call<void>('delete_provider_key', { provider });
 export const providerKeyStatus = (provider: ProviderId) => call<KeyStatus>('provider_key_status', { provider });
+export const listConnections = () => call<Connection[]>('list_connections');
+export const addConnection = (provider: ProviderId, label: string, key: string) =>
+  call<Connection>('add_connection', { provider, label, key });
+export const renameConnection = (id: string, label: string) => call<void>('rename_connection', { id, label });
 export const listRemoteModels = (refresh: boolean, role: ModelRole = 'decision') =>
   call<ProviderModels[]>('list_remote_models', { refresh, role });
 

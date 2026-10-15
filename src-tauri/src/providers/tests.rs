@@ -225,3 +225,107 @@ async fn openrouter_lists_tool_models_for_chat() {
     let reg = ProviderRegistry::load(&keyed_store().await, &server.uri(), "http://127.0.0.1:1").await.unwrap();
     assert_eq!(reg.remote_chat_models(false).await[0].models.len(), 4);
 }
+
+fn typesafe_models() -> serde_json::Value {
+    serde_json::json!({"models": [
+        {"name": "jev-latest", "description": "Stable", "release_date": "2026-09-15"},
+        {"name": "jev-preview", "description": "Preview", "release_date": "2026-10-14"}
+    ]})
+}
+
+#[tokio::test]
+async fn typesafe_lists_jev_models() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .and(header("authorization", "Bearer ts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(typesafe_models()))
+        .mount(&server)
+        .await;
+    let p = TypeSafeProvider::new(server.uri(), "ts".into());
+    let models = p.list_models().await.unwrap();
+    let ids: Vec<_> = models.iter().map(|m| (m.provider.as_str(), m.id.as_str(), m.display_name.as_str())).collect();
+    assert_eq!(ids, [("typesafe", "jev-latest", "Jev (stable)"), ("typesafe", "jev-preview", "Jev (preview)")]);
+    assert_eq!(models[0].price_per_mtok_in, Some(0.042));
+    assert!(p.list_chat_models().await.unwrap().is_empty());
+    assert!(p.chat_endpoint("jev-latest").is_err());
+}
+
+#[tokio::test]
+async fn typesafe_401_is_key_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET")).and(path("/v1/models")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+    let err = TypeSafeProvider::new(server.uri(), "bad".into()).validate_key().await.unwrap_err();
+    assert_eq!(err, ProviderError::KeyRejected("TypeSafe"));
+    assert_eq!(err.to_string(), "Check your TypeSafe key");
+}
+
+#[tokio::test]
+async fn registry_routes_typesafe_decisions() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .and(header("authorization", "Bearer ts"))
+        .and(body_partial_json(serde_json::json!({"model": "jev-latest"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::from_str::<serde_json::Value>(include_str!("../../tests/fixtures/openrouter_systemone_response.json")).unwrap()))
+        .mount(&server)
+        .await;
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    s.set_secret(TYPESAFE, "ts").await.unwrap();
+    let reg = ProviderRegistry::load_with(&s, "http://127.0.0.1:1", "http://127.0.0.1:1", &server.uri()).await.unwrap();
+    let r = ModelRef::parse("typesafe:jev-latest");
+    assert!(reg.check(&r).is_ok());
+    let qs = std::collections::BTreeMap::from([(
+        "rust".to_string(),
+        crate::engine::Question::Noul { instructions: "Mentions Rust?".into() },
+    )]);
+    assert!(reg.engine(&r).unwrap().decide("Rewrote the ledger in Rust.", &qs).await.is_ok());
+}
+
+#[tokio::test]
+async fn registry_hides_keyless_typesafe() {
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1").await.unwrap();
+    let err = reg.check(&ModelRef::parse("typesafe:jev-latest")).unwrap_err();
+    assert!(matches!(err, ProviderError::Missing(m) if m.contains("TypeSafe key")));
+}
+
+#[test]
+fn connection_ids() {
+    assert_eq!(kind_of("openrouter"), "openrouter");
+    assert_eq!(kind_of("openrouter~2"), "openrouter");
+    let rows = vec![Connection { id: "openrouter~2".into(), provider: "openrouter".into(), label: "Work".into() }];
+    assert_eq!(next_id("openrouter", &rows), "openrouter~3");
+    assert_eq!(next_id("subq", &rows), "subq~2");
+    let r = ModelRef::parse("openrouter~2:inception/mercury-decide:free");
+    assert_eq!((r.provider.as_str(), r.id.as_str()), ("openrouter~2", "inception/mercury-decide:free"));
+    assert!(!r.is_local());
+}
+
+#[tokio::test]
+async fn registry_builds_one_provider_per_connection() {
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    s.set_secret("openrouter", "k1").await.unwrap();
+    s.set_secret("openrouter~2", "k2").await.unwrap();
+    save_rows(&s, &[Connection { id: "openrouter~2".into(), provider: "openrouter".into(), label: "Work".into() }]).await.unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(models_fixture()))
+        .mount(&server)
+        .await;
+    let reg = ProviderRegistry::load(&s, &server.uri(), "http://127.0.0.1:1").await.unwrap();
+    let lists = reg.remote_models(false).await;
+    let got: Vec<_> = lists.iter().map(|l| (l.provider.as_str(), l.label.as_str())).collect();
+    assert_eq!(got, [("openrouter", "OpenRouter"), ("openrouter~2", "Work")]);
+    assert!(reg.check(&ModelRef::parse("openrouter~2:x")).is_ok());
+    assert!(reg.check(&ModelRef::parse("openrouter~3:x")).is_err());
+}
+
+#[tokio::test]
+async fn connection_row_without_a_key_is_ignored() {
+    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    save_rows(&s, &[Connection { id: "subq~2".into(), provider: "subq".into(), label: "Ghost".into() }]).await.unwrap();
+    let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1").await.unwrap();
+    assert!(reg.remote_models(false).await.is_empty());
+}

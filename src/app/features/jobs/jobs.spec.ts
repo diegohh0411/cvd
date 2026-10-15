@@ -25,9 +25,9 @@ describe('match readiness', () => {
     expect(r.blocker()?.link).toBe('/library/experience');
   });
 
-  it('blocks without a model, pointing to AI › Models', async () => {
+  it('blocks without a model, pointing to AI › AI Models', async () => {
     const r = await setup([RANKED.entries[0].entry], 'none');
-    expect(r.blocker()?.link).toBe('/ai/models');
+    expect(r.blocker()?.link).toBe('/ai');
     expect(r.blocker()?.queryParams).toBeUndefined();
   });
 
