@@ -8,6 +8,7 @@ import { JobsStore } from './core/stores/jobs.store';
 import { LibraryStore } from './core/stores/library.store';
 import { ModelsStore } from './core/stores/models.store';
 import { ProfileStore } from './core/stores/profile.store';
+import { UpdateService } from './core/update.service';
 import { FirstRunDialogComponent } from './features/onboarding/first-run-dialog.component';
 import { FirstRunService } from './features/onboarding/first-run.service';
 
@@ -28,6 +29,7 @@ export class AppComponent implements OnInit {
   private readonly models = inject(ModelsStore);
   private readonly engine = inject(EngineStore);
   private readonly firstRun = inject(FirstRunService);
+  private readonly updates = inject(UpdateService);
 
   constructor() {
     inject(ZardDarkMode).init();
@@ -42,5 +44,6 @@ export class AppComponent implements OnInit {
     void this.jobs.load();
     void this.models.load();
     void this.engine.load();
+    void this.updates.checkOnStartup();
   }
 }
