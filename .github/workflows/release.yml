@@ -19,8 +19,8 @@ jobs:
           - name: macOS (Intel)
             target: x86_64-apple-darwin
     name: ${{ matrix.name }}
-    # Intel Mac; the Apple Silicon build is cross-compiled.
-    runs-on: [self-hosted, macOS, X64]
+    # Apple Silicon Mac; the Intel build is cross-compiled.
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
 
