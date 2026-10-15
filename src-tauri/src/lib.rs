@@ -1,30 +1,16 @@
-mod commands;
-mod company;
-#[allow(dead_code)]
-mod mail;
-// Some items in these modules are only used by tests or by later plans.
-#[allow(dead_code)]
-mod engine;
-#[allow(dead_code)]
-mod matcher;
-#[allow(dead_code)]
-mod models;
-mod providers;
-#[allow(dead_code)]
-mod render;
-mod search;
-mod web;
-mod state;
-#[allow(dead_code)]
-pub mod store;
-pub mod mcp;
+mod ipc;
+mod launcher;
+
+/// Re-exported so the `cvd-mcp` binary keeps its import paths.
+pub use cvd_core::{mcp, store};
 
 use std::sync::Arc;
 
 use tauri::{Emitter as _, Manager};
 
-use commands::ipc;
-use state::{AppState, EngineSource};
+use cvd_core::state::{AppState, EngineSource};
+
+use launcher::TauriLauncher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -44,7 +30,7 @@ pub fn run() {
             let state = AppState::new(
                 store,
                 dir.join("models"),
-                EngineSource::Sidecar(handle),
+                EngineSource::Sidecar(Arc::new(move || Box::new(TauriLauncher(handle.clone())))),
                 Arc::new(move |event: &str, payload: serde_json::Value| {
                     let _ = emit_handle.emit(event, payload);
                 }),

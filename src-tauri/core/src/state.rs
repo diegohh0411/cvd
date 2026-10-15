@@ -1,4 +1,4 @@
-//! Shared application state behind the Tauri commands.
+//! Shared application state behind the commands.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::AppError;
 use crate::company::agent::ResearchError;
 use crate::company::coordinator::{ResearchCoordinator, ResearchFn};
-use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
+use crate::engine::{DecisionEngine, Launcher, LlamaSidecar};
 use crate::models::{self, ModelKind, REGISTRY};
 use crate::providers::{ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE, SUBQ_BASE, TYPESAFE_BASE};
 use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
@@ -24,10 +24,13 @@ pub const RESEARCH_MODEL_KEY: &str = "research_model";
 /// Sends a named event with a JSON payload to the webview.
 pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
+/// Builds a fresh launcher for a `llama-server` process (one per sidecar).
+pub type LauncherFactory = Arc<dyn Fn() -> Box<dyn Launcher> + Send + Sync>;
+
 /// Where the decision engine comes from.
 pub enum EngineSource {
     /// Production: a lazily started `llama-server` for the active model.
-    Sidecar(tauri::AppHandle),
+    Sidecar(LauncherFactory),
     /// Tests: a fixed engine (e.g. `FakeDecisionEngine`); no model file needed.
     #[cfg_attr(not(test), allow(dead_code))]
     Fixed(Arc<dyn DecisionEngine>),
@@ -178,8 +181,8 @@ impl AppState {
             store: self.store.clone(),
             providers: self.providers(),
             search: self.search().ok(),
-            app: match &self.source {
-                EngineSource::Sidecar(app) => Some(app.clone()),
+            launcher: match &self.source {
+                EngineSource::Sidecar(launch) => Some(launch.clone()),
                 EngineSource::Fixed(_) => None,
             },
             slot: self.research.clone(),
@@ -249,9 +252,9 @@ impl AppState {
                 Built { model_id: model_id.into(), engine: self.providers().engine(&r)?, sidecar: None }
             }
             EngineSource::Fixed(e) => Built { model_id: model_id.into(), engine: e.clone(), sidecar: None },
-            EngineSource::Sidecar(app) => {
+            EngineSource::Sidecar(launch) => {
                 let path = self.installed_path(model_id)?;
-                let sidecar = Arc::new(LlamaSidecar::new(Box::new(TauriLauncher(app.clone())), path));
+                let sidecar = Arc::new(LlamaSidecar::new(launch(), path));
                 Built { model_id: model_id.into(), engine: sidecar.clone(), sidecar: Some(sidecar) }
             }
         };
@@ -408,7 +411,7 @@ pub struct ResearchEnv {
     pub store: Store,
     providers: Arc<ProviderRegistry>,
     search: Option<Arc<dyn SearchProvider>>,
-    app: Option<tauri::AppHandle>,
+    launcher: Option<LauncherFactory>,
     slot: ResearchSlot,
     models_dir: PathBuf,
     override_fn: Option<ResearchFn>,
@@ -425,7 +428,7 @@ impl ResearchEnv {
         if !r.is_local() {
             return Ok(self.providers.chat_endpoint(&r)?);
         }
-        let Some(app) = &self.app else {
+        let Some(launch) = &self.launcher else {
             return Err(AppError::EngineUnavailable("Local research models need the app runtime.".into()));
         };
         let sidecar = {
@@ -435,7 +438,7 @@ impl ResearchEnv {
                 None => {
                     let path = installed_path(&self.models_dir, &id)?;
                     let s = Arc::new(
-                        LlamaSidecar::new(Box::new(TauriLauncher(app.clone())), path).with_kind(ModelKind::Chat),
+                        LlamaSidecar::new(launch(), path).with_kind(ModelKind::Chat),
                     );
                     if let Some((_, old)) = slot.replace((id.clone(), s.clone())) {
                         old.shutdown();
