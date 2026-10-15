@@ -13,7 +13,7 @@ concurrency:
 jobs:
   checks:
     name: Rust checks
-    runs-on: macos-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
