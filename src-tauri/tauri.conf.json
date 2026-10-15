@@ -21,7 +21,9 @@
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'self' blob:",
-      "dangerousDisableAssetCspModification": ["style-src"]
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {
@@ -50,6 +52,15 @@
         "MacOS/libllama.0.dylib": "binaries/libllama.0.dylib",
         "MacOS/libmtmd.0.dylib": "binaries/libmtmd.0.dylib"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBQjBFNDNGRjZENTZDNjcKUldSbmJOWDJQK1N3Nmxob01MNm14VDEwRjFReTc0ZStoVVpBZjUzOExTTkc5dDhveUZaREk3RDkK",
+      "endpoints": [
+        "https://github.com/diegohh0411/cvd/releases/latest/download/latest.json"
+      ]
     }
   }
 }
