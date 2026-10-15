@@ -18,6 +18,9 @@ jobs:
             target: aarch64-apple-darwin
           - name: macOS (Intel)
             target: x86_64-apple-darwin
+            # llama.cpp's x64 build ships no Metal backend.
+            extra_args: >-
+              --config '{"bundle":{"macOS":{"files":{"MacOS/libggml-metal.0.dylib":null}}}}'
     name: ${{ matrix.name }}
     # Apple Silicon Mac; the Intel build is cross-compiled.
     runs-on: [self-hosted, macOS, ARM64]
@@ -53,4 +56,4 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ matrix.extra_args }}
