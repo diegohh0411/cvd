@@ -27,9 +27,9 @@ jobs:
       - run: bash src-tauri/scripts/fetch-llama-server.sh
 
       - name: Build
-        run: cargo check --all-targets --locked
+        run: cargo check --all-targets
         working-directory: src-tauri
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test
         working-directory: src-tauri
