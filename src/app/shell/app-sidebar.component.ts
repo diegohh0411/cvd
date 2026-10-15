@@ -53,9 +53,8 @@ export const NAV: readonly NavItem[] = [
     icon: 'lucideBot',
     base: '/ai',
     items: [
-      { title: 'Roles', link: '/ai/roles' },
-      { title: 'Models', link: '/ai/models' },
-      { title: 'Providers', link: '/ai/providers' },
+      { title: 'AI Models', link: '/ai' },
+      { title: 'Downloads', link: '/ai/downloads' },
     ],
   },
 ];

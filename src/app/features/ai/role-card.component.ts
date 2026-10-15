@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
@@ -7,22 +7,16 @@ import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { ProviderModels } from '../../core/ipc/types';
+import { ConnectionsStore } from '../../core/stores/connections.store';
 import { EngineStore } from '../../core/stores/engine.store';
 import { ModelsStore } from '../../core/stores/models.store';
-import {
-  localOptions,
-  onlineOptions,
-  type ProviderKind,
-  providerOf,
-  REMOTE_NOTICE_SETTING,
-  type Role,
-  type RoleOption,
-  roleStatus,
-} from './role-options';
+import { ProviderKeyComponent } from './provider-key.component';
+import { LOCAL_PROVIDER, modelProviders, providerName, type Role } from './provider-registry';
+import { localOptions, onlineOptions, providerOf, REMOTE_NOTICE_SETTING, type RoleOption, roleStatus } from './role-options';
 
 const COPY: Record<Role, { title: string; subtitle: string }> = {
-  'system-one': { title: 'System One', subtitle: 'Scores your library against each job.' },
-  research: { title: 'Company research', subtitle: 'Researches each company on the web.' },
+  'system-one': { title: 'Fast Model', subtitle: 'Scores your library against each job and sorts the results.' },
+  research: { title: 'Smart Model', subtitle: 'Researches companies on the web and writes summaries.' },
 };
 
 const STATUS = {
@@ -31,10 +25,21 @@ const STATUS = {
   error: { label: 'Error', type: 'destructive' },
 } as const;
 
-/** One role: pick a provider, then a model from it. */
+interface Group {
+  /** Connection id (what model refs carry), or the provider id while it has no key. */
+  id: string;
+  provider: string;
+  name: string;
+  options: RoleOption[];
+  /** Needs a key first. */
+  locked: boolean;
+  error: string | null;
+}
+
+/** One model slot: shows the active model and a grouped picker over every connected provider. */
 @Component({
   selector: 'app-role-card',
-  imports: [RouterLink, ZardBadgeComponent, ZardButtonComponent],
+  imports: [RouterLink, ZardBadgeComponent, ZardButtonComponent, ProviderKeyComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="grid gap-4 rounded-lg border p-4 text-sm">
@@ -50,34 +55,26 @@ const STATUS = {
         <p class="text-muted-foreground">{{ r }}</p>
       }
 
-      @if (role() === 'research') {
-        <div class="flex items-center gap-2">
-          <span class="text-muted-foreground">Needs</span>
-          @if (hasExa()) {
-            <span>Exa key ✓</span>
-          } @else {
-            <a routerLink="/ai/providers" class="underline">Add your Exa key →</a>
-          }
+      @if (role() === 'research' && !hasExa()) {
+        <div class="grid gap-2 rounded-lg border border-dashed p-3">
+          <p class="text-muted-foreground">Company research needs an Exa key for web search.</p>
+          <app-provider-key provider="exa" (changed)="refreshExa()" />
         </div>
       }
 
-      <div role="group" aria-label="Provider" class="bg-muted text-muted-foreground inline-flex w-fit rounded-lg p-1">
-        @for (p of providers(); track p.id) {
-          <button
-            type="button"
-            class="rounded-md px-3 py-1 font-medium"
-            [class]="viewing() === p.id ? 'bg-background text-foreground shadow-sm' : 'hover:text-foreground'"
-            [attr.aria-pressed]="viewing() === p.id"
-            (click)="view(p.id)"
-          >
-            {{ p.label }}
-          </button>
-        }
+      <div class="flex items-center justify-between gap-3 rounded-lg border p-3" data-testid="active-model">
+        <div class="grid gap-0.5">
+          <span class="font-medium">{{ activeLabel() }}</span>
+          <span class="text-muted-foreground text-xs">{{ activeWhere() }}</span>
+        </div>
+        <button z-button zType="outline" zSize="sm" [attr.aria-expanded]="open()" (click)="open.set(!open())">
+          {{ open() ? 'Close' : 'Change' }}
+        </button>
       </div>
 
       @if (pending(); as m) {
         <div class="grid gap-3 rounded-lg border p-4" role="alertdialog" aria-label="Online model notice">
-          <p>Your CV entries and job descriptions will be sent to {{ keyName(providerOf(m.id)) }} and the model's provider.</p>
+          <p>Your CV entries and job descriptions will be sent to {{ providerName(providerOf(m.id)) }} and the model's provider.</p>
           <div class="flex gap-2">
             <button z-button zSize="sm" (click)="confirm(m)">Use {{ m.label }}</button>
             <button z-button zType="outline" zSize="sm" (click)="pending.set(null)">Cancel</button>
@@ -85,65 +82,85 @@ const STATUS = {
         </div>
       }
 
-      @if (viewing() !== 'local' && !hasKey(viewing())) {
-        <div class="text-muted-foreground rounded-lg border border-dashed p-6 text-center">
-          <a routerLink="/ai/providers" class="underline">Add your {{ keyName(viewing()) }} key →</a> to use online models.
-        </div>
-      } @else if (viewing() !== 'local' && onlineError(); as err) {
-        <div class="grid justify-items-start gap-2 rounded-lg border p-4">
-          <p class="text-destructive" role="alert">{{ err }}</p>
-          <button z-button zType="outline" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Retry</button>
-        </div>
-      } @else if (!options().length) {
-        <div class="text-muted-foreground rounded-lg border border-dashed p-6 text-center">
-          @if (viewing() === 'local') {
-            No model installed. <a routerLink="/ai/models" class="underline">Download one →</a>
-          } @else {
-            {{ loading() ? 'Loading online models…' : 'No online models available.' }}
-          }
-        </div>
-      } @else {
-        @if (viewing() !== 'local') {
-          <div class="-mb-2 flex justify-end">
-            <button z-button zType="ghost" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Refresh</button>
+      @if (open()) {
+        <div class="grid gap-3" data-testid="picker">
+          <div class="flex gap-2">
+            <input
+              type="search"
+              placeholder="Search models"
+              aria-label="Search models"
+              class="border-input h-8 flex-1 rounded-md border bg-transparent px-2"
+              [value]="query()"
+              (input)="query.set($any($event.target).value)"
+            />
+            @if (anyOnline()) {
+              <button z-button zType="ghost" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Refresh</button>
+            }
           </div>
-        }
-        <ul class="max-h-80 divide-y overflow-auto rounded-lg border" role="radiogroup" [attr.aria-label]="copy().title + ' model'">
-          @for (o of options(); track o.id) {
-            <li class="flex items-center gap-3 p-3" [class.opacity-60]="!o.installed">
-              <button
-                type="button"
-                role="radio"
-                class="flex flex-1 items-center gap-3 text-left disabled:cursor-not-allowed"
-                [attr.data-id]="o.id"
-                [attr.aria-checked]="o.id === active()"
-                [disabled]="!o.installed"
-                (click)="pick(o)"
-              >
-                <span
-                  class="flex size-4 shrink-0 items-center justify-center rounded-full border"
-                  [class.border-primary]="o.id === active()"
-                  aria-hidden="true"
-                >
-                  @if (o.id === active()) {
-                    <span class="bg-primary size-2 rounded-full"></span>
+
+          <div class="max-h-96 divide-y overflow-auto rounded-lg border" role="radiogroup" [attr.aria-label]="copy().title + ' model'">
+            @for (g of groups(); track g.id) {
+              <div class="grid" [attr.data-group]="g.id">
+                <div class="bg-muted/50 text-muted-foreground px-3 py-1.5 text-xs font-medium">{{ g.name }}</div>
+                @if (g.locked) {
+                  <div class="grid gap-2 p-3">
+                    <p class="text-muted-foreground">Add your {{ g.name }} key to use its models.</p>
+                    <app-provider-key [provider]="$any(g.provider)" (changed)="connections.load()" />
+                  </div>
+                } @else if (g.error; as err) {
+                  <div class="grid justify-items-start gap-2 p-3">
+                    <p class="text-destructive" role="alert">{{ err }}</p>
+                    <button z-button zType="outline" zSize="sm" [zLoading]="loading()" (click)="loadOnline(true)">Retry</button>
+                  </div>
+                } @else if (!g.options.length) {
+                  <p class="text-muted-foreground p-3">
+                    @if (g.id === 'local') {
+                      {{ query() ? 'No matching model.' : 'No model installed.' }}
+                      <a routerLink="/ai/downloads" class="underline">Download one →</a>
+                    } @else {
+                      {{ loading() ? 'Loading models…' : query() ? 'No matching model.' : 'No models available.' }}
+                    }
+                  </p>
+                } @else {
+                  @for (o of g.options; track o.id) {
+                    <div class="flex items-center gap-3 p-3" [class.opacity-60]="!o.installed">
+                      <button
+                        type="button"
+                        role="radio"
+                        class="flex flex-1 items-center gap-3 text-left disabled:cursor-not-allowed"
+                        [attr.data-id]="o.id"
+                        [attr.aria-checked]="o.id === active()"
+                        [disabled]="!o.installed"
+                        (click)="pick(o)"
+                      >
+                        <span
+                          class="flex size-4 shrink-0 items-center justify-center rounded-full border"
+                          [class.border-primary]="o.id === active()"
+                          aria-hidden="true"
+                        >
+                          @if (o.id === active()) {
+                            <span class="bg-primary size-2 rounded-full"></span>
+                          }
+                        </span>
+                        <span class="grid gap-0.5">
+                          <span class="font-medium">{{ o.label }}</span>
+                          @if (o.detail) {
+                            <span class="text-muted-foreground text-xs">{{ o.detail }}</span>
+                          }
+                        </span>
+                      </button>
+                      @if (!o.installed) {
+                        <a routerLink="/ai/downloads" class="text-xs underline">Download</a>
+                      } @else if (o.id === active()) {
+                        <span class="text-xs text-emerald-600">Active</span>
+                      }
+                    </div>
                   }
-                </span>
-                <span class="grid gap-0.5">
-                  <span class="font-medium">{{ o.label }}</span>
-                  @if (o.detail) {
-                    <span class="text-muted-foreground text-xs">{{ o.detail }}</span>
-                  }
-                </span>
-              </button>
-              @if (!o.installed) {
-                <a routerLink="/ai/models" class="text-xs underline">Download</a>
-              } @else if (o.id === active()) {
-                <span class="text-xs text-emerald-600">Active</span>
-              }
-            </li>
-          }
-        </ul>
+                }
+              </div>
+            }
+          </div>
+        </div>
       }
 
       @if (role() === 'system-one' && active()) {
@@ -170,43 +187,74 @@ export class RoleCardComponent implements OnInit {
   readonly role = input.required<Role>();
   protected readonly models = inject(ModelsStore);
   protected readonly engine = inject(EngineStore);
+  protected readonly connections = inject(ConnectionsStore);
   private readonly toast = inject(ZardSonnerService);
 
-  private readonly tabs: { id: ProviderKind; label: string; roles: Role[] }[] = [
-    { id: 'local', label: 'Llama.cpp (local)', roles: ['system-one', 'research'] },
-    { id: 'openrouter', label: 'OpenRouter (online)', roles: ['system-one', 'research'] },
-    { id: 'subq', label: 'SubQ (online)', roles: ['system-one'] },
-  ];
   protected readonly providerOf = providerOf;
-  protected readonly providers = computed(() => this.tabs.filter((t) => t.roles.includes(this.role())));
+  protected readonly providerName = providerName;
   protected readonly copy = computed(() => COPY[this.role()]);
   /** A pick in flight; the store's value wins again once it settles. */
   private readonly picking = signal<string | null>(null);
   protected readonly active = computed(
     () => this.picking() ?? (this.role() === 'research' ? this.models.researchModel() : this.engine.status().model_id),
   );
-  protected readonly viewing = signal<ProviderKind>('local');
-  protected readonly hasOpenRouter = signal(false);
-  protected readonly hasSubQ = signal(false);
-  protected readonly hasExa = signal(false);
+
+  private readonly exa = signal(false);
+  /** Saved keys by connection id (includes Exa for research). */
+  protected readonly keys = computed<Record<string, boolean>>(() => ({
+    ...Object.fromEntries([...this.connections.ids()].map((id) => [id, true])),
+    exa: this.exa(),
+  }));
+  protected readonly hasExa = computed(() => this.role() !== 'research' || this.exa());
   protected readonly online = signal<ProviderModels[] | null>(null);
   protected readonly loading = signal(false);
   protected readonly pending = signal<RoleOption | null>(null);
+  protected readonly open = signal(false);
+  protected readonly query = signal('');
+  /** This slot's connections, in provider order. */
+  private readonly slotConnections = computed(() => {
+    const kinds = modelProviders(this.role()).map((p) => p.id as string);
+    return this.connections.list().filter((c) => kinds.includes(c.provider));
+  });
+  protected readonly anyOnline = computed(() => this.slotConnections().length > 0);
+  /** Changes when a key is added or removed, so the model lists reload. */
+  private readonly connectionKey = computed(() => this.slotConnections().map((c) => c.id).join(','));
 
-  protected readonly onlineError = computed(
-    () => this.online()?.find((p) => p.provider === this.viewing() && p.error)?.error ?? null,
-  );
-  protected readonly options = computed(() =>
-    this.viewing() === 'local'
-      ? localOptions(this.role(), this.models.models())
-      : onlineOptions((this.online() ?? []).filter((p) => p.provider === this.viewing())),
-  );
+  protected readonly groups = computed<Group[]>(() => {
+    const q = this.query().trim().toLowerCase();
+    const match = (o: RoleOption) => !q || o.label.toLowerCase().includes(q);
+    const local: Group = {
+      id: LOCAL_PROVIDER.id,
+      provider: LOCAL_PROVIDER.id,
+      name: LOCAL_PROVIDER.name,
+      options: localOptions(this.role(), this.models.models()).filter(match),
+      locked: false,
+      error: null,
+    };
+    const remote = modelProviders(this.role()).flatMap<Group>((p) => {
+      const mine = this.connections.forProvider(p.id);
+      if (!mine.length) return [{ id: p.id, provider: p.id, name: p.name, options: [], locked: true, error: null }];
+      return mine.map<Group>((c) => {
+        const list = this.online()?.find((l) => l.provider === c.id);
+        return {
+          id: c.id,
+          provider: p.id,
+          // "OpenRouter" alone, or "OpenRouter · Work" once the key has its own name.
+          name: c.label === p.name ? p.name : `${p.name} · ${c.label}`,
+          options: onlineOptions(list ? [list] : []).filter(match),
+          locked: false,
+          error: list?.error ?? null,
+        };
+      });
+    });
+    return [local, ...remote];
+  });
+
   private readonly status = computed(() =>
     roleStatus({
       active: this.active(),
       installed: this.models.installed(),
-      hasOpenRouterKey: this.hasOpenRouter(),
-      hasSubQKey: this.hasSubQ(),
+      keys: this.keys(),
       hasExaKey: this.role() === 'research' ? this.hasExa() : undefined,
       engineError: this.role() === 'system-one' && this.engine.status().state === 'error',
     }),
@@ -216,40 +264,62 @@ export class RoleCardComponent implements OnInit {
     if (this.status() !== 'needs-setup') return null;
     const a = this.active();
     if (!a) return 'Choose a model below.';
-    if (providerOf(a) !== 'local' && !this.hasKey(providerOf(a))) return `The selected online model needs the ${this.keyName(providerOf(a))} key.`;
-    if (providerOf(a) === 'local' && !this.models.installed().some((m) => m.spec.id === a)) return 'The selected model is not installed.';
+    const p = providerOf(a);
+    if (p !== 'local' && !this.keys()[p]) return `The selected online model needs its ${providerName(p)} key.`;
+    if (p === 'local' && !this.models.installed().some((m) => m.spec.id === a)) return 'The selected model is not installed.';
     return null;
   });
 
+  protected readonly activeLabel = computed(() => {
+    const a = this.active();
+    if (!a) return 'No model selected';
+    const hit = this.groups()
+      .flatMap((g) => g.options)
+      .find((o) => o.id === a);
+    return hit?.label ?? this.models.models().find((m) => m.spec.id === a)?.spec.label ?? (providerOf(a) === 'local' ? a : a.slice(a.indexOf(':') + 1));
+  });
+  protected readonly activeWhere = computed(() => {
+    const a = this.active();
+    if (!a) return 'Pick one to get started.';
+    const p = providerOf(a);
+    if (p === 'local') return 'Runs on this computer';
+    const label = this.connections.list().find((c) => c.id === p)?.label;
+    return label && label !== providerName(p) ? `Online · ${providerName(p)} · ${label}` : `Online · ${providerName(p)}`;
+  });
+
+  constructor() {
+    // Model lists follow the saved keys, whichever component changed them.
+    let seen: string | null = null;
+    effect(() => {
+      const key = this.connectionKey();
+      untracked(() => {
+        if (seen !== null && key !== seen) void this.syncOnline();
+        seen = key;
+      });
+    });
+  }
+
   async ngOnInit(): Promise<void> {
     const research = this.role() === 'research';
-    const [or, subq, exa] = await Promise.all([
-      api.providerKeyStatus('openrouter').catch(() => null),
-      api.providerKeyStatus('subq').catch(() => null),
-      research ? api.providerKeyStatus('exa').catch(() => null) : null,
+    await Promise.all([
       research ? this.models.loadResearchModel() : null,
       this.models.load(),
       this.engine.load(),
+      this.connections.load(),
+      research ? this.refreshExa() : null,
     ]);
-    this.hasOpenRouter.set(or?.has_key ?? false);
-    this.hasSubQ.set(subq?.has_key ?? false);
-    this.hasExa.set(exa?.has_key ?? false);
-    this.view(providerOf(this.active()));
+    this.open.set(!this.active());
+    // Keys present on load produce the first list; later changes go through the effect.
+    if (this.anyOnline() && !this.online()) await this.loadOnline(false);
   }
 
-  protected hasKey(p: ProviderKind): boolean {
-    if (p === 'openrouter') return this.hasOpenRouter();
-    if (p === 'subq') return this.hasSubQ();
-    return true;
+  protected async refreshExa(): Promise<void> {
+    this.exa.set((await api.providerKeyStatus('exa').catch(() => null))?.has_key ?? false);
   }
 
-  protected keyName(p: ProviderKind): string {
-    return p === 'subq' ? 'SubQ' : 'OpenRouter';
-  }
-
-  protected view(p: ProviderKind): void {
-    this.viewing.set(p);
-    if (p !== 'local' && this.hasKey(p) && !this.online()) void this.loadOnline(false);
+  private async syncOnline(): Promise<void> {
+    if (this.anyOnline()) await this.loadOnline(false);
+    else this.online.set(null);
   }
 
   protected async loadOnline(refresh: boolean): Promise<void> {
@@ -257,7 +327,8 @@ export class RoleCardComponent implements OnInit {
     try {
       this.online.set(await api.listRemoteModels(refresh, this.role() === 'research' ? 'chat' : 'decision'));
     } catch (e) {
-      this.online.set([{ provider: this.viewing(), models: [], error: messageFor(e) }]);
+      const message = messageFor(e);
+      this.online.set(this.slotConnections().map((c) => ({ provider: c.id, models: [], error: message })));
     } finally {
       this.loading.set(false);
     }

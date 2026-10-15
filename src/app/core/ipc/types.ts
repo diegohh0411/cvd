@@ -195,7 +195,7 @@ export type AppErrorKind =
   | 'MailAuth'
   | 'MailUnavailable';
 
-export type ProviderId = 'openrouter' | 'subq' | 'exa';
+export type ProviderId = 'openrouter' | 'subq' | 'typesafe' | 'exa';
 
 export interface KeyStatus {
   has_key: boolean;
@@ -211,8 +211,18 @@ export interface RemoteModel {
   price_per_mtok_in: number | null;
 }
 
+/** A saved key. The first key of a provider has the bare provider id; later ones are `<provider>~<n>`. */
+export interface Connection {
+  id: string;
+  provider: ProviderId;
+  label: string;
+  last4: string | null;
+}
+
 export interface ProviderModels {
+  /** The connection id: what model refs carry. */
   provider: string;
+  label?: string;
   models: RemoteModel[];
   error: string | null;
 }

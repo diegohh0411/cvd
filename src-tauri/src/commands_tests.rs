@@ -357,6 +357,81 @@ mod provider_keys {
         assert!(st.engine_for("subq:subq-snap-preview").is_err());
     }
 
+    async fn typesafe_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"models": [{"name": "jev-latest", "description": "", "release_date": ""}]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/v1/models")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn typesafe_key_validates_and_routes() {
+        let server = typesafe_server("ts-good1234").await;
+        let (st, _) = state().await;
+        let st = st.with_typesafe_base(server.uri());
+        let err = set_provider_key(&st, "typesafe", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert!(err.to_string().contains("TypeSafe"), "{err}");
+        assert_eq!(set_provider_key(&st, "typesafe", " ts-good1234 ").await.unwrap().last4.as_deref(), Some("1234"));
+        set_active_model(&st, "typesafe:jev-latest").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_ok());
+        // Jev cannot do company research.
+        assert!(set_research_model(&st, "typesafe:jev-latest").await.is_ok());
+        assert!(st.research_endpoint().await.is_err());
+        delete_provider_key(&st, "typesafe").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_err());
+    }
+
+    #[tokio::test]
+    async fn extra_connections_get_their_own_key_and_refs() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        let first = add_connection(&st, "openrouter", "Personal", "good").await.unwrap();
+        assert_eq!(first.id, "openrouter", "the first key keeps the bare id so stored refs still resolve");
+        let second = add_connection(&st, "openrouter", " Work ", "good").await.unwrap();
+        assert_eq!((second.id.as_str(), second.label.as_str()), ("openrouter~2", "Work"));
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(list.iter().map(|c| (c.id.as_str(), c.label.as_str())).collect::<Vec<_>>(), [("openrouter", "Personal"), ("openrouter~2", "Work")]);
+
+        // A ref carrying the connection id resolves, and ids with `:` still split on the first one.
+        set_active_model(&st, "openrouter~2:inception/mercury-decide:free").await.unwrap();
+        assert!(st.engine_for("openrouter~2:inception/mercury-decide:free").is_ok());
+        assert!(st.engine_for("openrouter~3:x").is_err());
+
+        // Removing the extra key leaves the first one working.
+        delete_provider_key(&st, "openrouter~2").await.unwrap();
+        assert!(st.engine_for("openrouter~2:x").is_err());
+        assert!(st.engine_for("openrouter:x").is_ok());
+        assert_eq!(list_connections(&st).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn existing_bare_keys_list_without_a_connections_row() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        st.store.set_secret("openrouter", "sk-or-old1234").await.unwrap();
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(list, [ConnectionView { id: "openrouter".into(), provider: "openrouter".into(), label: "openrouter".into(), last4: Some("1234".into()) }]);
+        rename_connection(&st, "openrouter", "Personal").await.unwrap();
+        assert_eq!(list_connections(&st).await.unwrap()[0].label, "Personal");
+    }
+
+    #[tokio::test]
+    async fn connection_input_is_checked() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        assert_eq!(add_connection(&st, "exa", "x", "good").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(add_connection(&st, "openrouter", "  ", "good").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(add_connection(&st, "openrouter", "Work", "bad").await.unwrap_err().kind(), "ProviderAuth");
+        assert_eq!(set_provider_key(&st, "exa~2", "x").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(rename_connection(&st, "openrouter~9", "x").await.unwrap_err().kind(), "NotFound");
+    }
+
     async fn exa_server(valid: &str) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

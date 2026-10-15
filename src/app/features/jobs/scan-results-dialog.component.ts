@@ -38,7 +38,7 @@ import { StatusPillComponent } from './status-pill.component';
             @if (f.kind === 'MailAuth' || f.kind === 'MailUnavailable') {
               <p>Check your connection in <a routerLink="/settings" class="underline" (click)="open.set(false)">Settings › Integrations</a>.</p>
             } @else if (f.kind === 'ProviderAuth' || f.kind === 'ProviderCredits' || f.kind === 'ProviderUnavailable') {
-              <p>Check your AI key in <a routerLink="/ai/providers" class="underline" (click)="open.set(false)">AI › Providers</a>.</p>
+              <p>Check your AI key in <a routerLink="/ai" class="underline" (click)="open.set(false)">AI › AI Models</a>.</p>
             }
           </div>
         }
