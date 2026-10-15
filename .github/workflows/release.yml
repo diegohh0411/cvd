@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            os: macos-latest
+          - name: macOS (Intel)
+            os: macos-15-intel
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: bun install --frozen-lockfile
+
+      # Sidecar + dylibs that tauri.conf.json bundles; fetched for the runner's host triple.
+      - run: bash src-tauri/scripts/fetch-llama-server.sh
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bunx tauri
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v__VERSION__-build.{0}', github.run_number) }}
+          releaseName: "CVD v__VERSION__"
+          releaseBody: "Unsigned macOS build. On first launch, right-click the app and choose Open, or run `xattr -cr /Applications/cvd.app`."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.os == 'macos-latest' && '--target aarch64-apple-darwin' || '--target x86_64-apple-darwin' }}
