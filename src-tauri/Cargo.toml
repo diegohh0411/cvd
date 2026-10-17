@@ -1,6 +1,6 @@
 [package]
 name = "cvd"
-version = "0.2.2"
+version = "0.2.4"
 description = "A Tauri App"
 authors = ["Diego Hernández Herrera"]
 license-file = "../LICENSE"
