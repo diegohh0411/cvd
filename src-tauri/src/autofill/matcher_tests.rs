@@ -30,8 +30,9 @@ fn fill(d: Decision) -> (&'static str, String) {
     }
 }
 
+/// Left unfilled by the rules (the Fast Model may still try `Unsure` ones).
 fn is_needs(d: &Decision) -> bool {
-    matches!(d, Decision::NeedsUser(_))
+    matches!(d, Decision::NeedsUser(_) | Decision::Unsure(_))
 }
 
 #[test]
@@ -185,4 +186,34 @@ fn long_start_date_questions() {
     assert!(is_needs(&decide(&q, &f)));
     f.push(Fact { key: "earliest_start", variants: vec!["In two weeks".into()] });
     assert_eq!(fill(decide(&q, &f)).1, "In two weeks");
+}
+
+#[test]
+fn only_unknown_questions_are_left_to_the_model() {
+    let f = facts();
+    assert!(matches!(decide(&field(FieldKind::Text, "Favourite colour"), &f), Decision::Unsure(_)));
+    assert!(matches!(decide(&field(FieldKind::Select, "Gender"), &f), Decision::NeedsUser(_)));
+    assert!(matches!(decide(&field(FieldKind::Textarea, "Why us?"), &f), Decision::NeedsUser(_)));
+    assert!(matches!(decide(&field(FieldKind::Url, "GitHub"), &f), Decision::NeedsUser(_)));
+}
+
+#[test]
+fn keywords_match_at_word_starts_only() {
+    let f = facts();
+    // "preferred" contains "referr"; "pronunciation" starts like "pronoun"; "embrace" contains "race".
+    assert!(matches!(decide(&field(FieldKind::Text, "Preferred Name (if applicable)"), &f), Decision::Unsure(_)));
+    assert!(matches!(decide(&field(FieldKind::Text, "Name Pronunciation"), &f), Decision::Unsure(_)));
+    assert!(matches!(decide(&field(FieldKind::Text, "How do you embrace change?"), &f), Decision::Unsure(_)));
+    assert!(is_needs(&decide(&field(FieldKind::Text, "Who referred you?"), &f)));
+    assert!(matches!(decide(&field(FieldKind::Text, "Your pronouns"), &f), Decision::NeedsUser(_)));
+}
+
+#[test]
+fn never_agrees_or_consents() {
+    let f = facts();
+    for label in ["Agreement to Arbitrate", "AI Policy for Application", "I consent to AI notetakers", "I acknowledge the privacy notice"] {
+        let mut x = field(FieldKind::Combobox, label);
+        x.options = vec!["Yes".into(), "No".into()];
+        assert!(matches!(decide(&x, &f), Decision::NeedsUser(_)), "{label}");
+    }
 }

@@ -52,6 +52,7 @@ pub fn run() {
             );
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
+            app.manage(autofill::window::Sessions::default());
             // Dev hook: open an apply window on any supported posting, with no job attached.
             #[cfg(debug_assertions)]
             if let Ok(url) = std::env::var("CVD_APPLY_URL") {

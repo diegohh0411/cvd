@@ -1,5 +1,5 @@
 use super::field::{FieldKind, FieldSpec, FillAction};
-use super::window::{is_supported_url, plan, Resume};
+use super::window::{is_supported_url, plan, Resume, Session};
 use super::Fact;
 
 #[test]
@@ -19,8 +19,8 @@ fn field(key: &str, kind: FieldKind, label: &str) -> FieldSpec {
     FieldSpec { key: key.into(), kind: Some(kind), label: label.into(), ..Default::default() }
 }
 
-#[test]
-fn plans_fills_files_and_handoffs() {
+#[tokio::test]
+async fn plans_fills_files_and_handoffs() {
     let facts = vec![Fact { key: "first_name", variants: vec!["Diego".into()] }];
     let fields = vec![
         field("a", FieldKind::Text, "First name"),
@@ -29,13 +29,13 @@ fn plans_fills_files_and_handoffs() {
         field("", FieldKind::Text, "First name"),
     ];
     let resume = Resume { name: "cv.pdf".into(), b64: "AAA=".into() };
-    let actions = plan(fields.clone(), &facts, Some(&resume));
+    let actions = plan(fields.clone(), &facts, Some(&resume), None, &mut Session::default()).await;
     assert_eq!(actions.len(), 3, "fields without a key are dropped");
     assert_eq!(actions[0], FillAction::Set { key: "a".into(), value: "Diego".into(), fact: "first_name" });
     assert_eq!(actions[1], FillAction::File { key: "b".into(), name: "cv.pdf".into(), b64: "AAA=".into() });
     assert!(matches!(actions[2], FillAction::NeedsUser { .. }));
 
-    let without = plan(fields, &facts, None);
+    let without = plan(fields, &facts, None, None, &mut Session::default()).await;
     assert!(matches!(&without[1], FillAction::NeedsUser { reason, .. } if reason.contains("Export a CV")));
 }
 

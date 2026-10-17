@@ -9,6 +9,8 @@ use super::Fact;
 pub enum Decision {
     Fill { fact: &'static str, value: String },
     Resume,
+    /// No rule matched, but nothing forbids filling it: the Fast Model may pick a candidate.
+    Unsure(String),
     NeedsUser(String),
 }
 
@@ -26,13 +28,22 @@ pub fn normalize(s: &str) -> String {
         .join(" ")
 }
 
+/// Matched at word starts (see [`has`]), so "race" doesn't hit "embrace".
 const SENSITIVE: &[&str] = &[
     "gender", "race", "racial", "ethnic", "hispanic", "latino", "veteran", "disab", "sexual orientation",
-    "transgender", "pronoun", "date of birth", "birth date", "religio", "marital",
+    "transgender", "pronouns", "date of birth", "birth date", "religio", "marital",
 ];
 
+/// Agreements and consents are the user's to give, whatever the options say.
+const LEGAL: &[&str] = &["agree", "consent", "acknowledg", "arbitrat", "terms", "privacy", "policy", "certify", "attest", "signature"];
+
 /// Questions about someone else, where the user's own phone or name would be wrong.
-const OTHER_PERSON: &[&str] = &["emergency", "reference", "referr", "referred", "recruiter", "manager", "spouse", "hear about"];
+const OTHER_PERSON: &[&str] = &["emergency", "reference", "referr", "recruiter", "manager", "spouse", "hear about"];
+
+/// Whether `pattern` occurs in normalized `text` starting at a word boundary.
+fn has(text: &str, pattern: &str) -> bool {
+    format!(" {text}").contains(&format!(" {pattern}"))
+}
 
 const EXACT: &[(&str, &[&str])] = &[
     ("first_name", &["first name", "given name", "legal first name", "first", "forename", "preferred first name"]),
@@ -43,7 +54,7 @@ const EXACT: &[(&str, &[&str])] = &[
     ("city", &["city", "current city", "city of residence", "location city"]),
     ("region", &["state", "province", "state province", "region"]),
     ("country", &["country", "country of residence", "current country"]),
-    ("location_full", &["location", "current location", "where are you located", "where are you based"]),
+    ("location_full", &["location", "current location", "where are you located", "where are you currently located", "where are you based"]),
     ("linkedin", &["linkedin", "linkedin profile", "linkedin url", "linkedin profile url"]),
     ("github", &["github", "github url", "github profile"]),
     ("website", &["website", "personal website", "portfolio", "portfolio url", "website url", "blog", "portfolio website"]),
@@ -86,7 +97,7 @@ fn by_label(label: &str) -> Option<&'static str> {
     if let Some((key, _)) = EXACT.iter().find(|(_, pats)| pats.contains(&label)) {
         return Some(key);
     }
-    CONTAINS.iter().find(|(_, pats)| pats.iter().any(|p| label.contains(p))).map(|(k, _)| *k)
+    CONTAINS.iter().find(|(_, pats)| pats.iter().any(|p| has(label, p))).map(|(k, _)| *k)
 }
 
 /// `job_application[first_name]` → `first name`.
@@ -94,13 +105,13 @@ fn name_tail(name: &str) -> String {
     normalize(name.split(['[', ']', '.']).filter(|s| !s.is_empty()).last().unwrap_or(""))
 }
 
-fn is_yes_no(fact: &str) -> bool {
+pub(crate) fn is_yes_no(fact: &str) -> bool {
     matches!(fact, "needs_sponsorship" | "work_authorization" | "willing_to_relocate")
 }
 
 /// The option whose text is one of the fact's spellings, or for yes/no facts
 /// the one that starts with that answer ("Yes, I am authorized").
-fn match_option(options: &[String], fact: &Fact) -> Option<String> {
+pub(crate) fn match_option(options: &[String], fact: &Fact) -> Option<String> {
     let variants: Vec<String> = fact.variants.iter().map(|v| normalize(v)).collect();
     let norm: Vec<String> = options.iter().map(|o| normalize(o)).collect();
     if let Some(i) = norm.iter().position(|o| variants.contains(o)) {
@@ -126,17 +137,20 @@ pub fn decide(field: &FieldSpec, facts: &[Fact]) -> Decision {
         let resume = ["resume", "cv", "curriculum"].iter().any(|w| hay.split(' ').any(|t| t == *w));
         return if resume { Decision::Resume } else { needs("File upload") };
     }
-    if SENSITIVE.iter().any(|w| context.contains(w)) {
+    if SENSITIVE.iter().any(|w| has(&context, w)) {
         return needs("Personal question: cvd never answers these");
     }
-    let salary = ["salary", "compensation", "pay expectation"].iter().any(|w| context.contains(w));
+    if LEGAL.iter().any(|w| has(&context, w)) {
+        return needs("Agreement or consent: give it yourself");
+    }
+    let salary = ["salary", "compensation", "pay expectation"].iter().any(|w| has(&label, w));
     if kind == FieldKind::Date {
         return needs("Pick a date");
     }
     if matches!(kind, FieldKind::Textarea | FieldKind::Checkbox | FieldKind::Other) && !salary {
         return needs("Needs your own answer");
     }
-    if OTHER_PERSON.iter().any(|w| context.contains(w)) {
+    if OTHER_PERSON.iter().any(|w| has(&context, w)) {
         return needs("Asks about someone else");
     }
 
@@ -156,7 +170,7 @@ pub fn decide(field: &FieldSpec, facts: &[Fact]) -> Decision {
             })
     };
     let Some(fact_key) = fact_key else {
-        return needs("Not sure what this asks");
+        return Decision::Unsure("Not sure what this asks".into());
     };
     let Some(fact) = facts.iter().find(|f| f.key == fact_key) else {
         return needs(if salary { "Salary: set an expectation in Application defaults, or answer here" } else { "Not in your profile yet" });
@@ -168,7 +182,7 @@ pub fn decide(field: &FieldSpec, facts: &[Fact]) -> Decision {
         }
         FieldKind::Select | FieldKind::Radio | FieldKind::Combobox => match match_option(&field.options, fact) {
             Some(o) => o,
-            None => return needs("None of the options matches your profile"),
+            None => return Decision::Unsure("None of the options matches your profile".into()),
         },
         FieldKind::Number => match fact.variants.iter().find(|v| v.parse::<f64>().is_ok()) {
             Some(v) => v.clone(),

@@ -34,10 +34,24 @@
     return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0;
   };
 
+  /** Visible text only: skips controls and hidden helper text ("No location found"). */
   const textWithoutControls = (node) => {
-    const c = node.cloneNode(true);
-    c.querySelectorAll('input,select,textarea,button,[aria-hidden="true"]').forEach((n) => n.remove());
-    return cap(c.textContent, 300);
+    const parts = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const hiddenCache = new Map();
+    const hidden = (el) => {
+      if (!el || el === node.parentElement) return false;
+      if (hiddenCache.has(el)) return hiddenCache.get(el);
+      const h =
+        /^(INPUT|SELECT|TEXTAREA|BUTTON|SCRIPT|STYLE)$/.test(el.tagName) ||
+        el.getAttribute('aria-hidden') === 'true' ||
+        el.getClientRects().length === 0 ||
+        hidden(el.parentElement);
+      hiddenCache.set(el, h);
+      return h;
+    };
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) if (!hidden(t.parentElement)) parts.push(t.textContent);
+    return cap(parts.join(' '), 300);
   };
 
   /** Closest preceding label-like element within a few ancestors. */
@@ -100,7 +114,25 @@
     el.getAttribute('aria-autocomplete') === 'list' ||
     el.getAttribute('aria-haspopup') === 'listbox';
 
+  /** react-select (Greenhouse and many others) keeps its options and a
+   *  `selectOption` callback in component props, readable without opening it. */
+  const reactSelect = (el) => {
+    const fk = Object.keys(el).find((k) => k.startsWith('__reactFiber$'));
+    let f = fk && el[fk];
+    for (let i = 0; f && i < 15; i++, f = f.return) {
+      const p = f.memoizedProps;
+      if (p && Array.isArray(p.options) && typeof p.selectOption === 'function') return p;
+    }
+    return null;
+  };
+
+  /** Flattens grouped react-select options; keeps only text labels. */
+  const reactOptions = (p) =>
+    p.options.flatMap((o) => (o && Array.isArray(o.options) ? o.options : [o])).filter((o) => o && typeof o.label === 'string');
+
   const comboOptions = (el) => {
+    const rs = reactSelect(el);
+    if (rs) return reactOptions(rs).map((o) => cap(o.label, 200)).slice(0, 300);
     const list = document.getElementById(el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '');
     return list ? [...list.querySelectorAll('[role="option"]')].map((o) => cap(o.textContent, 200)).filter(Boolean) : [];
   };
@@ -126,6 +158,11 @@
   };
 
   const hasValue = (el) => {
+    const rs = reactSelect(el);
+    if (rs) {
+      const v = rs.getValue ? rs.getValue() : rs.value;
+      return Array.isArray(v) ? v.length > 0 : v != null;
+    }
     const k = kindOf(el);
     if (k === 'file') return el.files && el.files.length > 0;
     if (k === 'checkbox') return el.checked;
@@ -254,8 +291,14 @@
     fire(el, 'input', 'change');
     el.blur();
     await later(600);
-    if (el.isConnected && el.value === value && el.getAttribute('aria-invalid') !== 'true') mark(key, 'filled');
-    else mark(key, 'needs', 'The page rejected this value');
+    if (el.isConnected && el.value === value && el.getAttribute('aria-invalid') !== 'true') return mark(key, 'filled');
+    if (el.isConnected) {
+      nativeSet(el, '');
+      fire(el, 'input', 'change');
+    }
+    mark(key, 'needs', 'The page rejected this value');
+    // cvd may answer with another candidate.
+    send({ type: 'rejected', key, value });
   };
 
   const setSelect = (el, key, value) => {
@@ -273,16 +316,33 @@
     mark(key, r.checked ? 'filled' : 'needs', r.checked ? '' : 'Could not select it');
   };
 
+  const findOption = (el, value) => optionEls(el).find((o) => cap(o.textContent, 200) === value);
+
   const setCombobox = async (el, key, value) => {
-    el.focus();
-    nativeSet(el, value);
-    fire(el, 'input');
-    await later(500);
-    const opt = [...document.querySelectorAll('[role="option"]')].find((o) => cap(o.textContent, 200) === value);
+    const rs = reactSelect(el);
+    if (rs) {
+      const o = reactOptions(rs).find((x) => cap(x.label, 200) === value);
+      if (!o) return mark(key, 'needs', 'Option not found');
+      rs.selectOption(o);
+      await later(300);
+      return mark(key, 'filled');
+    }
+    // Open and pick, as a user would; type to filter only if the option isn't rendered.
+    await openCombobox(el);
+    let opt = findOption(el, value);
+    if (!opt) {
+      nativeSet(el, value);
+      fire(el, 'input');
+      await later(500);
+      opt = findOption(el, value);
+    }
     if (opt) {
+      opt.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       opt.click();
+      await later(300);
       mark(key, 'filled');
     } else {
+      closeCombobox(el);
       mark(key, 'needs', 'Pick from the list');
     }
   };
@@ -389,9 +449,72 @@
 
   // ---- lifecycle ----
 
-  const scan = () => {
-    const fields = extract();
-    if (fields.length) send({ type: 'fields', url: location.href, fields });
+  const press = (el, key) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode: key === 'ArrowDown' ? 40 : 27, bubbles: true }));
+
+  /** The open listbox that belongs to `el`: its aria-controls target, or a visible one beside it. */
+  const listboxFor = (el) => {
+    const own = document.getElementById(el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '');
+    if (own) return own;
+    let anc = el.parentElement;
+    for (let i = 0; anc && i < 5; i++, anc = anc.parentElement) {
+      const list = [...anc.querySelectorAll('[role="listbox"]')].find((l) => l.getClientRects().length > 0);
+      if (list) return list;
+    }
+    return null;
+  };
+
+  const optionEls = (el) => {
+    const list = listboxFor(el);
+    return list ? [...list.querySelectorAll('[role="option"]')] : [];
+  };
+
+  const listOptions = (el) => optionEls(el).map((o) => cap(o.textContent, 200)).filter(Boolean);
+
+  /** Opens a combobox (keyboard ArrowDown, like a user would) and returns its option elements. */
+  const openCombobox = async (el) => {
+    el.focus();
+    press(el, 'ArrowDown');
+    await later(200);
+    if (!listOptions(el).length) {
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await later(200);
+    }
+  };
+
+  const closeCombobox = (el) => {
+    press(el, 'Escape');
+    el.blur();
+  };
+
+  // Comboboxes only render their options when open, so read them by opening
+  // each one briefly. Nothing is selected.
+  const probeOptions = async (fields) => {
+    for (const f of fields) {
+      if (f.kind !== 'combobox' || f.options.length) continue;
+      const el = elsFor(f.key)[0];
+      if (!el) continue;
+      try {
+        await openCombobox(el);
+        f.options = listOptions(el).slice(0, 300);
+      } finally {
+        closeCombobox(el);
+      }
+      await later(50);
+    }
+  };
+
+  let scanning = false;
+  const scan = async () => {
+    if (scanning) return;
+    scanning = true;
+    try {
+      const fields = extract();
+      await probeOptions(fields);
+      if (fields.length) send({ type: 'fields', url: location.href, fields });
+    } finally {
+      scanning = false;
+    }
   };
 
   // Wait for the form to settle: at least 3 controls and no DOM changes for 500 ms

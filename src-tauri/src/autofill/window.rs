@@ -7,9 +7,14 @@ use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use super::field::{FillAction, FieldSpec, MAX_FIELDS};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
+
+use super::field::{FieldKind, FillAction, FieldSpec, MAX_FIELDS};
 use super::matcher::{decide, Decision};
+use super::picker::{candidates, pick_all, Pending, Pick};
 use super::Fact;
+use crate::engine::DecisionEngine;
 use crate::commands::AppError;
 use crate::state::AppState;
 
@@ -58,6 +63,9 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
         let _ = w.unminimize();
         return w.set_focus().map_err(|e| AppError::Io(e.to_string()));
     }
+    if let Some(sessions) = app.try_state::<Sessions>() {
+        sessions.reset(&label);
+    }
     let parsed = url.parse().map_err(|_| AppError::NotFound(format!("Not a valid URL: {url}")))?;
     WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
         .title(title)
@@ -72,6 +80,8 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
 #[serde(tag = "type", rename_all = "snake_case")]
 enum PageMessage {
     Fields { fields: Vec<FieldSpec> },
+    /// The page didn't keep a value cvd set.
+    Rejected { key: String, value: String },
     Status { filled: usize, needs: Vec<Value> },
     #[serde(other)]
     Other,
@@ -82,23 +92,82 @@ pub struct Resume {
     pub b64: String,
 }
 
-/// Turns the page's fields into fill actions. Pure, so the harness is testable
-/// without a webview.
-pub fn plan(fields: Vec<FieldSpec>, facts: &[Fact], resume: Option<&Resume>) -> Vec<FillAction> {
-    fields
-        .into_iter()
-        .take(MAX_FIELDS)
-        .map(FieldSpec::sanitized)
-        .filter(|f| !f.key.is_empty())
-        .map(|f| match decide(&f, facts) {
-            Decision::Fill { fact, value } => FillAction::Set { key: f.key, value, fact },
-            Decision::Resume => match resume {
+/// What one apply window has seen so far: fields by key (for retries), values
+/// the page rejected, and which facts went into which labels.
+#[derive(Default, Clone)]
+pub struct Session {
+    pub fields: HashMap<String, FieldSpec>,
+    pub excluded: HashMap<String, Vec<String>>,
+    pub already: BTreeMap<String, &'static str>,
+}
+
+/// Sessions by window label.
+#[derive(Default)]
+pub struct Sessions(Mutex<HashMap<String, Session>>);
+
+/// A rejected field is retried this many times before it goes to the user.
+const MAX_RETRIES: usize = 2;
+
+/// Turns the page's fields into fill actions: rules first, then the Fast Model
+/// for fields no rule matched. With no engine, those fields go to the user.
+pub async fn plan(
+    fields: Vec<FieldSpec>,
+    facts: &[Fact],
+    resume: Option<&Resume>,
+    engine: Option<&dyn DecisionEngine>,
+    session: &mut Session,
+) -> Vec<FillAction> {
+    let mut actions: Vec<Option<FillAction>> = Vec::new();
+    let mut pending: Vec<(usize, Pending, String)> = Vec::new();
+    let fields: Vec<FieldSpec> = fields.into_iter().take(MAX_FIELDS).map(FieldSpec::sanitized).filter(|f| !f.key.is_empty()).collect();
+    for f in fields {
+        session.fields.insert(f.key.clone(), f.clone());
+        let excluded = session.excluded.get(&f.key).cloned().unwrap_or_default();
+        let decision = match decide(&f, facts) {
+            // A value the page rejected goes back to the model with that value excluded.
+            Decision::Fill { value, .. } if excluded.contains(&value) => Decision::Unsure("The page rejected this value".into()),
+            d => d,
+        };
+        let action = match decision {
+            Decision::Fill { fact, value } => {
+                session.already.insert(f.label.clone(), fact);
+                Some(FillAction::Set { key: f.key, value, fact })
+            }
+            Decision::Resume => Some(match resume {
                 Some(r) => FillAction::File { key: f.key, name: r.name.clone(), b64: r.b64.clone() },
                 None => FillAction::NeedsUser { key: f.key, reason: "Export a CV for this job first, or attach one yourself".into() },
-            },
-            Decision::NeedsUser(reason) => FillAction::NeedsUser { key: f.key, reason },
-        })
-        .collect()
+            }),
+            Decision::NeedsUser(reason) => Some(FillAction::NeedsUser { key: f.key, reason }),
+            Decision::Unsure(reason) => {
+                let cands = candidates(&f, facts, &excluded);
+                if engine.is_none() || cands.is_empty() {
+                    Some(FillAction::NeedsUser { key: f.key, reason })
+                } else {
+                    pending.push((actions.len(), Pending { field: f, candidates: cands }, reason));
+                    None
+                }
+            }
+        };
+        actions.push(action);
+    }
+
+    if let (Some(engine), false) = (engine, pending.is_empty()) {
+        let batch: Vec<Pending> = pending.iter().map(|(_, p, _)| Pending { field: p.field.clone(), candidates: p.candidates.clone() }).collect();
+        let picks = pick_all(engine, &batch, &session.already).await;
+        for (n, (i, p, reason)) in pending.into_iter().enumerate() {
+            let key = p.field.key.clone();
+            actions[i] = Some(match picks.as_ref().map(|v| &v[n]) {
+                Ok(Pick::Chosen(c)) => {
+                    session.already.insert(p.field.label.clone(), c.fact);
+                    FillAction::Set { key, value: c.value.clone(), fact: c.fact }
+                }
+                Ok(Pick::NoneFits) => FillAction::NeedsUser { key, reason },
+                Ok(Pick::LowConfidence) => FillAction::NeedsUser { key, reason: "Not sure enough to fill this".into() },
+                Err(e) => FillAction::NeedsUser { key, reason: format!("Fast Model unavailable: {e}") },
+            });
+        }
+    }
+    actions.into_iter().flatten().collect()
 }
 
 /// The newest exported CV for the job that still exists on disk. The path
@@ -118,9 +187,14 @@ async fn load_resume(st: &AppState, job_id: i64) -> Option<Resume> {
     None
 }
 
-pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, msg: Value) -> Result<(), AppError> {
-    let label = window.label();
-    let job_id = job_id_of(label).ok_or_else(|| AppError::NotFound("Not an apply window".into()))?;
+async fn active_engine(st: &AppState) -> Option<Arc<dyn DecisionEngine>> {
+    let model = st.active_model().await.ok()?;
+    st.engine_for(&model).ok()
+}
+
+pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Sessions, msg: Value) -> Result<(), AppError> {
+    let label = window.label().to_string();
+    let job_id = job_id_of(&label).ok_or_else(|| AppError::NotFound("Not an apply window".into()))?;
     let url = window.url().map_err(|e| AppError::Io(e.to_string()))?;
     if !is_supported_url(url.as_str()) {
         return Err(AppError::NotFound("Autofill is not available on this page".into()));
@@ -130,6 +204,23 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, msg: Value) ->
     }
     let fields = match serde_json::from_value(msg) {
         Ok(PageMessage::Fields { fields }) => fields,
+        Ok(PageMessage::Rejected { key, value }) => {
+            let mut session = sessions.get(&label);
+            let tries = {
+                let ex = session.excluded.entry(key.clone()).or_default();
+                ex.push(value);
+                ex.len()
+            };
+            let field = session.fields.get(&key).cloned();
+            sessions.put(&label, session);
+            match field {
+                Some(f) if tries <= MAX_RETRIES => vec![f],
+                _ => {
+                    let reason = "The page rejected this value".to_string();
+                    return send(window, &[FillAction::NeedsUser { key, reason }]);
+                }
+            }
+        }
         Ok(PageMessage::Status { filled, needs }) => {
             #[cfg(debug_assertions)]
             eprintln!("[autofill] status: {filled} filled, {} need the user: {}", needs.len(), Value::from(needs.clone()));
@@ -138,10 +229,18 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, msg: Value) ->
         }
         _ => return Ok(()),
     };
+    #[cfg(debug_assertions)]
+    if let Ok(dir) = std::env::var("CVD_AUTOFILL_DUMP") {
+        let file = format!("{dir}/{}-{}.json", url.host_str().unwrap_or("page"), chrono::Local::now().format("%H%M%S%3f"));
+        let _ = std::fs::write(file, serde_json::to_string_pretty(&serde_json::json!({ "url": url.as_str(), "fields": fields_json(&fields) })).unwrap_or_default());
+    }
     let facts = crate::commands::apply_facts(st).await?;
-    let wants_file = fields.iter().any(|f| f.kind == Some(super::field::FieldKind::File));
+    let wants_file = fields.iter().any(|f| f.kind == Some(FieldKind::File));
     let resume = if wants_file { load_resume(st, job_id).await } else { None };
-    let actions = plan(fields, &facts, resume.as_ref());
+    let engine = active_engine(st).await;
+    let mut session = sessions.get(&label);
+    let actions = plan(fields, &facts, resume.as_ref(), engine.as_deref(), &mut session).await;
+    sessions.put(&label, session);
     #[cfg(debug_assertions)]
     for a in &actions {
         match a {
@@ -150,14 +249,52 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, msg: Value) ->
             FillAction::NeedsUser { key, reason } => eprintln!("[autofill] {key}: needs user ({reason})"),
         }
     }
-    let json = serde_json::to_string(&actions).map_err(|e| AppError::Io(e.to_string()))?;
+    send(window, &actions)
+}
+
+#[cfg(debug_assertions)]
+fn fields_json(fields: &[FieldSpec]) -> Value {
+    fields
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "key": f.key, "kind": f.kind(), "label": f.label, "placeholder": f.placeholder,
+                "autocomplete": f.autocomplete, "name_attr": f.name_attr, "help": f.help,
+                "section": f.section, "required": f.required, "options": f.options,
+            })
+        })
+        .collect()
+}
+
+fn send(window: &WebviewWindow, actions: &[FillAction]) -> Result<(), AppError> {
+    let json = serde_json::to_string(actions).map_err(|e| AppError::Io(e.to_string()))?;
     window
         .eval(format!("window.__cvdAutofill && window.__cvdAutofill.apply({json})"))
         .map_err(|e| AppError::Io(e.to_string()))
 }
 
+impl Sessions {
+    fn get(&self, label: &str) -> Session {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).get(label).cloned().unwrap_or_default()
+    }
+
+    fn put(&self, label: &str, session: Session) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(label.to_string(), session);
+    }
+
+    /// A reopened window starts fresh.
+    pub fn reset(&self, label: &str) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(label);
+    }
+}
+
 /// The single command remote pages may call (see `capabilities/apply.json`).
 #[tauri::command]
-pub async fn autofill_bridge(window: WebviewWindow, st: tauri::State<'_, AppState>, msg: Value) -> Result<(), AppError> {
-    handle_bridge(&window, &st, msg).await
+pub async fn autofill_bridge(
+    window: WebviewWindow,
+    st: tauri::State<'_, AppState>,
+    sessions: tauri::State<'_, Sessions>,
+    msg: Value,
+) -> Result<(), AppError> {
+    handle_bridge(&window, &st, &sessions, msg).await
 }
