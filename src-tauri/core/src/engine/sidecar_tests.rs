@@ -260,7 +260,7 @@ async fn real_server_shape() {
         }
     }
     let model = std::env::var("CVD_TEST_MODEL").expect("set CVD_TEST_MODEL to a Clef .gguf");
-    let bin = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/binaries"))
+    let bin = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../binaries"))
         .expect("run scripts/fetch-llama-server.sh first")
         .flatten()
         .map(|e| e.path())
