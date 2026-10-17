@@ -50,3 +50,6 @@ Thumbs.db
 
 # llama-server sidecar (src-tauri/scripts/fetch-llama-server.sh)
 src-tauri/binaries
+
+# Worktrees
+.worktrees/
