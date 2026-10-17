@@ -7,7 +7,8 @@
     "build": "bun --bun ng build",
     "watch": "bun --bun ng build --watch --configuration development",
     "tauri": "tauri",
-    "test": "bun --bun ng test --watch=false"
+    "test": "bun --bun ng test --watch=false",
+    "bump": "bun scripts/bump-version.ts"
   },
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
