@@ -1,3 +1,4 @@
+mod autofill;
 mod commands;
 mod company;
 #[allow(dead_code)]
@@ -79,6 +80,9 @@ pub fn run() {
             ipc::list_cvs,
             ipc::get_ui_setting,
             ipc::set_ui_setting,
+            ipc::get_apply_defaults,
+            ipc::save_apply_defaults,
+            ipc::apply_facts,
             ipc::engine_status,
             ipc::cancel_download,
             ipc::get_ranked,

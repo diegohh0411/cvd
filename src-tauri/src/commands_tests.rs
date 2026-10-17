@@ -771,3 +771,29 @@ async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
     assert_eq!(kept.folder, "INBOX");
     assert_eq!(get_mail_account(&st).await.unwrap().unwrap().folder, "INBOX");
 }
+
+#[tokio::test]
+async fn apply_defaults_round_trip_and_feed_facts() {
+    let (st, _) = state().await;
+    assert_eq!(get_apply_defaults(&st).await.unwrap(), ApplyDefaults::default());
+
+    save_profile(&st, Profile { name: "Diego Hernández".into(), ..Default::default() }).await.unwrap();
+    save_apply_defaults(
+        &st,
+        ApplyDefaults { city: "  Monterrey ".into(), needs_sponsorship: Some(false), ..Default::default() },
+    )
+    .await
+    .unwrap();
+
+    let d = get_apply_defaults(&st).await.unwrap();
+    assert_eq!(d.city, "Monterrey");
+    assert_eq!(d.needs_sponsorship, Some(false));
+
+    let facts = apply_facts(&st).await.unwrap();
+    let keys: Vec<_> = facts.iter().map(|f| f.key).collect();
+    assert!(keys.contains(&"last_name"));
+    assert!(keys.contains(&"city"));
+    assert!(keys.contains(&"needs_sponsorship"));
+    // `apply.` keys are not reachable through the generic UI setting commands.
+    assert!(get_ui_setting(&st, APPLY_DEFAULTS_KEY).await.is_err());
+}
