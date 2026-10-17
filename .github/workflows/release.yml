@@ -67,7 +67,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5' }}
+      OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || '~deepseek/deepseek-flash-latest' }}
       REPO: ${{ github.repository }}
       TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
       RUN_NUMBER: ${{ github.run_number }}
