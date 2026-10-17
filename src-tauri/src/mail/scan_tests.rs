@@ -279,11 +279,11 @@ async fn bad_engine_response_is_retried_next_run() {
 }
 
 #[tokio::test]
-async fn fatal_engine_error_stops_scan_and_keeps_earlier_rows() {
+async fn fatal_engine_error_fails_the_run() {
     let (store, _, _, _) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>"), header(2, "<b>"), header(3, "<c>")]);
     let engine = ignoring();
-    // Each email asks four questions, so call 5 is the first question of the second email.
+    // Emails run concurrently, so which one hits call 5 is not fixed; the run must fail either way.
     engine.fail_on_call(5);
 
     let result = run(&store, &mail, &engine, &unreachable_chat()).await;
@@ -292,9 +292,6 @@ async fn fatal_engine_error_stops_scan_and_keeps_earlier_rows() {
     let run = store.get_scan_run(1).await.unwrap().unwrap();
     assert_eq!(run.status, ScanStatus::Failed);
     assert!(run.error.is_some());
-    assert!(store.get_processed("<a>").await.unwrap().is_some());
-    assert!(store.get_processed("<b>").await.unwrap().is_none());
-    assert_eq!(mail.fetched(), vec![1, 2]);
 }
 
 #[tokio::test]
