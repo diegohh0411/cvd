@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 
+import { getVersion } from '@tauri-apps/api/app';
+
 import { type DarkModeOptions, ZardDarkMode } from '@/shared/services/dark-mode';
 import * as api from '../../core/ipc/commands';
 import { PageHeaderComponent } from '../../shell/page-header.component';
@@ -37,6 +39,7 @@ import { GmailCardComponent } from './gmail-card.component';
         <p class="text-muted-foreground text-sm">Connect outside accounts that feed the Jobs page.</p>
       </div>
       <app-gmail-card />
+      <p class="text-muted-foreground mt-auto pt-6 text-center text-xs">Version {{ version() }}</p>
     </div>
   `,
 })
@@ -45,7 +48,10 @@ export class SettingsPageComponent implements OnInit {
   protected readonly budget = signal('1');
   protected readonly theme = signal<DarkModeOptions>(this.dark.currentTheme());
 
+  protected readonly version = signal('…');
+
   ngOnInit(): void {
+    void getVersion().then((v) => this.version.set(v), () => this.version.set('unknown'));
     void api.getUiSetting(BUDGET_SETTING).then((v) => this.budget.set(v === '2' ? '2' : '1'), () => undefined);
   }
 
