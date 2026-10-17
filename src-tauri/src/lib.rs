@@ -14,7 +14,6 @@ mod providers;
 #[allow(dead_code)]
 mod render;
 mod search;
-mod spike;
 mod web;
 mod state;
 #[allow(dead_code)]
@@ -53,8 +52,10 @@ pub fn run() {
             );
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
-            if let Ok(url) = std::env::var("CVD_SPIKE_URL") {
-                spike::open_apply(app.handle(), &url)?;
+            // Dev hook: open an apply window on any supported posting, with no job attached.
+            #[cfg(debug_assertions)]
+            if let Ok(url) = std::env::var("CVD_APPLY_URL") {
+                autofill::window::open_window(app.handle(), 0, &url, "Apply (dev)")?;
             }
             Ok(())
         })
@@ -121,8 +122,8 @@ pub fn run() {
             ipc::add_connection,
             ipc::rename_connection,
             ipc::list_remote_models,
-            spike::autofill_bridge,
-            spike::spike_open_apply,
+            ipc::start_apply,
+            autofill::window::autofill_bridge,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

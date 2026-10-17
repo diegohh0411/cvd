@@ -49,6 +49,8 @@ export const saveProfile = (profile: Profile) => call<void>('save_profile', { pr
 export const getApplyDefaults = () => call<ApplyDefaults>('get_apply_defaults');
 export const saveApplyDefaults = (defaults: ApplyDefaults) => call<void>('save_apply_defaults', { defaults });
 export const applyFacts = () => call<ApplyFact[]>('apply_facts');
+/** `false`: the posting's site isn't supported, nothing was opened. */
+export const startApply = (jobId: number) => call<boolean>('start_apply', { jobId });
 export const listEntries = (includeArchived: boolean) => call<Entry[]>('list_entries', { includeArchived });
 export const saveEntry = (input: EntryInput) => call<number>('save_entry', { input });
 export const deleteEntry = (id: number) => call<void>('delete_entry', { id });

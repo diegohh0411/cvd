@@ -8,7 +8,9 @@
   "remote": {
     "urls": [
       "https://*.greenhouse.io/*",
-      "https://greenhouse.io/*"
+      "https://greenhouse.io/*",
+      "https://jobs.lever.co/*",
+      "https://jobs.ashbyhq.com/*"
     ]
   },
   "permissions": [

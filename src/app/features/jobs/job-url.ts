@@ -23,3 +23,15 @@ export function urlHost(url: string): string {
     return url;
   }
 }
+
+/** Hosts auto-apply works on; mirrors `autofill::window::SUPPORTED_HOSTS`. */
+const AUTOFILL_HOSTS = ['greenhouse.io', 'jobs.lever.co', 'jobs.ashbyhq.com'];
+
+export function canAutofill(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return u.protocol === 'https:' && AUTOFILL_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}

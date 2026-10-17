@@ -1194,6 +1194,10 @@ pub mod ipc {
         super::apply_facts(&st).await
     }
     #[tauri::command]
+    pub async fn start_apply(app: tauri::AppHandle, st: S<'_>, job_id: i64) -> Res<bool> {
+        crate::autofill::window::start_apply(&app, &st, job_id).await
+    }
+    #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {
         super::get_ui_setting(&st, &key).await
     }

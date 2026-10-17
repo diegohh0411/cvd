@@ -246,3 +246,10 @@ Also: `#[tauri::command] fn autofill_bridge(window: WebviewWindow, msg: serde_js
 4. **§2 extraction:** `label` must also come from the nearest preceding heading or text when `<label for>` is missing; combobox inputs on Greenhouse have none.
 5. **§8:** the `autofill_bridge` handler should check `window.label()` and the window URL host in Rust as well, as defence in depth; the capability alone is the only gate in the spike.
 6. **Open question, Windows:** still untested. The test needs a Windows machine.
+
+## Implementation status
+
+- **Step 2 (done):** `src-tauri/src/autofill/{facts,defaults}.rs`, plus the Application defaults section on the Profile page with a preview of the facts.
+- **Step 3 (done):** `autofill/matcher.rs` handles harness steps 1–3 (hard rules, autocomplete, label tables). `autofill/window.rs` covers the apply window, `autofill_bridge` with label and host re-checks, the resume taken from the job's newest exported CV, and the `plan()` harness entry point. The injected script is plain JS at `autofill/inject.js` (not a TS bundle under `src/`): extraction, settle wait, re-scan on DOM changes, fills, file attach with verify and retry, overlay. The job page shows an **Autofill** button on supported hosts. Dev hook: `CVD_APPLY_URL=<posting> ./target/debug/cvd` logs every decision to stderr.
+- Checked against the real Anthropic Greenhouse form (no submit). Name, email, phone and LinkedIn filled and kept their values. The resume field was recognized from its section text. EEO, free-text and unknown questions went to the user. Country, sponsorship and start date were left empty because the test profile had no Application defaults.
+- **Next:** Step 4 (Fast Model steps 4–7 + eval fixtures), then step 5 (memory, confirmation detection, status change).
