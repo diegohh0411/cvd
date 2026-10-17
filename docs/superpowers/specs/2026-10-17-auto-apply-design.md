@@ -194,3 +194,55 @@ Jev bills $0.042 / Mtok input. A 30-field form is one or two batched requests at
 - Should the threshold be a user setting, or fixed and tuned with the eval?
 - Windows WebView2 parity: test there in the same spikes, or ship macOS first?
 - Free-text questions: a later version could hand them to the Smart Model as drafts the user must approve. Not in v1.
+
+## Spike results
+
+Run 2026-10-17 on macOS (WKWebView), Tauri 2.12.1, against `https://job-boards.greenhouse.io/anthropic/jobs/4461450008` (React-based Greenhouse job board). Throwaway code: `src-tauri/src/spike.rs`, `src-tauri/src/spike_init.js`, `src-tauri/capabilities/apply.json`, `build.rs`. Open it with `CVD_SPIKE_URL=<job url> ./target/debug/cvd`, or the debug-only `spike_open_apply` command. Results are appended to `/tmp/cvd-spike.log`. No application was submitted. Windows WebView2 was not tested.
+
+### (a) Bridge: works
+
+- A script from `WebviewWindowBuilder::initialization_script` ran on the remote origin and called `window.__TAURI_INTERNALS__.invoke('autofill_bridge', { msg })`. Rust received it with the real page origin.
+- Extraction returned 36 fields from the Greenhouse form (label, kind, required, select options). Notes for the extractor: Greenhouse comboboxes show up as `type=text` inputs with an empty `id` and no label, so they need the ARIA combobox path from §2. The phone widget adds an `iti-0__search-input` that must be skipped. The resume `<input type=file>` is `#resume`, labelled just "Attach"; its real label is the section heading "Resume/CV".
+- Rust `window.eval` of the native-setter fill on `#first_name` succeeded in all 6 runs. After 1 s, `value` was still `Diego`, the node was still in the DOM and `aria-invalid="false"`, so React's controlled state accepted it. (Inputs carry `__reactProps$…`.)
+- ACL is enforced. From the `apply-test` window, `get_profile`, `list_jobs` and `spike_open_apply` fail with "not allowed. Command not found", and `plugin:opener|open_url` fails with "not allowed on window apply-test". Only `autofill_bridge` is reachable.
+
+### (b) File upload: works, with a timing caveat
+
+- `new File([bytes], name, {type:'application/pdf'})` → `DataTransfer.items.add` → `input.files = dt.files` → dispatch `input` and `change` (bubbling) on WKWebView. Bytes came from Rust as base64 and `atob` decoded them fine.
+- Greenhouse accepted it: the filename appeared under "Resume/CV*", the file input was replaced by the attached-state UI, and no error text appeared.
+- **Failure mode:** if the assignment runs too early (the form exists but the uploader hasn't hydrated), the page throws `undefined is not an object (evaluating 'oe.uploadFile')` and shows no filename. This happened in 2 of 3 early runs, where the upload ran right after the fields appeared. With a 3 s wait before assigning, it passed 3 of 3 runs. The script should therefore verify success (filename visible, no new error, `input.files` consumed) and retry on a delay instead of assuming one `change` is enough.
+- The test PDF was a minimal stub. Greenhouse didn't validate content at attach time. Whether it rejects a bad PDF on submit was not tested, since we never submit.
+
+### Exact Tauri v2 config
+
+`build.rs`: an app manifest is what creates the `allow-autofill-bridge` permission.
+
+```rust
+tauri_build::try_build(
+    tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(&["autofill_bridge"])),
+)
+.expect("failed to run tauri-build");
+```
+
+`src-tauri/capabilities/apply.json`:
+
+```json
+{
+  "identifier": "apply",
+  "windows": ["apply-*"],
+  "remote": { "urls": ["https://*.greenhouse.io/*", "https://greenhouse.io/*"] },
+  "permissions": ["allow-autofill-bridge"]
+}
+```
+
+Also: `#[tauri::command] fn autofill_bridge(window: WebviewWindow, msg: serde_json::Value)` registered in `generate_handler!`; the script via `.initialization_script(...)`; the window via `WebviewUrl::External(url)`. No `tauri.conf.json` change was needed (the app CSP applies only to the app's own pages, not remote ones). Listing only some commands in the manifest doesn't restrict the others for the `main` window.
+
+### Design changes
+
+1. **§1 capability:** `remote.urls` is a static allowlist baked into the app, so each supported ATS host has to be listed (`*.greenhouse.io`, `*.lever.co`, `*.ashbyhq.com`, `*.smartrecruiters.com`, …). A job whose URL is on a custom or company domain gets no bridge, and cvd must say so up front. Alternatives: add a user-editable list (needs a rebuild, since capabilities are compile-time), or follow the "Apply" link to the ATS host. For v1, ship the fixed allowlist and treat other hosts as "open in browser, no autofill".
+2. **§1 injected script:** run extraction only after the form settles (≥3 inputs present and DOM quiet for ~500 ms), not on first appearance.
+3. **§5 file fill:** keep the DataTransfer approach, no Finder fallback needed on macOS. Add post-condition checks (filename visible, no new error, no throw) with up to 2 retries spaced ~2 s apart, then fall back to needs-user. Detect the resume input via the section heading rather than the "Attach" label.
+4. **§2 extraction:** `label` must also come from the nearest preceding heading or text when `<label for>` is missing; combobox inputs on Greenhouse have none.
+5. **§8:** the `autofill_bridge` handler should check `window.label()` and the window URL host in Rust as well, as defence in depth; the capability alone is the only gate in the spike.
+6. **Open question, Windows:** still untested. The test needs a Windows machine.

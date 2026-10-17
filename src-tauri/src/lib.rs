@@ -14,6 +14,7 @@ mod providers;
 #[allow(dead_code)]
 mod render;
 mod search;
+mod spike;
 mod web;
 mod state;
 #[allow(dead_code)]
@@ -52,6 +53,9 @@ pub fn run() {
             );
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
+            if let Ok(url) = std::env::var("CVD_SPIKE_URL") {
+                spike::open_apply(app.handle(), &url)?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,6 +121,8 @@ pub fn run() {
             ipc::add_connection,
             ipc::rename_connection,
             ipc::list_remote_models,
+            spike::autofill_bridge,
+            spike::spike_open_apply,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
