@@ -1,6 +1,8 @@
 //! The 30-day Gmail scan: read unseen mail, classify it, then apply or queue status changes.
 
 use chrono::{Duration, NaiveDate};
+use futures::stream::{self, StreamExt};
+use futures::FutureExt;
 use serde_json::{json, Value};
 
 use super::classify::{classify, EmailInput, JobCtx};
@@ -15,6 +17,8 @@ use crate::store::types::{JobDescription, JobStatus};
 use crate::store::{NewProcessed, Outcome, ScanStatus, Store};
 
 pub const SCAN_DAYS: i64 = 30;
+/// Most emails fetched, classified and summarised at the same time.
+pub const MAX_CONCURRENT_EMAILS: usize = 4;
 pub const PROGRESS_EVENT: &str = "scan://progress";
 pub const FINISHED_EVENT: &str = "scan://finished";
 
@@ -88,23 +92,50 @@ async fn scan(deps: &ScanDeps<'_>, summary: &mut ScanSummary) -> Result<(), AppE
     let total = headers.len();
     let processed = deps.store.processed_ids().await?;
 
-    for (index, header) in headers.iter().enumerate() {
-        if !processed.contains(&header.message_id) {
-            handle_header(deps, header, summary).await?;
+    let (new, seen): (Vec<_>, Vec<_>) = headers.iter().partition(|h| !processed.contains(&h.message_id));
+    summary.checked = seen.len();
+    (deps.emit)(PROGRESS_EVENT, json!({ "checked": summary.checked, "total": total }));
+
+    let run_id = summary.run_id;
+    let mut pending = Vec::with_capacity(new.len());
+    for header in new {
+        pending.push(handle_header(deps, header, run_id).boxed());
+    }
+    let mut results = stream::iter(pending)
+        .buffer_unordered(MAX_CONCURRENT_EMAILS);
+    while let Some(result) = results.next().await {
+        match result? {
+            Tally::Failed => summary.failed += 1,
+            Tally::Ignored => {}
+            Tally::Recorded(outcome) => {
+                summary.job_related += 1;
+                match outcome {
+                    Outcome::Applied => summary.applied += 1,
+                    Outcome::PendingReview => summary.pending += 1,
+                    Outcome::NoChange => summary.no_change += 1,
+                    Outcome::Ignored | Outcome::Dismissed => {}
+                }
+            }
         }
-        summary.checked = index + 1;
+        summary.checked += 1;
         (deps.emit)(PROGRESS_EVENT, json!({ "checked": summary.checked, "total": total }));
     }
     Ok(())
 }
 
+/// What happened to one email.
+enum Tally {
+    Failed,
+    Ignored,
+    Recorded(Outcome),
+}
+
 /// Records one new email. Per-email problems count as `failed` and leave the
 /// email unrecorded, so the next scan retries it. Returns `Err` only for
 /// failures that make the rest of the scan pointless.
-async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut ScanSummary) -> Result<(), AppError> {
+async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) -> Result<Tally, AppError> {
     let Ok(body) = deps.mail.body_text(header.uid).await else {
-        summary.failed += 1;
-        return Ok(());
+        return Ok(Tally::Failed);
     };
 
     // Re-read per email so a status applied earlier in this scan is seen here.
@@ -116,8 +147,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
     let classified = match classify(deps.engine, &email, &contexts, &statuses).await {
         Ok(c) => c,
         Err(crate::engine::EngineError::BadResponse(_) | crate::engine::EngineError::ContextOverflow) => {
-            summary.failed += 1;
-            return Ok(());
+            return Ok(Tally::Failed);
         }
         Err(e) => return Err(e.into()),
     };
@@ -130,7 +160,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
 
     let mut row = NewProcessed {
         message_id: header.message_id.clone(),
-        run_id: summary.run_id,
+        run_id,
         received_at: header.received_at.clone(),
         subject: header.subject.clone(),
         sender: header.sender.clone(),
@@ -145,7 +175,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
     let (job_id, next_status, confidence, outcome) = match decision {
         Decision::Ignored => {
             deps.store.record_processed(&row, None).await?;
-            return Ok(());
+            return Ok(Tally::Ignored);
         }
         Decision::NoChange { job_id } => (job_id, None, None, Outcome::NoChange),
         Decision::Applied { job_id, status_id, confidence } => {
@@ -157,8 +187,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
     };
 
     let Some(job) = contexts.iter().find(|c| c.id == job_id) else {
-        summary.failed += 1;
-        return Ok(());
+        return Ok(Tally::Failed);
     };
     let previous_name = status_name(&statuses, current);
     let next_name = status_name(&statuses, next_status).unwrap_or("unchanged");
@@ -169,8 +198,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
             return Err(e);
         }
         Err(_) => {
-            summary.failed += 1;
-            return Ok(());
+            return Ok(Tally::Failed);
         }
     };
 
@@ -183,14 +211,7 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, summary: &mut S
     let apply_status = if outcome == Outcome::Applied { next_status } else { None };
     deps.store.record_processed(&row, apply_status).await?;
 
-    summary.job_related += 1;
-    match outcome {
-        Outcome::Applied => summary.applied += 1,
-        Outcome::PendingReview => summary.pending += 1,
-        Outcome::NoChange => summary.no_change += 1,
-        Outcome::Ignored | Outcome::Dismissed => {}
-    }
-    Ok(())
+    Ok(Tally::Recorded(outcome))
 }
 
 fn job_contexts(jobs: &[JobDescription], statuses: &[JobStatus]) -> Vec<JobCtx> {
