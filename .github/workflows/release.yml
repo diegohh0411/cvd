@@ -57,3 +57,82 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: --target ${{ matrix.target }} ${{ matrix.extra_args }}
+
+  changelog:
+    name: Generate changelog
+    needs: release
+    runs-on: ubuntu-latest
+    # A failed LLM call must not fail the release; the default body stays in place.
+    continue-on-error: true
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || '~deepseek/deepseek-flash-latest' }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find the draft release built by this run
+        run: |
+          # Tag pushes use the tag; manual runs get v<version>-build.<run_number> from tauri-action.
+          release=$(gh api "repos/$REPO/releases" --paginate | jq -s -c \
+            --arg tag "$TAG" --arg suffix "-build.$RUN_NUMBER" \
+            'add | map(select(.draft and (($tag != "" and .tag_name == $tag) or ($tag == "" and (.tag_name | endswith($suffix)))))) | first')
+          if [ -z "$release" ] || [ "$release" = "null" ]; then
+            echo "::error::No draft release found for this run"; exit 1
+          fi
+          echo "RELEASE_ID=$(jq -r .id <<<"$release")" >> "$GITHUB_ENV"
+          echo "CURRENT_TAG=$(jq -r .tag_name <<<"$release")" >> "$GITHUB_ENV"
+          jq -r '.body // ""' <<<"$release" > existing-body.md
+
+      - name: Collect changes since the latest published release
+        run: |
+          prev=$(gh api "repos/$REPO/releases" --paginate | jq -s -r \
+            'add | map(select(.draft | not)) | first | .tag_name // empty')
+          if [ -n "$prev" ] && git rev-parse -q --verify "refs/tags/$prev" >/dev/null; then
+            range="$prev..HEAD"
+          else
+            prev=""
+            range="HEAD"
+          fi
+          echo "Comparing against: ${prev:-<first release>}"
+          {
+            echo "Previous release: ${prev:-none (first release)}"
+            echo "New release: $CURRENT_TAG"
+            echo
+            echo "## Commits"
+            git log --no-merges --pretty='format:- %s%n%b' "$range" | head -c 30000
+            echo
+            echo "## Files changed"
+            if [ -n "$prev" ]; then git diff --stat "$range" | tail -n 60; fi
+          } > changes.txt
+
+      - name: Generate release notes with OpenRouter
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY secret is not set"; exit 1
+          fi
+          jq -n --arg model "$OPENROUTER_MODEL" --rawfile changes changes.txt '{
+            model: $model,
+            messages: [
+              {role: "system", content: "You write release notes for CVD, a desktop app, from git history. Output concise GitHub Markdown only, no preamble. Group user-visible changes under \"### Features\", \"### Fixes\" and \"### Other\" headings, omitting empty groups. Write for end users: plain language, one line per change. Collapse CI, chore, test and refactor commits into at most one \"Other\" line. Never invent changes that are not in the input."},
+              {role: "user", content: $changes}
+            ]
+          }' > request.json
+          curl -sS --fail-with-body --max-time 120 https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @request.json > response.json
+          jq -r '.choices[0].message.content // empty' response.json > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::OpenRouter returned no content"; cat response.json; exit 1
+          fi
+
+      - name: Update the draft release body
+        run: |
+          { cat notes.md; echo; echo "---"; echo; cat existing-body.md; } > body.md
+          gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F body=@body.md --silent
