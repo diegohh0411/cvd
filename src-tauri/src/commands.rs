@@ -281,6 +281,12 @@ pub async fn list_jobs(st: &AppState) -> Res<Vec<JobDescription>> {
     Ok(st.store.list_jds().await?)
 }
 
+/// Job ids matching `query` (fuzzy), best first; empty for a blank query.
+pub async fn search_jobs(st: &AppState, query: &str) -> Res<Vec<i64>> {
+    let jobs = st.store.list_jds().await?;
+    Ok(crate::job_search::search_jobs(&jobs, query))
+}
+
 pub async fn get_job(st: &AppState, id: i64) -> Res<JobDescription> {
     st.store
         .get_jd(id)
@@ -1128,6 +1134,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_jobs(st: S<'_>) -> Res<Vec<JobDescription>> {
         super::list_jobs(&st).await
+    }
+    #[tauri::command]
+    pub async fn search_jobs(st: S<'_>, query: String) -> Res<Vec<i64>> {
+        super::search_jobs(&st, &query).await
     }
     #[tauri::command]
     pub async fn get_job(st: S<'_>, id: i64) -> Res<JobDescription> {

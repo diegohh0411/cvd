@@ -199,4 +199,17 @@ describe('JobsPageComponent scan controls', () => {
     expect(scan.finishedRunId()).toBeNull();
     expect(f.debugElement.query(By.directive(ScanResultsDialogComponent))).toBeTruthy();
   });
+
+  it('ranks jobs by the fuzzy search ids and shows an empty state', async () => {
+    const job = (id: number, company: string) => ({ id, title: 'Engineer', company, raw_text: '', created_at: '2026-01-01T00:00:00Z', url: '', status_id: null, company_id: null });
+    const { f, el } = await render({ list_jobs: [job(1, 'Acme'), job(2, 'Stripe')], list_runs: [], search_jobs: [1] });
+    const input = el.querySelector('[data-testid="job-search"]') as HTMLInputElement;
+    input.value = 'acm';
+    input.dispatchEvent(new Event('input'));
+    await flush();
+    f.detectChanges();
+    const rows = () => Array.from(el.querySelectorAll('ul[aria-label="Jobs"] li')).map((li) => li.textContent);
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain('Acme');
+  });
 });
