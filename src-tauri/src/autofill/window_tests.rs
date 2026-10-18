@@ -1,5 +1,5 @@
 use super::field::{FieldKind, FieldSpec, FillAction};
-use super::window::{is_supported_url, plan, Resume, Session};
+use super::window::{facts_matching, is_supported_url, plan, Resume, Session};
 use super::Fact;
 
 #[test]
@@ -45,4 +45,28 @@ fn actions_serialize_for_the_page() {
     assert_eq!(serde_json::to_value(&a).unwrap(), serde_json::json!({"action": "set", "key": "a", "value": "Diego", "fact": "first_name"}));
     let f: FieldSpec = serde_json::from_value(serde_json::json!({"key": "k", "kind": "weird", "label": "x", "extra": 1})).unwrap();
     assert_eq!(f.kind(), FieldKind::Other);
+}
+
+#[test]
+fn edits_match_facts_by_any_spelling() {
+    let f = |key: &'static str, v: &[&str]| Fact { key, variants: v.iter().map(|s| s.to_string()).collect() };
+    let facts = vec![
+        f("first_name", &["Diego"]),
+        f("city", &["Monterrey"]),
+        f("location_full", &["Monterrey, Mexico"]),
+        f("country", &["México", "Mexico"]),
+        f("needs_sponsorship", &["No"]),
+        f("willing_to_relocate", &["Yes"]),
+    ];
+    assert_eq!(facts_matching(" diego ", &facts, false), ["first_name"]);
+    // Picked options may carry extras; typed text must match exactly.
+    assert_eq!(facts_matching("Mexico (+52)", &facts, true), ["country"]);
+    assert!(facts_matching("Mexico (+52)", &facts, false).is_empty());
+    assert_eq!(facts_matching("Monterrey", &facts, false), ["city"]);
+    // Ambiguous when picked: a city is also part of the full location.
+    assert_eq!(facts_matching("Monterrey", &facts, true), ["city", "location_full"]);
+    // Yes/no answers teach nothing.
+    assert!(facts_matching("Yes", &facts, true).is_empty());
+    assert!(facts_matching("Blue", &facts, false).is_empty());
+    assert!(facts_matching("", &facts, false).is_empty());
 }

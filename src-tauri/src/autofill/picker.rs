@@ -69,7 +69,7 @@ fn is_yes_no_options(options: &[String]) -> bool {
 
 /// Loose match between a page option and a fact spelling, for long lists such
 /// as countries ("Mexico" ~ "Mexico (+52)").
-fn loosely_matches(option: &str, variant: &str) -> bool {
+pub(crate) fn loosely_matches(option: &str, variant: &str) -> bool {
     let (o, v) = (normalize(option), normalize(variant));
     o == v || (v.len() >= 3 && o.contains(&v)) || (o.len() >= 3 && v.contains(&o))
 }

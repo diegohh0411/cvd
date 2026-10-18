@@ -1,6 +1,8 @@
 //! Deterministic field → fact matching (harness steps 1 and 3). Anything it is
 //! not sure about goes to the user; the Fast Model takes over those later.
 
+use std::collections::BTreeMap;
+
 use super::facts::fold_accents;
 use super::field::{FieldKind, FieldSpec};
 use super::Fact;
@@ -127,37 +129,69 @@ pub(crate) fn match_option(options: &[String], fact: &Fact) -> Option<String> {
     None
 }
 
-pub fn decide(field: &FieldSpec, facts: &[Fact]) -> Decision {
+fn is_salary(label: &str) -> bool {
+    ["salary", "compensation", "pay expectation"].iter().any(|w| has(label, w))
+}
+
+/// Fields cvd never fills, whatever it knows: uploads, personal and legal
+/// questions, free text, dates, questions about someone else.
+fn hard_rule(field: &FieldSpec) -> Option<Decision> {
     let label = normalize(&field.label);
     let context = normalize(&format!("{} {} {}", field.label, field.help, field.section));
     let kind = field.kind();
-
     if kind == FieldKind::File {
         let hay = normalize(&format!("{} {} {}", field.label, field.section, field.name_attr));
         let resume = ["resume", "cv", "curriculum"].iter().any(|w| hay.split(' ').any(|t| t == *w));
-        return if resume { Decision::Resume } else { needs("File upload") };
+        return Some(if resume { Decision::Resume } else { needs("File upload") });
     }
     if SENSITIVE.iter().any(|w| has(&context, w)) {
-        return needs("Personal question: cvd never answers these");
+        return Some(needs("Personal question: cvd never answers these"));
     }
     if LEGAL.iter().any(|w| has(&context, w)) {
-        return needs("Agreement or consent: give it yourself");
+        return Some(needs("Agreement or consent: give it yourself"));
     }
-    let salary = ["salary", "compensation", "pay expectation"].iter().any(|w| has(&label, w));
     if kind == FieldKind::Date {
-        return needs("Pick a date");
+        return Some(needs("Pick a date"));
     }
-    if matches!(kind, FieldKind::Textarea | FieldKind::Checkbox | FieldKind::Other) && !salary {
-        return needs("Needs your own answer");
+    if matches!(kind, FieldKind::Textarea | FieldKind::Checkbox | FieldKind::Other) && !is_salary(&label) {
+        return Some(needs("Needs your own answer"));
     }
     if OTHER_PERSON.iter().any(|w| has(&context, w)) {
-        return needs("Asks about someone else");
+        return Some(needs("Asks about someone else"));
     }
+    None
+}
+
+/// Whether cvd may learn from the user's answer to this field.
+pub fn is_learnable(field: &FieldSpec) -> bool {
+    !normalize(&field.label).is_empty() && !is_salary(&normalize(&field.label)) && hard_rule(field).is_none()
+}
+
+pub fn decide(field: &FieldSpec, facts: &[Fact]) -> Decision {
+    decide_with(field, facts, &BTreeMap::new())
+}
+
+/// `memory` maps normalized labels to fact keys the user taught cvd. It comes
+/// after the hard rules, so a memory can never unlock a protected field.
+pub fn decide_with(field: &FieldSpec, facts: &[Fact], memory: &BTreeMap<String, String>) -> Decision {
+    if let Some(d) = hard_rule(field) {
+        return d;
+    }
+    let label = normalize(&field.label);
+    let kind = field.kind();
+    let salary = is_salary(&label);
+    let remembered = match memory.get(&label) {
+        // The user said this label means that fact, which the profile no longer has.
+        Some(k) if !facts.iter().any(|f| f.key == k) => return needs("Not in your profile yet"),
+        Some(k) => facts.iter().find(|f| f.key == k).map(|f| f.key),
+        None => None,
+    };
 
     let fact_key = if salary {
         Some("salary_expectation")
     } else {
-        by_autocomplete(&field.autocomplete)
+        remembered
+            .or_else(|| by_autocomplete(&field.autocomplete))
             .or_else(|| by_label(&label))
             // Placeholder and name attribute only stand in for a missing label: a label
             // cvd doesn't recognise means the question is something else.

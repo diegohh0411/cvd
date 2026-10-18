@@ -1,5 +1,7 @@
 use super::field::{FieldKind, FieldSpec};
-use super::matcher::{decide, normalize, Decision};
+use std::collections::BTreeMap;
+
+use super::matcher::{decide, decide_with, is_learnable, normalize, Decision};
 use super::Fact;
 
 fn facts() -> Vec<Fact> {
@@ -216,4 +218,33 @@ fn never_agrees_or_consents() {
         x.options = vec!["Yes".into(), "No".into()];
         assert!(matches!(decide(&x, &f), Decision::NeedsUser(_)), "{label}");
     }
+}
+
+#[test]
+fn memory_fills_learned_labels_but_never_protected_ones() {
+    let f = facts();
+    let mem: BTreeMap<String, String> = [
+        ("nombre de pila".to_string(), "first_name".to_string()),
+        ("gender".to_string(), "first_name".to_string()),
+        ("apodo".to_string(), "github".to_string()),
+    ]
+    .into();
+    assert_eq!(fill(decide_with(&field(FieldKind::Text, "Nombre de pila"), &f, &mem)), ("first_name", "Diego".into()));
+    // A memory can't unlock a hard-rule field.
+    assert!(matches!(decide_with(&field(FieldKind::Text, "Gender"), &f, &mem), Decision::NeedsUser(_)));
+    // A remembered fact the profile no longer has goes to the user.
+    assert!(matches!(decide_with(&field(FieldKind::Text, "Apodo"), &f, &mem), Decision::NeedsUser(_)));
+    // Memory wins over a label rule the user corrected.
+    let mem: BTreeMap<String, String> = [("name".to_string(), "first_name".to_string())].into();
+    assert_eq!(fill(decide_with(&field(FieldKind::Text, "Name"), &f, &mem)).0, "first_name");
+}
+
+#[test]
+fn only_unprotected_labelled_fields_are_learnable() {
+    assert!(is_learnable(&field(FieldKind::Text, "Nombre de pila")));
+    assert!(!is_learnable(&field(FieldKind::Text, "")));
+    assert!(!is_learnable(&field(FieldKind::Select, "Gender")));
+    assert!(!is_learnable(&field(FieldKind::Textarea, "Why us?")));
+    assert!(!is_learnable(&field(FieldKind::Text, "Desired salary")));
+    assert!(!is_learnable(&field(FieldKind::Text, "Emergency contact phone")));
 }

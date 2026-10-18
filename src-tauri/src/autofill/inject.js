@@ -269,8 +269,28 @@
     });
   };
 
-  // The user taking over a field clears its highlight.
+  /** What the user sees as the field's answer: typed text, option text, radio label. */
+  const answerOf = (el, key) => {
+    const rs = reactSelect(el);
+    if (rs) {
+      const v = rs.getValue ? rs.getValue() : [];
+      const first = Array.isArray(v) ? v[0] : v;
+      return first && typeof first.label === 'string' ? first.label : '';
+    }
+    const k = kindOf(el);
+    if (k === 'radio') {
+      const checked = elsFor(key).find((r) => r.checked);
+      return checked ? labelOf(checked) : '';
+    }
+    if (k === 'select') return el.selectedIndex >= 0 ? cap(el.options[el.selectedIndex].text, 200) : '';
+    if (k === 'file' || k === 'checkbox') return '';
+    return cap(el.value, 500);
+  };
+
+  // The user taking over a field clears its highlight, and their answer is
+  // sent to cvd so it can learn which profile detail this label means.
   const watching = new WeakSet();
+  const editTimers = new Map();
   const watch = (el, key) => {
     if (watching.has(el)) return;
     watching.add(el);
@@ -278,6 +298,14 @@
       if (!e.isTrusted) return;
       const r = results.get(key);
       if (r && r.status === 'needs' && hasValue(el)) mark(key, 'user');
+      clearTimeout(editTimers.get(key));
+      editTimers.set(
+        key,
+        setTimeout(() => {
+          const value = answerOf(el, key);
+          if (value) send({ type: 'user_edit', key, value });
+        }, 800),
+      );
     };
     el.addEventListener('input', onUser);
     el.addEventListener('change', onUser);
@@ -395,8 +423,14 @@
   // ---- overlay ----
 
   let host, root, collapsed = false;
+  let noticeText = '';
+  const notice = (text) => {
+    noticeText = cap(text, 300);
+    render();
+  };
   const render = () => {
     if (!document.body) return;
+    if (!results.size && !noticeText) return;
     if (!host) {
       host = document.createElement('div');
       host.id = 'cvd-autofill-host';
@@ -420,14 +454,17 @@
         li{padding:6px 12px;cursor:pointer} li:hover{background:#f6f6f6}
         li small{display:block;color:#666}
         .foot{padding:8px 12px;border-top:1px solid #eee;color:#555;font-size:12px}
+        .note{padding:8px 12px;background:#ecfdf5;color:#065f46;border-bottom:1px solid #d1fae5}
         @media (prefers-color-scheme: dark){.box{background:#1c1c1e;color:#eee;border-color:#333}.head,.foot{border-color:#333}
+          .note{background:#064e3b;color:#d1fae5;border-color:#065f46}
           li:hover{background:#2a2a2c} li small,.foot{color:#aaa}}
       </style>
       <div class="box">
         <div class="head" data-toggle><b>cvd autofill</b>
           <span class="n ok">${filled} filled</span><span class="n warn">${needs.length} need you</span></div>
+        ${noticeText ? `<div class="note">${esc(noticeText)}</div>` : ''}
         ${
-          collapsed
+          collapsed || noticeText
             ? ''
             : `<ul>${needs.map(([k, r]) => `<li data-key="${esc(k)}">${esc(r.label) || 'Unlabelled field'}<small>${esc(r.reason)}</small></li>`).join('')}</ul>
                <div class="foot">Review every answer, then submit it yourself.</div>`
@@ -528,11 +565,15 @@
     lastMutation = Date.now();
     if (started) {
       clearTimeout(debounce);
-      debounce = setTimeout(scan, 700);
+      debounce = setTimeout(() => {
+        checkConfirmation();
+        scan();
+      }, 700);
     }
   });
 
   const start = () => {
+    checkConfirmation();
     observer.observe(document.documentElement, { childList: true, subtree: true });
     const t0 = Date.now();
     const poll = setInterval(() => {
@@ -546,7 +587,66 @@
     }, 250);
   };
 
-  window.__cvdAutofill = { apply };
+  // ---- submit confirmation ----
+  // cvd never submits. When the user does, and the page then shows a
+  // confirmation, cvd marks the job as applied. sessionStorage carries the
+  // submit across the navigation to the confirmation page (same origin).
+  const SUBMIT_KEY = 'cvd-submit-at';
+  const DONE_KEY = 'cvd-confirmed';
+  const SUBMIT_WORDS = /\b(submit|apply|send)\b/i;
+  const CONFIRM_TEXT =
+    /thank you for (applying|your application|submitting)|thanks for applying|application (was |has been )?(received|submitted)|we('ve| have) received your application|successfully (submitted|applied)/i;
+  const CONFIRM_URL = /\/(confirmation|thanks|thank-you|thank_you|applied)(\b|\/|$)|\/application\/(submitted|success)/i;
+
+  const store = {
+    get: (k) => {
+      try {
+        return sessionStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    set: (k, v) => {
+      try {
+        sessionStorage.setItem(k, v);
+      } catch {
+        /* storage blocked: detection only works on the same page */
+      }
+    },
+  };
+  let submitAtMemory = 0;
+
+  const noteSubmit = () => {
+    submitAtMemory = Date.now();
+    store.set(SUBMIT_KEY, String(submitAtMemory));
+    // Some forms swap in the confirmation without navigating.
+    for (let i = 1; i <= 30; i++) setTimeout(checkConfirmation, i * 1000);
+  };
+
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (!e.isTrusted) return;
+      const b = e.target.closest && e.target.closest('button,input[type="submit"],[role="button"],a');
+      if (!b || b.closest('#cvd-autofill-host')) return;
+      const text = cap(b.textContent || b.value || b.getAttribute('aria-label'), 100);
+      if (b.type === 'submit' || SUBMIT_WORDS.test(text)) noteSubmit();
+    },
+    true,
+  );
+  document.addEventListener('submit', (e) => e.isTrusted && noteSubmit(), true);
+
+  const checkConfirmation = () => {
+    if (store.get(DONE_KEY)) return;
+    const at = Math.max(Number(store.get(SUBMIT_KEY)) || 0, submitAtMemory);
+    if (!at || Date.now() - at > 15 * 60 * 1000) return;
+    const text = document.body ? document.body.innerText.slice(0, 20000) : '';
+    if (!CONFIRM_TEXT.test(text) && !CONFIRM_URL.test(location.pathname)) return;
+    store.set(DONE_KEY, '1');
+    send({ type: 'submitted', url: location.href });
+  };
+
+  window.__cvdAutofill = { apply, notice };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })();

@@ -492,3 +492,18 @@ async fn processed_email_serializes_outcomes_in_snake_case() {
     let value = serde_json::to_value(row).unwrap();
     assert_eq!(value["outcome"], "pending_review");
 }
+
+#[tokio::test]
+async fn apply_memory_remembers_repoints_and_forgets() {
+    let s = Store::open("sqlite::memory:").await.unwrap();
+    assert!(s.apply_memory().await.unwrap().is_empty());
+    s.remember_label("nombre de pila", "first_name").await.unwrap();
+    s.remember_label("nombre de pila", "first_name").await.unwrap();
+    s.remember_label("apodo", "first_name").await.unwrap();
+    s.remember_label("apodo", "full_name").await.unwrap();
+    let m = s.apply_memory().await.unwrap();
+    assert_eq!(m.get("nombre de pila").map(String::as_str), Some("first_name"));
+    assert_eq!(m.get("apodo").map(String::as_str), Some("full_name"));
+    s.forget_label("apodo").await.unwrap();
+    assert!(!s.apply_memory().await.unwrap().contains_key("apodo"));
+}

@@ -11,7 +11,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use super::field::{FieldKind, FillAction, FieldSpec, MAX_FIELDS};
-use super::matcher::{decide, Decision};
+use super::matcher::{decide_with, is_learnable, normalize, Decision};
+use super::picker::loosely_matches;
 use super::picker::{candidates, pick_all, Pending, Pick};
 use super::Fact;
 use crate::engine::DecisionEngine;
@@ -82,6 +83,10 @@ enum PageMessage {
     Fields { fields: Vec<FieldSpec> },
     /// The page didn't keep a value cvd set.
     Rejected { key: String, value: String },
+    /// The user changed a field. The value is compared to facts, never stored.
+    UserEdit { key: String, value: String },
+    /// The page shows an application confirmation after the user submitted.
+    Submitted,
     Status { filled: usize, needs: Vec<Value> },
     #[serde(other)]
     Other,
@@ -99,6 +104,11 @@ pub struct Session {
     pub fields: HashMap<String, FieldSpec>,
     pub excluded: HashMap<String, Vec<String>>,
     pub already: BTreeMap<String, &'static str>,
+    /// Learned label → fact keys, loaded from the store per page message.
+    pub memory: BTreeMap<String, String>,
+    /// Fields cvd filled, by key, with the fact it used.
+    pub filled: HashMap<String, &'static str>,
+    pub submitted: bool,
 }
 
 /// Sessions by window label.
@@ -123,7 +133,7 @@ pub async fn plan(
     for f in fields {
         session.fields.insert(f.key.clone(), f.clone());
         let excluded = session.excluded.get(&f.key).cloned().unwrap_or_default();
-        let decision = match decide(&f, facts) {
+        let decision = match decide_with(&f, facts, &session.memory) {
             // A value the page rejected goes back to the model with that value excluded.
             Decision::Fill { value, .. } if excluded.contains(&value) => Decision::Unsure("The page rejected this value".into()),
             d => d,
@@ -131,6 +141,7 @@ pub async fn plan(
         let action = match decision {
             Decision::Fill { fact, value } => {
                 session.already.insert(f.label.clone(), fact);
+                session.filled.insert(f.key.clone(), fact);
                 Some(FillAction::Set { key: f.key, value, fact })
             }
             Decision::Resume => Some(match resume {
@@ -159,6 +170,7 @@ pub async fn plan(
             actions[i] = Some(match picks.as_ref().map(|v| &v[n]) {
                 Ok(Pick::Chosen(c)) => {
                     session.already.insert(p.field.label.clone(), c.fact);
+                    session.filled.insert(key.clone(), c.fact);
                     FillAction::Set { key, value: c.value.clone(), fact: c.fact }
                 }
                 Ok(Pick::NoneFits) => FillAction::NeedsUser { key, reason },
@@ -221,6 +233,24 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Ses
                 }
             }
         }
+        Ok(PageMessage::UserEdit { key, value }) => {
+            let session = sessions.get(&label);
+            if let Some(field) = session.fields.get(&key) {
+                let facts = crate::commands::apply_facts(st).await?;
+                learn(st, field, &value, &facts, session.filled.contains_key(&key), &session.memory).await;
+            }
+            return Ok(());
+        }
+        Ok(PageMessage::Submitted) => {
+            let mut session = sessions.get(&label);
+            if session.submitted {
+                return Ok(());
+            }
+            session.submitted = true;
+            sessions.put(&label, session);
+            let text = mark_applied(st, job_id).await;
+            return notice(window, &text);
+        }
         Ok(PageMessage::Status { filled, needs }) => {
             #[cfg(debug_assertions)]
             eprintln!("[autofill] status: {filled} filled, {} need the user: {}", needs.len(), Value::from(needs.clone()));
@@ -239,6 +269,7 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Ses
     let resume = if wants_file { load_resume(st, job_id).await } else { None };
     let engine = active_engine(st).await;
     let mut session = sessions.get(&label);
+    session.memory = st.store.apply_memory().await.unwrap_or_default();
     let actions = plan(fields, &facts, resume.as_ref(), engine.as_deref(), &mut session).await;
     sessions.put(&label, session);
     #[cfg(debug_assertions)]
@@ -264,6 +295,76 @@ fn fields_json(fields: &[FieldSpec]) -> Value {
             })
         })
         .collect()
+}
+
+/// The fact keys whose spellings match what the user typed or picked. Typed
+/// text must match exactly; a picked option may carry extras ("Mexico (+52)").
+/// Yes/no preferences are skipped: "Yes" says nothing about which one was meant.
+pub fn facts_matching(value: &str, facts: &[Fact], picked: bool) -> Vec<&'static str> {
+    let v = normalize(value);
+    if v.is_empty() {
+        return vec![];
+    }
+    let mut keys: Vec<&'static str> = facts
+        .iter()
+        .filter(|f| !super::matcher::is_yes_no(f.key))
+        .filter(|f| f.variants.iter().any(|x| normalize(x) == v || (picked && v.len() >= 3 && loosely_matches(value, x))))
+        .map(|f| f.key)
+        .collect();
+    keys.dedup();
+    keys
+}
+
+/// Learns from one edit: a value matching exactly one fact teaches cvd that
+/// this label means that fact. Replacing a remembered fill with something else
+/// makes cvd forget the label.
+pub(crate) async fn learn(st: &AppState, field: &FieldSpec, value: &str, facts: &[Fact], cvd_filled: bool, memory: &BTreeMap<String, String>) {
+    if !is_learnable(field) || value.len() > 500 {
+        return;
+    }
+    let label = normalize(&field.label);
+    let picked = matches!(field.kind(), FieldKind::Select | FieldKind::Radio | FieldKind::Combobox);
+    match facts_matching(value, facts, picked)[..] {
+        [key] => {
+            let _ = st.store.remember_label(&label, key).await;
+        }
+        [] if cvd_filled && memory.contains_key(&label) => {
+            let _ = st.store.forget_label(&label).await;
+        }
+        _ => {}
+    }
+}
+
+/// Moves the job to the status named "Applied", if there is one. Returns the
+/// line shown in the page.
+pub(crate) async fn mark_applied(st: &AppState, job_id: i64) -> String {
+    if job_id == 0 {
+        return "Submitted. (Dev window: no job to update.)".into();
+    }
+    let Ok(statuses) = st.store.list_job_statuses().await else {
+        return "Submitted. cvd couldn't read your statuses.".into();
+    };
+    let Some(applied) = statuses.iter().find(|s| s.name.trim().eq_ignore_ascii_case("applied")) else {
+        return "Submitted. Add an \"Applied\" status in cvd to track this automatically.".into();
+    };
+    let Ok(job) = crate::commands::get_job(st, job_id).await else {
+        return "Submitted. The job is no longer in cvd.".into();
+    };
+    if job.status_id != Some(applied.id) && crate::commands::update_job_tracking(st, job_id, Some(applied.id), &job.url).await.is_err() {
+        return "Submitted. cvd couldn't update the job's status.".into();
+    }
+    (st.emitter())(JOB_UPDATED_EVENT, serde_json::json!({ "job_id": job_id, "status_id": applied.id }));
+    format!("Submitted. Marked as {} in cvd.", applied.name)
+}
+
+/// Tells the main window a job's tracking changed outside it.
+pub const JOB_UPDATED_EVENT: &str = "job://updated";
+
+fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
+    let json = serde_json::to_string(text).map_err(|e| AppError::Io(e.to_string()))?;
+    window
+        .eval(format!("window.__cvdAutofill && window.__cvdAutofill.notice({json})"))
+        .map_err(|e| AppError::Io(e.to_string()))
 }
 
 fn send(window: &WebviewWindow, actions: &[FillAction]) -> Result<(), AppError> {

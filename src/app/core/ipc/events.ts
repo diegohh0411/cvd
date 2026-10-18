@@ -16,6 +16,8 @@ export const ENGINE_EVENT = 'engine://status';
 export const RESEARCH_EVENT = 'company://research';
 export const SCAN_PROGRESS_EVENT = 'scan://progress';
 export const SCAN_FINISHED_EVENT = 'scan://finished';
+/** A job's tracking changed outside the main window (auto-apply marked it Applied). */
+export const JOB_UPDATED_EVENT = 'job://updated';
 
 /** Progress for one run. Subscribe before starting the run so nothing is missed. */
 export function onMatchProgress(runId: number | (() => number | null), cb: (e: MatchStage) => void): Promise<UnlistenFn> {
@@ -43,6 +45,10 @@ export function onScanFinished(cb: (e: ScanFinished) => void): Promise<UnlistenF
 
 export function onDownload(cb: (e: DownloadEvent) => void): Promise<UnlistenFn> {
   return listen<DownloadEvent>(DOWNLOAD_EVENT, ({ payload }) => cb(payload));
+}
+
+export function onJobUpdated(cb: (e: { job_id: number; status_id: number | null }) => void): Promise<UnlistenFn> {
+  return listen<{ job_id: number; status_id: number | null }>(JOB_UPDATED_EVENT, ({ payload }) => cb(payload));
 }
 
 export function onEngineStatus(cb: () => void): Promise<UnlistenFn> {
