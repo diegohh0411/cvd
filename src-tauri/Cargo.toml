@@ -1,6 +1,6 @@
 [package]
 name = "cvd"
-version = "0.1.0"
+version = "0.3.0"
 description = "A Tauri App"
 authors = ["Diego Hernández Herrera"]
 license-file = "../LICENSE"
@@ -59,6 +59,7 @@ mailparse = "0.18.0"
 rustls = "0.23.45"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+nucleo-matcher = "0.3.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

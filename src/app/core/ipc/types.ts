@@ -11,6 +11,27 @@ export interface Profile {
   summary: string;
 }
 
+/** Answers for application forms that are not in the CV (`autofill::ApplyDefaults`). */
+export interface ApplyDefaults {
+  first_name: string;
+  last_name: string;
+  city: string;
+  region: string;
+  country: string;
+  authorized_to_work: boolean | null;
+  needs_sponsorship: boolean | null;
+  willing_to_relocate: boolean | null;
+  notice_period: string;
+  earliest_start: string;
+  salary_expectation: string;
+}
+
+/** One value auto-apply may offer, in every spelling (`autofill::Fact`). */
+export interface ApplyFact {
+  key: string;
+  variants: string[];
+}
+
 export type EntryKind = 'experience' | 'project' | 'education' | 'volunteer';
 export const ENTRY_KINDS: readonly EntryKind[] = ['experience', 'project', 'education', 'volunteer'];
 
@@ -195,7 +216,7 @@ export type AppErrorKind =
   | 'MailAuth'
   | 'MailUnavailable';
 
-export type ProviderId = 'openrouter' | 'subq' | 'exa';
+export type ProviderId = 'openrouter' | 'subq' | 'typesafe' | 'exa';
 
 export interface KeyStatus {
   has_key: boolean;
@@ -211,8 +232,18 @@ export interface RemoteModel {
   price_per_mtok_in: number | null;
 }
 
+/** A saved key. The first key of a provider has the bare provider id; later ones are `<provider>~<n>`. */
+export interface Connection {
+  id: string;
+  provider: ProviderId;
+  label: string;
+  last4: string | null;
+}
+
 export interface ProviderModels {
+  /** The connection id: what model refs carry. */
   provider: string;
+  label?: string;
   models: RemoteModel[];
   error: string | null;
 }

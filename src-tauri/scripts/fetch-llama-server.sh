@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Downloads the pinned llama.cpp release for the host target triple and installs
+# Downloads the pinned llama.cpp release for the target triple (arg 1, default: host) and installs
 # it as src-tauri/binaries/llama-server-<target-triple> (the name Tauri's
 # `bundle.externalBin` expects). The macOS binary loads its dylibs through
 # `@rpath` = `@loader_path`, so the shared libraries are copied next to it.
@@ -9,12 +9,12 @@ TAG="b11507"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dest="$here/../binaries"
 
-triple="$(rustc -vV | sed -n 's/^host: //p')"
+triple="${1:-$(rustc -vV | sed -n 's/^host: //p')}"
 case "$triple" in
   aarch64-apple-darwin)      asset="llama-${TAG}-bin-macos-arm64.tar.gz" ;;
   x86_64-apple-darwin)       asset="llama-${TAG}-bin-macos-x64.tar.gz" ;;
   x86_64-unknown-linux-gnu)  asset="llama-${TAG}-bin-ubuntu-x64.tar.gz" ;;
-  *) echo "unsupported host triple: $triple" >&2; exit 1 ;;
+  *) echo "unsupported target triple: $triple" >&2; exit 1 ;;
 esac
 
 if [[ -x "$dest/llama-server-$triple" ]]; then

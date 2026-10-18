@@ -5,7 +5,8 @@ import { onEngineStatus } from '../ipc/events';
 import type { EngineStatus } from '../ipc/types';
 import { ModelsStore } from './models.store';
 
-const REMOTE_PREFIX = /^(openrouter|subq):/;
+/** Remote model ids are `<provider>:<id>`; local ids never contain a colon. */
+const REMOTE_PREFIX = /^[a-z][a-z0-9~-]*:/;
 
 const LABELS: Record<EngineStatus['state'], string> = {
   none: 'no model',

@@ -1,21 +1,22 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucideCircleDot, lucideExternalLink, lucideLink } from '@ng-icons/lucide';
+import { lucideCircleDot, lucideExternalLink, lucideLink, lucideWandSparkles } from '@ng-icons/lucide';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
+import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { JobDescription } from '../../core/ipc/types';
 import { JobsStore } from '../../core/stores/jobs.store';
-import { isOpenableUrl, normalizeUrl, openJobUrl } from './job-url';
+import { canAutofill, isOpenableUrl, normalizeUrl, openJobUrl } from './job-url';
 import { StatusPickerComponent } from './status-picker.component';
 
 /** Notion-style property rows (Status, URL) for one job; saves on change. */
 @Component({
   selector: 'app-job-properties',
   imports: [FormsModule, NgIcon, ZardButtonComponent, StatusPickerComponent],
-  viewProviders: [provideIcons({ lucideCircleDot, lucideExternalLink, lucideLink })],
+  viewProviders: [provideIcons({ lucideCircleDot, lucideExternalLink, lucideLink, lucideWandSparkles })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dl class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-sm">
@@ -38,6 +39,11 @@ import { StatusPickerComponent } from './status-picker.component';
             <ng-icon name="lucideExternalLink" />
           </button>
         }
+        @if (autofillable(job().url)) {
+          <button z-button zType="outline" zSize="xs" type="button" (click)="autofill()" [zLoading]="starting()">
+            <ng-icon name="lucideWandSparkles" /> Autofill
+          </button>
+        }
       </dd>
     </dl>
   `,
@@ -53,9 +59,27 @@ export class JobPropertiesComponent {
   protected readonly draft = signal('');
   protected readonly openable = isOpenableUrl;
   protected readonly open = openJobUrl;
+  protected readonly autofillable = canAutofill;
+  protected readonly starting = signal(false);
 
   constructor() {
     effect(() => this.draft.set(this.job().url));
+  }
+
+  /** Opens the posting in cvd's apply window, which fills what it can. */
+  protected async autofill(): Promise<void> {
+    const job = this.job();
+    this.starting.set(true);
+    try {
+      if (!(await api.startApply(job.id))) {
+        this.toast.info("Autofill isn't available on this site yet", { description: 'Opened it in your browser instead.' });
+        openJobUrl(job.url);
+      }
+    } catch (e) {
+      this.toast.error('Could not open the application', { description: messageFor(e) });
+    } finally {
+      this.starting.set(false);
+    }
   }
 
   protected saveUrl(): void {

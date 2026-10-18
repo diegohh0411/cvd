@@ -22,7 +22,7 @@ describe('EngineFooterComponent', () => {
     f.detectChanges();
     const el = () => (f.nativeElement as HTMLElement).querySelector('[data-testid=engine-footer]')!.textContent!;
     expect(el()).toContain('Clef-Flash · ready');
-    expect((f.nativeElement as HTMLElement).querySelector('a[data-testid=engine-footer]')!.getAttribute('href')).toBe('/ai/roles');
+    expect((f.nativeElement as HTMLElement).querySelector('a[data-testid=engine-footer]')!.getAttribute('href')).toBe('/ai');
     state = 'error';
     await t.emit('engine://status', {});
     await flush();
@@ -34,6 +34,6 @@ describe('EngineFooterComponent', () => {
 describe('sidebar nav', () => {
   it('groups AI pages and keeps Library and Jobs', () => {
     expect(NAV.map((n) => n.title)).toEqual(['Jobs', 'Library', 'AI']);
-    expect(NAV[2].items.map((i) => i.link)).toEqual(['/ai/roles', '/ai/models', '/ai/providers']);
+    expect(NAV[2].items.map((i) => i.link)).toEqual(['/ai', '/ai/downloads']);
   });
 });

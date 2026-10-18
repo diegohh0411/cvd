@@ -5,6 +5,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { toAppError } from './errors';
 import type {
   Company,
+  ApplyDefaults,
+  ApplyFact,
   CompanyProfile,
   Cv,
   Entry,
@@ -20,6 +22,7 @@ import type {
   Override,
   Profile,
   ProcessedEmail,
+  Connection,
   ProviderId,
   ProviderModels,
   Ranked,
@@ -43,6 +46,11 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 // ---- profile & library ----
 export const getProfile = () => call<Profile>('get_profile');
 export const saveProfile = (profile: Profile) => call<void>('save_profile', { profile });
+export const getApplyDefaults = () => call<ApplyDefaults>('get_apply_defaults');
+export const saveApplyDefaults = (defaults: ApplyDefaults) => call<void>('save_apply_defaults', { defaults });
+export const applyFacts = () => call<ApplyFact[]>('apply_facts');
+/** `false`: the posting's site isn't supported, nothing was opened. */
+export const startApply = (jobId: number) => call<boolean>('start_apply', { jobId });
 export const listEntries = (includeArchived: boolean) => call<Entry[]>('list_entries', { includeArchived });
 export const saveEntry = (input: EntryInput) => call<number>('save_entry', { input });
 export const deleteEntry = (id: number) => call<void>('delete_entry', { id });
@@ -56,6 +64,8 @@ export const updateJobTracking = (id: number, statusId: number | null, url: stri
 export const updateJobDescription = (id: number, rawText: string) => call<void>('update_job_description', { id, rawText });
 export const fetchJobDescription = (url: string) => call<string>('fetch_job_description', { url });
 export const listJobs = () => call<JobDescription[]>('list_jobs');
+/** Ids of jobs matching a fuzzy query, best first; empty for a blank query. */
+export const searchJobs = (query: string) => call<number[]>('search_jobs', { query });
 export const getJob = (id: number) => call<JobDescription>('get_job', { id });
 export const startMatch = (jdId: number) => call<number>('start_match', { jdId });
 export const cancelMatch = (runId: number) => call<void>('cancel_match', { runId });
@@ -106,6 +116,10 @@ export const engineStatus = () => call<EngineStatus>('engine_status');
 export const setProviderKey = (provider: ProviderId, key: string) => call<KeyStatus>('set_provider_key', { provider, key });
 export const deleteProviderKey = (provider: ProviderId) => call<void>('delete_provider_key', { provider });
 export const providerKeyStatus = (provider: ProviderId) => call<KeyStatus>('provider_key_status', { provider });
+export const listConnections = () => call<Connection[]>('list_connections');
+export const addConnection = (provider: ProviderId, label: string, key: string) =>
+  call<Connection>('add_connection', { provider, label, key });
+export const renameConnection = (id: string, label: string) => call<void>('rename_connection', { id, label });
 export const listRemoteModels = (refresh: boolean, role: ModelRole = 'decision') =>
   call<ProviderModels[]>('list_remote_models', { refresh, role });
 
@@ -122,5 +136,7 @@ export const startScan = () => call<number>('start_scan');
 export const getScanStatus = () => call<ScanState>('get_scan_status');
 export const listScanResults = (runId: number) => call<ProcessedEmail[]>('list_scan_results', { runId });
 export const listPendingReviews = () => call<ProcessedEmail[]>('list_pending_reviews');
+/** Emails matched to a job, newest first. */
+export const listJobEmails = (jobId: number) => call<ProcessedEmail[]>('list_job_emails', { jobId });
 export const applySuggestion = (messageId: string) => call<ProcessedEmail>('apply_suggestion', { messageId });
 export const dismissSuggestion = (messageId: string) => call<void>('dismiss_suggestion', { messageId });

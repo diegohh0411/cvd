@@ -5,13 +5,17 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::autofill::{build_facts, ApplyDefaults, Fact, APPLY_DEFAULTS_KEY};
 use crate::company::{self, agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS}, coordinator::ResearchCoordinator};
 use crate::search::{ExaSearch, SearchProvider, EXA};
 use crate::state::ResearchEnv;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
 use tokio_util::sync::CancellationToken;
-use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, OPENROUTER, SUBQ};
+use crate::providers::{
+    kind_of, load_rows, next_id, save_rows, Connection, ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, TypeSafeProvider,
+    OPENROUTER, SUBQ, TYPESAFE,
+};
 use crate::engine::EngineError;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
@@ -277,6 +281,12 @@ pub async fn list_jobs(st: &AppState) -> Res<Vec<JobDescription>> {
     Ok(st.store.list_jds().await?)
 }
 
+/// Job ids matching `query` (fuzzy), best first; empty for a blank query.
+pub async fn search_jobs(st: &AppState, query: &str) -> Res<Vec<i64>> {
+    let jobs = st.store.list_jds().await?;
+    Ok(crate::job_search::search_jobs(&jobs, query))
+}
+
 pub async fn get_job(st: &AppState, id: i64) -> Res<JobDescription> {
     st.store
         .get_jd(id)
@@ -313,6 +323,11 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
         Err(AppError::NotFound(format!("Match run {run_id} is not running.")))
     }
 }
+
+/// Master switch for LLM company research. While false, matching scores
+/// without researching (an already-saved profile is still used) and manual
+/// refresh does nothing. Flip to true to restore the feature.
+const COMPANY_RESEARCH_ENABLED: bool = false;
 
 /// Scores `run_id` in a spawned task. A freshly created run has no scores,
 /// so `matcher::resume_match` scores it end to end. Company research runs
@@ -395,7 +410,7 @@ async fn company_context(
         },
     };
     store.set_jd_company(jd_id, Some(c.id)).await?;
-    if company::need(&c, chrono::Utc::now()) == company::Need::Research {
+    if COMPANY_RESEARCH_ENABLED && company::need(&c, chrono::Utc::now()) == company::Need::Research {
         on_progress(matcher::Progress::Researching { company_id: c.id });
         let input = ResearchInput {
             name: c.name.clone(),
@@ -463,6 +478,9 @@ pub async fn edit_company(st: &AppState, id: i64, profile: CompanyProfile) -> Re
 /// Researches the company now, ignoring the TTL and any backoff.
 pub async fn refresh_company(st: &AppState, id: i64) -> Res<Company> {
     let c = get_company(st, id).await?;
+    if !COMPANY_RESEARCH_ENABLED {
+        return Ok(c);
+    }
     let input = ResearchInput { name: c.name.clone(), domain: c.domain.clone(), jd_snippet: String::new() };
     Ok(st.coordinator.start(&st.store, c, input, st.research_env().research_fn()).await?)
 }
@@ -590,6 +608,27 @@ pub async fn set_ui_setting(st: &AppState, key: &str, value: &str) -> Res<()> {
     Ok(st.store.set_setting(key, value).await?)
 }
 
+// ---- auto-apply ----
+
+pub async fn get_apply_defaults(st: &AppState) -> Res<ApplyDefaults> {
+    Ok(ApplyDefaults::from_setting(st.store.get_setting(APPLY_DEFAULTS_KEY).await?.as_deref()))
+}
+
+pub async fn save_apply_defaults(st: &AppState, defaults: ApplyDefaults) -> Res<()> {
+    let json = serde_json::to_string(&defaults.trimmed()).map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(st.store.set_setting(APPLY_DEFAULTS_KEY, &json).await?)
+}
+
+/// What auto-apply would offer as candidates, for the Profile page preview.
+pub async fn apply_facts(st: &AppState) -> Res<Vec<Fact>> {
+    use chrono::Datelike as _;
+    let profile = get_profile(st).await?;
+    let entries = st.store.list_entries(false).await?;
+    let defaults = get_apply_defaults(st).await?;
+    let now = chrono::Local::now();
+    Ok(build_facts(&profile, &entries, &defaults, (now.year(), now.month())))
+}
+
 // ---- models ----
 
 pub async fn engine_status(st: &AppState) -> Res<crate::state::EngineStatus> {
@@ -708,11 +747,14 @@ pub struct KeyStatus {
     pub last4: Option<String>,
 }
 
-fn known_provider(provider: &str) -> Res<()> {
-    if provider == OPENROUTER || provider == SUBQ || provider == EXA {
+/// Accepts a provider id or a connection id (`openrouter~2`); Exa has a single key.
+fn known_provider(id: &str) -> Res<()> {
+    let kind = kind_of(id);
+    let extra = kind != id;
+    if kind == OPENROUTER || kind == SUBQ || kind == TYPESAFE || (kind == EXA && !extra) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Unknown provider {provider}.")))
+        Err(AppError::NotFound(format!("Unknown provider {id}.")))
     }
 }
 
@@ -723,30 +765,108 @@ fn key_status(key: Option<&str>) -> KeyStatus {
     }
 }
 
-/// Validates, stores and activates a provider key. Leading/trailing whitespace is dropped.
-pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
-    known_provider(provider)?;
-    let key = key.trim();
-    if provider == EXA {
+/// Checks `key` against the provider's own API.
+async fn validate_key(st: &AppState, kind: &str, key: &str) -> Res<()> {
+    if kind == EXA {
         ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
-    } else if provider == SUBQ {
+    } else if kind == SUBQ {
         SubQProvider::new(st.subq_base.clone(), key.into()).validate_key().await?;
+    } else if kind == TYPESAFE {
+        TypeSafeProvider::new(st.typesafe_base.clone(), key.into()).validate_key().await?;
     } else {
         OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
     }
-    st.store.set_secret(provider, key).await?;
+    Ok(())
+}
+
+async fn providers_changed(st: &AppState) -> Res<()> {
     st.reload_providers().await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    Ok(())
+}
+
+/// Validates, stores and activates a key under `provider`, a provider or connection id.
+/// Leading/trailing whitespace is dropped.
+pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
+    known_provider(provider)?;
+    let key = key.trim();
+    validate_key(st, kind_of(provider), key).await?;
+    st.store.set_secret(provider, key).await?;
+    providers_changed(st).await?;
     Ok(key_status(Some(key)))
 }
 
 pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
     known_provider(provider)?;
     st.store.delete_secret(provider).await?;
+    let rows = load_rows(&st.store).await?;
+    // A removed extra key takes its label with it; a default key's row (just a rename) goes too.
+    let kept: Vec<Connection> = rows.into_iter().filter(|r| r.id != provider).collect();
+    save_rows(&st.store, &kept).await?;
+    providers_changed(st).await
+}
+
+/// A saved key as the UI lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConnectionView {
+    pub id: String,
+    pub provider: String,
+    pub label: String,
+    pub last4: Option<String>,
+}
+
+/// Every saved model-provider key (Exa excluded), defaults first.
+pub async fn list_connections(st: &AppState) -> Res<Vec<ConnectionView>> {
+    let rows = load_rows(&st.store).await?;
+    let mut out = Vec::new();
+    for kind in [OPENROUTER, SUBQ, TYPESAFE] {
+        let extras = rows.iter().filter(|r| r.provider == kind && r.id != kind).map(|r| r.id.clone());
+        for id in std::iter::once(kind.to_string()).chain(extras) {
+            let Some(key) = st.store.get_secret(&id).await? else { continue };
+            let label = rows.iter().find(|r| r.id == id).map_or_else(|| kind.to_string(), |r| r.label.clone());
+            out.push(ConnectionView { last4: key_status(Some(&key)).last4, id, provider: kind.into(), label });
+        }
+    }
+    Ok(out)
+}
+
+/// Saves another key for `provider` under a fresh connection id and a label such as "Work".
+pub async fn add_connection(st: &AppState, provider: &str, label: &str, key: &str) -> Res<ConnectionView> {
+    if provider != OPENROUTER && provider != SUBQ && provider != TYPESAFE {
+        return Err(AppError::NotFound(format!("Unknown provider {provider}.")));
+    }
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    let key = key.trim();
+    validate_key(st, provider, key).await?;
+    let mut rows = load_rows(&st.store).await?;
+    // The first key of a provider keeps the bare id, so refs stored before connections still resolve.
+    let id = if st.store.get_secret(provider).await?.is_none() { provider.to_string() } else { next_id(provider, &rows) };
+    st.store.set_secret(&id, key).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection { id: id.clone(), provider: provider.into(), label: label.into() });
+    save_rows(&st.store, &rows).await?;
+    providers_changed(st).await?;
+    Ok(ConnectionView { id, provider: provider.into(), label: label.into(), last4: key_status(Some(key)).last4 })
+}
+
+pub async fn rename_connection(st: &AppState, id: &str, label: &str) -> Res<()> {
+    known_provider(id)?;
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    if st.store.get_secret(id).await?.is_none() {
+        return Err(AppError::NotFound(format!("No saved key for {id}.")));
+    }
+    let mut rows = load_rows(&st.store).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection { id: id.into(), provider: kind_of(id).into(), label: label.into() });
+    save_rows(&st.store, &rows).await?;
     st.reload_providers().await?;
-    st.reset_engine();
-    (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
 }
 
@@ -924,6 +1044,10 @@ pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>>
     Ok(st.store.list_pending_reviews().await?.into_iter().map(scan_view).collect())
 }
 
+pub async fn list_job_emails(st: &AppState, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st.store.list_job_emails(job_id).await?.into_iter().map(scan_view).collect())
+}
+
 pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
     Ok(scan_view(st.store.apply_suggestion(message_id).await?))
 }
@@ -1012,6 +1136,10 @@ pub mod ipc {
         super::list_jobs(&st).await
     }
     #[tauri::command]
+    pub async fn search_jobs(st: S<'_>, query: String) -> Res<Vec<i64>> {
+        super::search_jobs(&st, &query).await
+    }
+    #[tauri::command]
     pub async fn get_job(st: S<'_>, id: i64) -> Res<JobDescription> {
         super::get_job(&st, id).await
     }
@@ -1048,12 +1176,40 @@ pub mod ipc {
         super::delete_provider_key(&st, &provider).await
     }
     #[tauri::command]
+    pub async fn list_connections(st: S<'_>) -> Res<Vec<ConnectionView>> {
+        super::list_connections(&st).await
+    }
+    #[tauri::command]
+    pub async fn add_connection(st: S<'_>, provider: String, label: String, key: String) -> Res<ConnectionView> {
+        super::add_connection(&st, &provider, &label, &key).await
+    }
+    #[tauri::command]
+    pub async fn rename_connection(st: S<'_>, id: String, label: String) -> Res<()> {
+        super::rename_connection(&st, &id, &label).await
+    }
+    #[tauri::command]
     pub async fn provider_key_status(st: S<'_>, provider: String) -> Res<KeyStatus> {
         super::provider_key_status(&st, &provider).await
     }
     #[tauri::command]
     pub async fn list_remote_models(st: S<'_>, refresh: bool, role: Option<String>) -> Res<Vec<ProviderModels>> {
         super::list_remote_models(&st, refresh, role.as_deref().unwrap_or("decision")).await
+    }
+    #[tauri::command]
+    pub async fn get_apply_defaults(st: S<'_>) -> Res<ApplyDefaults> {
+        super::get_apply_defaults(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_apply_defaults(st: S<'_>, defaults: ApplyDefaults) -> Res<()> {
+        super::save_apply_defaults(&st, defaults).await
+    }
+    #[tauri::command]
+    pub async fn apply_facts(st: S<'_>) -> Res<Vec<Fact>> {
+        super::apply_facts(&st).await
+    }
+    #[tauri::command]
+    pub async fn start_apply(app: tauri::AppHandle, st: S<'_>, job_id: i64) -> Res<bool> {
+        crate::autofill::window::start_apply(&app, &st, job_id).await
     }
     #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {
@@ -1171,6 +1327,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_scan_results(st: S<'_>, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
         super::list_scan_results(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn list_job_emails(st: S<'_>, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+        super::list_job_emails(&st, job_id).await
     }
     #[tauri::command]
     pub async fn list_pending_reviews(st: S<'_>) -> Res<Vec<ProcessedEmailView>> {

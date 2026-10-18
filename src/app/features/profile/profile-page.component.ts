@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal, untracked, viewChild } from '@angular/core';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
@@ -6,11 +6,12 @@ import { messageFor } from '../../core/ipc/errors';
 import type { Profile } from '../../core/ipc/types';
 import { ProfileStore } from '../../core/stores/profile.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
+import { ApplyDefaultsComponent } from './apply-defaults.component';
 import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-form.component';
 
 @Component({
   selector: 'app-profile-page',
-  imports: [PageHeaderComponent, ProfileFormComponent, ZardButtonComponent],
+  imports: [ApplyDefaultsComponent, PageHeaderComponent, ProfileFormComponent, ZardButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Profile' }]" />
@@ -24,6 +25,7 @@ import { cleanProfile, ProfileFormComponent, profileErrors } from './profile-for
         <p class="text-destructive text-sm" role="alert">{{ errors().join(' ') }}</p>
       }
       <div><button z-button (click)="save()" [zLoading]="saving()">Save profile</button></div>
+      <app-apply-defaults class="mt-6 border-t pt-6" />
     </div>
   `,
 })
@@ -34,6 +36,7 @@ export class ProfilePageComponent implements OnInit {
   protected readonly saving = signal(false);
   protected readonly touched = signal(false);
   protected readonly errors = computed(() => profileErrors(this.draft()));
+  private readonly applyDefaults = viewChild(ApplyDefaultsComponent);
 
   constructor() {
     // Follow the stored profile until the user starts editing.
@@ -54,6 +57,7 @@ export class ProfilePageComponent implements OnInit {
     try {
       await this.profile.save(cleanProfile(this.draft()));
       this.toast.success('Profile saved');
+      void this.applyDefaults()?.refreshFacts().catch(() => undefined);
     } catch (e) {
       this.toast.error('Could not save', { description: messageFor(e) });
     } finally {

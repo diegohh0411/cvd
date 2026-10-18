@@ -18,7 +18,7 @@ import { ModelsStore } from '../../core/stores/models.store';
         <span>Models</span>
         <span class="text-foreground">
           {{ installedLabel() }} ·
-          <a routerLink="/ai/models" class="underline">Manage downloads</a>
+          <a routerLink="/ai/downloads" class="underline">Manage downloads</a>
         </span>
       </div>
       <p class="text-muted-foreground">Runs models on this computer. Nothing you match or research leaves it.</p>

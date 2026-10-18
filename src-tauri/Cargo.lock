@@ -1286,7 +1286,7 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "cvd"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "agentix",
  "async-imap",
@@ -1299,6 +1299,7 @@ dependencies = [
  "hf-hub",
  "html2text",
  "mailparse",
+ "nucleo-matcher",
  "pdf-extract",
  "reqwest 0.13.5",
  "rmcp",
@@ -4058,6 +4059,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
 ]
 
 [[package]]

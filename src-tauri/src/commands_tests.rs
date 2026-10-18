@@ -357,6 +357,81 @@ mod provider_keys {
         assert!(st.engine_for("subq:subq-snap-preview").is_err());
     }
 
+    async fn typesafe_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"models": [{"name": "jev-latest", "description": "", "release_date": ""}]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/v1/models")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+        server
+    }
+
+    #[tokio::test]
+    async fn typesafe_key_validates_and_routes() {
+        let server = typesafe_server("ts-good1234").await;
+        let (st, _) = state().await;
+        let st = st.with_typesafe_base(server.uri());
+        let err = set_provider_key(&st, "typesafe", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert!(err.to_string().contains("TypeSafe"), "{err}");
+        assert_eq!(set_provider_key(&st, "typesafe", " ts-good1234 ").await.unwrap().last4.as_deref(), Some("1234"));
+        set_active_model(&st, "typesafe:jev-latest").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_ok());
+        // Jev cannot do company research.
+        assert!(set_research_model(&st, "typesafe:jev-latest").await.is_ok());
+        assert!(st.research_endpoint().await.is_err());
+        delete_provider_key(&st, "typesafe").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_err());
+    }
+
+    #[tokio::test]
+    async fn extra_connections_get_their_own_key_and_refs() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        let first = add_connection(&st, "openrouter", "Personal", "good").await.unwrap();
+        assert_eq!(first.id, "openrouter", "the first key keeps the bare id so stored refs still resolve");
+        let second = add_connection(&st, "openrouter", " Work ", "good").await.unwrap();
+        assert_eq!((second.id.as_str(), second.label.as_str()), ("openrouter~2", "Work"));
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(list.iter().map(|c| (c.id.as_str(), c.label.as_str())).collect::<Vec<_>>(), [("openrouter", "Personal"), ("openrouter~2", "Work")]);
+
+        // A ref carrying the connection id resolves, and ids with `:` still split on the first one.
+        set_active_model(&st, "openrouter~2:inception/mercury-decide:free").await.unwrap();
+        assert!(st.engine_for("openrouter~2:inception/mercury-decide:free").is_ok());
+        assert!(st.engine_for("openrouter~3:x").is_err());
+
+        // Removing the extra key leaves the first one working.
+        delete_provider_key(&st, "openrouter~2").await.unwrap();
+        assert!(st.engine_for("openrouter~2:x").is_err());
+        assert!(st.engine_for("openrouter:x").is_ok());
+        assert_eq!(list_connections(&st).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn existing_bare_keys_list_without_a_connections_row() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        st.store.set_secret("openrouter", "sk-or-old1234").await.unwrap();
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(list, [ConnectionView { id: "openrouter".into(), provider: "openrouter".into(), label: "openrouter".into(), last4: Some("1234".into()) }]);
+        rename_connection(&st, "openrouter", "Personal").await.unwrap();
+        assert_eq!(list_connections(&st).await.unwrap()[0].label, "Personal");
+    }
+
+    #[tokio::test]
+    async fn connection_input_is_checked() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        assert_eq!(add_connection(&st, "exa", "x", "good").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(add_connection(&st, "openrouter", "  ", "good").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(add_connection(&st, "openrouter", "Work", "bad").await.unwrap_err().kind(), "ProviderAuth");
+        assert_eq!(set_provider_key(&st, "exa~2", "x").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(rename_connection(&st, "openrouter~9", "x").await.unwrap_err().kind(), "NotFound");
+    }
+
     async fn exa_server(valid: &str) -> MockServer {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -695,4 +770,75 @@ async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
 
     assert_eq!(kept.folder, "INBOX");
     assert_eq!(get_mail_account(&st).await.unwrap().unwrap().folder, "INBOX");
+}
+
+#[tokio::test]
+async fn apply_defaults_round_trip_and_feed_facts() {
+    let (st, _) = state().await;
+    assert_eq!(get_apply_defaults(&st).await.unwrap(), ApplyDefaults::default());
+
+    save_profile(&st, Profile { name: "Diego Hernández".into(), ..Default::default() }).await.unwrap();
+    save_apply_defaults(
+        &st,
+        ApplyDefaults { city: "  Monterrey ".into(), needs_sponsorship: Some(false), ..Default::default() },
+    )
+    .await
+    .unwrap();
+
+    let d = get_apply_defaults(&st).await.unwrap();
+    assert_eq!(d.city, "Monterrey");
+    assert_eq!(d.needs_sponsorship, Some(false));
+
+    let facts = apply_facts(&st).await.unwrap();
+    let keys: Vec<_> = facts.iter().map(|f| f.key).collect();
+    assert!(keys.contains(&"last_name"));
+    assert!(keys.contains(&"city"));
+    assert!(keys.contains(&"needs_sponsorship"));
+    // `apply.` keys are not reachable through the generic UI setting commands.
+    assert!(get_ui_setting(&st, APPLY_DEFAULTS_KEY).await.is_err());
+}
+
+#[tokio::test]
+async fn submitted_application_moves_job_to_applied() {
+    use crate::autofill::window::mark_applied;
+    let (st, events) = state().await;
+    let job = create_job(&st, "Engineer", "Acme", "text", "https://boards.greenhouse.io/acme/jobs/1", None).await.unwrap();
+
+    let applied = st.store.list_job_statuses().await.unwrap().into_iter().find(|s| s.name == "Applied").expect("seeded status");
+    let msg = mark_applied(&st, job).await;
+    assert_eq!(msg, "Submitted. Marked as Applied in cvd.");
+    assert_eq!(get_job(&st, job).await.unwrap().status_id, Some(applied.id));
+    assert!(events.lock().unwrap().iter().any(|(n, v)| n == "job://updated" && v["job_id"] == job));
+
+    assert!(mark_applied(&st, 9999).await.contains("no longer"));
+
+    // Without an "Applied" status cvd only says how to set one up.
+    delete_job_status(&st, applied.id).await.unwrap();
+    assert!(mark_applied(&st, job).await.contains("Add an"));
+    assert!(mark_applied(&st, 0).await.contains("Dev window"));
+}
+
+#[tokio::test]
+async fn edits_teach_and_unteach_labels() {
+    use crate::autofill::field::{FieldKind, FieldSpec};
+    use crate::autofill::window::learn;
+    let (st, _) = state().await;
+    save_profile(&st, Profile { name: "Diego Hernández".into(), email: "d@example.com".into(), ..Default::default() }).await.unwrap();
+    let facts = apply_facts(&st).await.unwrap();
+    let field = |label: &str, kind| FieldSpec { key: "k".into(), kind: Some(kind), label: label.into(), ..Default::default() };
+    let none = std::collections::BTreeMap::new();
+
+    learn(&st, &field("Nombre de pila", FieldKind::Text), "Diego", &facts, false, &none).await;
+    learn(&st, &field("Correo", FieldKind::Text), "d@example.com", &facts, false, &none).await;
+    // Protected fields and non-matching values teach nothing.
+    learn(&st, &field("Gender", FieldKind::Text), "Diego", &facts, false, &none).await;
+    learn(&st, &field("Color", FieldKind::Text), "Blue", &facts, false, &none).await;
+    let mem = st.store.apply_memory().await.unwrap();
+    assert_eq!(mem.get("nombre de pila").map(String::as_str), Some("first_name"));
+    assert_eq!(mem.get("correo").map(String::as_str), Some("email"));
+    assert_eq!(mem.len(), 2);
+
+    // The user replaces a remembered fill with something else: forget it.
+    learn(&st, &field("Correo", FieldKind::Text), "other@example.com", &facts, true, &mem).await;
+    assert!(!st.store.apply_memory().await.unwrap().contains_key("correo"));
 }

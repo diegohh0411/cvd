@@ -12,6 +12,8 @@ use super::{DecisionEngine, MAX_QUESTIONS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+/// TypeSafe answers 529 when overloaded; like 429 it is retried once.
+const STATUS_OVERLOADED: u16 = 529;
 
 pub struct HttpSystemOneEngine {
     /// Display name for user-facing errors, e.g. "OpenRouter".
@@ -55,10 +57,13 @@ fn retry_after(resp: &reqwest::Response) -> Duration {
         .min(MAX_RETRY_AFTER)
 }
 
-/// OpenRouter errors live at `/error/message`; SubQ's at `/detail/message`.
+/// OpenRouter errors live at `/error/message`; SubQ's at `/detail/message`; TypeSafe's body is
+/// undocumented, so a top-level `message` or `code` is accepted too.
 fn error_message(v: &Value) -> String {
     v.pointer("/error/message")
         .or_else(|| v.pointer("/detail/message"))
+        .or_else(|| v.pointer("/message"))
+        .or_else(|| v.pointer("/code"))
         .and_then(Value::as_str)
         .unwrap_or("unknown error")
         .to_string()
@@ -79,7 +84,7 @@ impl DecisionEngine for HttpSystemOneEngine {
         body["model"] = Value::String(self.model.clone());
 
         let mut resp = self.send(&body).await?;
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS || resp.status().as_u16() == STATUS_OVERLOADED {
             tokio::time::sleep(retry_after(&resp)).await;
             resp = self.send(&body).await?;
         }
@@ -90,10 +95,12 @@ impl DecisionEngine for HttpSystemOneEngine {
         match status.as_u16() {
             401 | 403 => Err(EngineError::Unauthorized(self.provider)),
             402 => Err(EngineError::InsufficientCredits(self.provider)),
-            429 => Err(EngineError::RateLimited),
+            429 | STATUS_OVERLOADED => Err(EngineError::RateLimited),
             404 => Err(EngineError::ModelUnavailable(self.model.clone())),
             400 if msg().contains("does not exist") => Err(EngineError::ModelUnavailable(self.model.clone())),
-            400 if msg().contains("token limit") => Err(EngineError::ContextOverflow),
+            400 if msg().contains("token limit") || String::from_utf8_lossy(&bytes).contains("max_tokens_exceeded") => {
+                Err(EngineError::ContextOverflow)
+            }
             _ if !status.is_success() => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),
             _ => match json {
                 Some(v) => parse_wire_response(v),

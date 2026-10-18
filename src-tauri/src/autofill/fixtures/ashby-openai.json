@@ -1,0 +1,253 @@
+{
+ "url": "https://jobs.ashbyhq.com/openai/8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3/application",
+ "fields": [
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f1",
+   "kind": "file",
+   "label": "",
+   "name_attr": "",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Compensation",
+   "expect": [
+    null,
+    "resume"
+   ]
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f2",
+   "kind": "text",
+   "label": "Legal Name",
+   "name_attr": "_systemfield_name",
+   "options": [],
+   "placeholder": "Type here...",
+   "required": true,
+   "section": "Autofill from resume",
+   "expect": "full_name"
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f3",
+   "kind": "text",
+   "label": "Preferred Name (if applicable)",
+   "name_attr": "09a328e0-8d57-4f88-86ab-688de1657b17",
+   "options": [],
+   "placeholder": "Type here...",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": [
+    null,
+    "first_name"
+   ]
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f4",
+   "kind": "email",
+   "label": "Email",
+   "name_attr": "_systemfield_email",
+   "options": [],
+   "placeholder": "hello@example.com...",
+   "required": true,
+   "section": "Autofill from resume",
+   "expect": "email"
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f5",
+   "kind": "file",
+   "label": "Resume",
+   "name_attr": "",
+   "options": [],
+   "placeholder": "",
+   "required": true,
+   "section": "Resume",
+   "expect": "resume"
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f6",
+   "kind": "tel",
+   "label": "Phone Number",
+   "name_attr": "20f8883c-d278-427c-9465-dc614f612e1f",
+   "options": [],
+   "placeholder": "1-415-555-1234...",
+   "required": true,
+   "section": "Autofill from resume",
+   "expect": "phone"
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f7",
+   "kind": "combobox",
+   "label": "Where are you currently located?",
+   "name_attr": "",
+   "options": [],
+   "placeholder": "Start typing...",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": [
+    null,
+    "location_full",
+    "city"
+   ]
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f8",
+   "kind": "text",
+   "label": "When can you start a new role?",
+   "name_attr": "",
+   "options": [],
+   "placeholder": "Pick date...",
+   "required": true,
+   "section": "Autofill from resume",
+   "expect": "earliest_start"
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f9",
+   "kind": "checkbox",
+   "label": "Are you authorized to work in the country where the job is located?",
+   "name_attr": "bed95633-1b6e-4cd0-9eaf-c5a9f75ac35d",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f10",
+   "kind": "checkbox",
+   "label": "Will you now or in the future require sponsorship for employment visa status in this country?",
+   "name_attr": "bda78810-f000-4f1c-99c5-f783e161f2f7",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f11",
+   "kind": "checkbox",
+   "label": "Are you able to work from our US office three days per week?",
+   "name_attr": "d33e2a8f-3742-4e5e-b91c-b7607d3cdf63",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f12",
+   "kind": "textarea",
+   "label": "Additional Information",
+   "name_attr": "f189fed2-624b-41a1-a76f-0c67a2611d1a",
+   "options": [],
+   "placeholder": "Type here...",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f13",
+   "kind": "checkbox",
+   "label": "I acknowledge that I have opened, read, and understood the Arbitration Agreement. I understand that by submitting my application, I am agreeing to be bound by the terms of the Arbitration Agreement.",
+   "name_attr": "I acknowledge that I have opened, read, and understood the Arbitration Agreement. I understand that by submitting my application, I am agreeing to be bound by the terms of the Arbitration Agreement.",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "f14",
+   "kind": "checkbox",
+   "label": "I confirm I have read the above.",
+   "name_attr": "I confirm I have read the above.",
+   "options": [],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "g15",
+   "kind": "radio",
+   "label": "Gender",
+   "name_attr": "9def17f1-15ed-4059-b2bb-8824e0ef06e8__systemfield_eeoc_gender",
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "g16",
+   "kind": "radio",
+   "label": "Race",
+   "name_attr": "9def17f1-15ed-4059-b2bb-8824e0ef06e8__systemfield_eeoc_race",
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  },
+  {
+   "autocomplete": "",
+   "help": "",
+   "key": "g17",
+   "kind": "radio",
+   "label": "Veteran Status",
+   "name_attr": "9def17f1-15ed-4059-b2bb-8824e0ef06e8__systemfield_eeoc_veteran_status",
+   "options": [
+    "I identify as one or more of the classifications of protected veteran listed above",
+    "I am not a protected veteran",
+    "I decline to self-identify for protected veteran status"
+   ],
+   "placeholder": "",
+   "required": false,
+   "section": "Autofill from resume",
+   "expect": null
+  }
+ ]
+}
