@@ -127,5 +127,7 @@ export const startScan = () => call<number>('start_scan');
 export const getScanStatus = () => call<ScanState>('get_scan_status');
 export const listScanResults = (runId: number) => call<ProcessedEmail[]>('list_scan_results', { runId });
 export const listPendingReviews = () => call<ProcessedEmail[]>('list_pending_reviews');
+/** Emails matched to a job, newest first. */
+export const listJobEmails = (jobId: number) => call<ProcessedEmail[]>('list_job_emails', { jobId });
 export const applySuggestion = (messageId: string) => call<ProcessedEmail>('apply_suggestion', { messageId });
 export const dismissSuggestion = (messageId: string) => call<void>('dismiss_suggestion', { messageId });

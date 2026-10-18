@@ -492,3 +492,30 @@ async fn processed_email_serializes_outcomes_in_snake_case() {
     let value = serde_json::to_value(row).unwrap();
     assert_eq!(value["outcome"], "pending_review");
 }
+
+#[tokio::test]
+async fn job_emails_are_scoped_to_the_job_newest_first() {
+    let s = store().await;
+    let job = s.create_jd("Engineer", "Acme", "text", "", None).await.unwrap();
+    let other = s.create_jd("Designer", "Beta", "text", "", None).await.unwrap();
+    let run = s.create_scan_run().await.unwrap();
+    for (id, job_id, received) in [
+        ("msg-old", job, "2026-10-01 09:00:00"),
+        ("msg-new", job, "2026-10-10 09:00:00"),
+        ("msg-other", other, "2026-10-05 09:00:00"),
+    ] {
+        let mut row = processed(id, run, Outcome::NoChange);
+        row.matched_job_id = Some(job_id);
+        row.received_at = received.into();
+        s.record_processed(&row, None).await.unwrap();
+    }
+
+    let ids: Vec<_> = s
+        .list_job_emails(job)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.message_id)
+        .collect();
+    assert_eq!(ids, ["msg-new", "msg-old"]);
+}

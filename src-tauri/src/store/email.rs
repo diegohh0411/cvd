@@ -238,6 +238,17 @@ impl Store {
         rows.iter().map(processed_from_row).collect()
     }
 
+    /// Emails matched to one job, newest first.
+    pub async fn list_job_emails(&self, job_id: i64) -> Result<Vec<ProcessedEmail>> {
+        let rows = sqlx::query(
+            "SELECT * FROM processed_email WHERE matched_job_id = ? ORDER BY received_at DESC, message_id",
+        )
+        .bind(job_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(processed_from_row).collect()
+    }
+
     pub async fn list_pending_reviews(&self) -> Result<Vec<ProcessedEmail>> {
         let rows = sqlx::query(
             "SELECT * FROM processed_email WHERE outcome = 'pending_review' ORDER BY received_at DESC, message_id",
