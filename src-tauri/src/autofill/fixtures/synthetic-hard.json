@@ -414,6 +414,22 @@
     "location_full",
     "city"
    ]
+  },
+  {
+   "key": "s28",
+   "kind": "text",
+   "label": "In which city and country are you based?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "location_full",
+    "city"
+   ]
   }
  ]
 }

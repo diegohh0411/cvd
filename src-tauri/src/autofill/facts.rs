@@ -53,12 +53,14 @@ pub fn build_facts(profile: &Profile, entries: &[Entry], defaults: &ApplyDefault
     push("city", with_ascii(&defaults.city));
     push("region", with_ascii(&defaults.region));
     push("country", with_ascii(&defaults.country));
-    let joined = [&defaults.city, &defaults.region, &defaults.country]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    // "Madrid, Madrid, Spain" reads as a typo; repeated parts are dropped.
+    let mut parts: Vec<&str> = Vec::new();
+    for p in [&defaults.city, &defaults.region, &defaults.country] {
+        if !p.is_empty() && !parts.iter().any(|q| q.eq_ignore_ascii_case(p)) {
+            parts.push(p);
+        }
+    }
+    let joined = parts.join(", ");
     let mut loc = with_ascii(&joined);
     loc.extend(with_ascii(&profile.location));
     push("location_full", loc);

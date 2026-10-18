@@ -54,7 +54,7 @@ const EXACT: &[(&str, &[&str])] = &[
     ("city", &["city", "current city", "city of residence", "location city"]),
     ("region", &["state", "province", "state province", "region"]),
     ("country", &["country", "country of residence", "current country"]),
-    ("location_full", &["location", "current location", "where are you located", "where are you currently located", "where are you based"]),
+    ("location_full", &["location", "current location", "where are you located", "where are you currently located", "where are you based", "where do you live", "where do you currently live"]),
     ("linkedin", &["linkedin", "linkedin profile", "linkedin url", "linkedin profile url"]),
     ("github", &["github", "github url", "github profile"]),
     ("website", &["website", "personal website", "portfolio", "portfolio url", "website url", "blog", "portfolio website"]),

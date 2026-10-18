@@ -185,15 +185,48 @@ async fn eval_rules_only() {
     assert_eq!(s.wrong, 0, "rules must never fill a field wrongly: {}", s.line());
 }
 
+/// Prints every question and answer when `CVD_EVAL_VERBOSE` is set.
+struct Logged(std::sync::Arc<dyn DecisionEngine>);
+
+#[async_trait::async_trait]
+impl DecisionEngine for Logged {
+    fn max_questions(&self) -> usize {
+        self.0.max_questions()
+    }
+
+    async fn decide(
+        &self,
+        state: &str,
+        questions: &BTreeMap<String, crate::engine::Question>,
+    ) -> Result<BTreeMap<String, crate::engine::Answer>, crate::engine::EngineError> {
+        let answers = self.0.decide(state, questions).await?;
+        if std::env::var("CVD_EVAL_VERBOSE").is_ok() {
+            for (id, q) in questions {
+                let crate::engine::Question::Choice { instructions, .. } = q else { continue };
+                let Some(crate::engine::Answer::Choice { choice, probabilities }) = answers.get(id) else { continue };
+                let opts = &instructions["options"];
+                let mut probs: Vec<(String, f64)> = probabilities
+                    .iter()
+                    .map(|(k, p)| (opts.get(k).and_then(|v| v.as_str()).unwrap_or(k).to_string(), *p))
+                    .collect();
+                probs.sort_by(|a, b| b.1.total_cmp(&a.1));
+                let top: Vec<String> = probs.iter().take(3).map(|(t, p)| format!("{t:.40} {p:.2}")).collect();
+                println!("    Q {:?} -> {choice} | {}", instructions["field"]["label"].as_str().unwrap_or(""), top.join(" ; "));
+            }
+        }
+        Ok(answers)
+    }
+}
+
 #[tokio::test]
 #[ignore = "calls a real Fast Model; needs CVD_EVAL_TYPESAFE_KEY"]
 async fn eval_live() {
     use crate::providers::{Provider, TypeSafeProvider, TYPESAFE_BASE};
     let key = std::env::var("CVD_EVAL_TYPESAFE_KEY").expect("set CVD_EVAL_TYPESAFE_KEY");
     let model = std::env::var("CVD_EVAL_MODEL").unwrap_or_else(|_| "jev-latest".into());
-    let engine = TypeSafeProvider::new(TYPESAFE_BASE.into(), key).engine(&model).unwrap();
+    let engine = Logged(TypeSafeProvider::new(TYPESAFE_BASE.into(), key).engine(&model).unwrap());
     println!("model: typesafe:{model}");
-    let s = run(Some(engine.as_ref())).await;
+    let s = run(Some(&engine)).await;
     // Release gate from the spec: wrong fills ≤ 2 % of fills.
     assert!(s.wrong * 50 <= s.correct + s.wrong, "too many wrong fills: {}", s.line());
 }

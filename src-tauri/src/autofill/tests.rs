@@ -153,3 +153,10 @@ fn defaults_read_tolerantly_and_trim() {
     assert_eq!(d.needs_sponsorship, Some(false));
     assert_eq!(d.authorized_to_work, None);
 }
+
+#[test]
+fn location_drops_repeated_parts() {
+    let d = ApplyDefaults { city: "Madrid".into(), region: "madrid".into(), country: "Spain".into(), ..Default::default() };
+    let f = build_facts(&profile(), &[], &d, TODAY);
+    assert_eq!(get(&f, "location_full").unwrap()[0], "Madrid, Spain");
+}

@@ -78,7 +78,7 @@ fn loosely_matches(option: &str, variant: &str) -> bool {
 pub fn candidates(field: &FieldSpec, facts: &[Fact], excluded: &[String]) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = Vec::new();
     let mut add = |fact: &'static str, value: String| {
-        if !excluded.contains(&value) && !out.iter().any(|c| c.value == value) {
+        if !excluded.contains(&value) && !out.iter().any(|c| c.fact == fact && c.value == value) {
             out.push(Candidate { fact, value });
         }
     };
@@ -153,16 +153,29 @@ fn field_json(f: &FieldSpec) -> Value {
     })
 }
 
-const STATE: &str = "You are filling in a job application form for the applicant, using only the applicant's own data. \
-Pick an option only if it answers the field exactly. If unsure, or if the field asks for something else, pick `none`.";
+const STATE: &str = "You are helping an applicant fill in a job application form. The form may be in any language. \
+For each field, choose which of the applicant's own details the field asks for. Choose `none` when the field asks for \
+something the listed details don't cover.";
+
+/// The field named in plain words, e.g. `the field "Correo electrónico" (email input)`.
+fn field_phrase(f: &FieldSpec) -> String {
+    let mut s = format!("the field \"{}\"", f.label);
+    if !f.help.is_empty() {
+        s.push_str(&format!(" (hint: \"{}\")", f.help));
+    }
+    if !f.placeholder.is_empty() {
+        s.push_str(&format!(" (placeholder: \"{}\")", f.placeholder));
+    }
+    s
+}
 
 fn choice(field: &FieldSpec, already: &BTreeMap<String, &'static str>, question: &str, options: &BTreeMap<String, String>) -> Question {
     Question::Choice {
         instructions: json!({
+            "question": question,
+            "options": options,
             "field": field_json(field),
             "already_filled": already,
-            "options": options,
-            "question": question,
         }),
         options: options.keys().cloned().collect(),
     }
@@ -208,7 +221,8 @@ pub async fn pick_all(engine: &dyn DecisionEngine, pending: &[Pending], already:
         }
         let mut cats: BTreeMap<String, String> = cats.into_iter().map(|(k, v)| (k.clone(), format!("{k}: {}", v.join(", ")))).collect();
         cats.insert(NONE.into(), "none of these".into());
-        round1.insert(format!("f{i}"), choice(&p.field, already, "What kind of information does `field` ask for?", &cats));
+        let q = format!("What kind of applicant detail does {} ask for?", field_phrase(&p.field));
+        round1.insert(format!("f{i}"), choice(&p.field, already, &q, &cats));
     }
     if !round1.is_empty() {
         let answers = ask(engine, round1).await?;
@@ -230,13 +244,23 @@ pub async fn pick_all(engine: &dyn DecisionEngine, pending: &[Pending], already:
         if early[i].is_some() || narrowed[i].is_empty() {
             continue;
         }
+        // Yes/no questions: the model names the preference; the stored answer is used.
+        let yes_no = narrowed[i].iter().all(|c| is_yes_no(c.fact));
         let mut opts: BTreeMap<String, String> = narrowed[i]
             .iter()
             .enumerate()
-            .map(|(j, c)| (format!("c{j}"), format!("{} ({})", c.value, describe(c.fact))))
+            .map(|(j, c)| {
+                let text = if yes_no { describe(c.fact).to_string() } else { format!("{}: {}", describe(c.fact), c.value) };
+                (format!("c{j}"), text)
+            })
             .collect();
         opts.insert(NONE.into(), "none of these".into());
-        round2.insert(format!("f{i}"), choice(&p.field, already, "Which of the applicant's values belongs in `field`?", &opts));
+        let q = if yes_no {
+            format!("Which of the applicant's stated preferences does {} ask about?", field_phrase(&p.field))
+        } else {
+            format!("Which of the applicant's details should be entered in {}?", field_phrase(&p.field))
+        };
+        round2.insert(format!("f{i}"), choice(&p.field, already, &q, &opts));
     }
     let answers = if round2.is_empty() { BTreeMap::new() } else { ask(engine, round2).await? };
 

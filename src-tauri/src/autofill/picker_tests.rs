@@ -107,7 +107,7 @@ async fn model_fills_what_rules_could_not() {
         field("d", FieldKind::Text, "Favourite colour", &[]),
     ];
     let engine = oracle(&[
-        ("Nombre de pila", "identity", "Diego (first name)", 0.95),
+        ("Nombre de pila", "identity", "first name: Diego", 0.95),
         ("Would you be willing to move to San Francisco?", "", "willing to relocate", 0.9),
     ]);
     let mut s = Session::default();
@@ -123,11 +123,11 @@ async fn model_fills_what_rules_could_not() {
 #[tokio::test]
 async fn low_confidence_and_engine_errors_go_to_the_user() {
     let fields = vec![field("b", FieldKind::Text, "Nombre de pila", &[])];
-    let engine = oracle(&[("Nombre de pila", "identity", "Diego (first name)", ACCEPT_P - 0.1)]);
+    let engine = oracle(&[("Nombre de pila", "identity", "first name: Diego", ACCEPT_P - 0.1)]);
     let a = plan(fields.clone(), &facts(), None, Some(&engine), &mut Session::default()).await;
     assert!(matches!(&a[0], FillAction::NeedsUser { reason, .. } if reason.contains("Not sure enough")));
 
-    let engine = oracle(&[("Nombre de pila", "identity", "Diego (first name)", 0.95)]);
+    let engine = oracle(&[("Nombre de pila", "identity", "first name: Diego", 0.95)]);
     engine.fail_on_call(1);
     let a = plan(fields.clone(), &facts(), None, Some(&engine), &mut Session::default()).await;
     assert!(matches!(&a[0], FillAction::NeedsUser { reason, .. } if reason.contains("Fast Model unavailable")));
@@ -159,7 +159,7 @@ async fn rejected_values_are_excluded_on_retry() {
     let mut s = Session::default();
     s.excluded.insert("a".into(), vec!["Hernández".into()]);
     // The rule's value was rejected, so the model gets the remaining spellings.
-    let engine = oracle(&[("Last name", "identity", "Hernandez (last name)", 0.9)]);
+    let engine = oracle(&[("Last name", "identity", "last name: Hernandez", 0.9)]);
     let a = plan(f, &facts(), None, Some(&engine), &mut s).await;
     assert_eq!(a[0], FillAction::Set { key: "a".into(), value: "Hernandez".into(), fact: "last_name" });
 }
