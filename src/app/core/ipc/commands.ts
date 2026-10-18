@@ -64,6 +64,8 @@ export const updateJobTracking = (id: number, statusId: number | null, url: stri
 export const updateJobDescription = (id: number, rawText: string) => call<void>('update_job_description', { id, rawText });
 export const fetchJobDescription = (url: string) => call<string>('fetch_job_description', { url });
 export const listJobs = () => call<JobDescription[]>('list_jobs');
+/** Ids of jobs matching a fuzzy query, best first; empty for a blank query. */
+export const searchJobs = (query: string) => call<number[]>('search_jobs', { query });
 export const getJob = (id: number) => call<JobDescription>('get_job', { id });
 export const startMatch = (jdId: number) => call<number>('start_match', { jdId });
 export const cancelMatch = (runId: number) => call<void>('cancel_match', { runId });

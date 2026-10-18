@@ -1,5 +1,6 @@
 mod autofill;
 mod commands;
+mod job_search;
 mod company;
 #[allow(dead_code)]
 mod mail;
@@ -77,6 +78,7 @@ pub fn run() {
             ipc::delete_job_status,
             ipc::reorder_job_statuses,
             ipc::list_jobs,
+            ipc::search_jobs,
             ipc::get_job,
             ipc::start_match,
             ipc::cancel_match,

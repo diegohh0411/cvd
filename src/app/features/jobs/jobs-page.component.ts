@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucidePlus } from '@ng-icons/lucide';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
+import { ZardInputComponent } from '@/shared/components/input';
 import { ZardSkeletonComponent } from '@/shared/components/skeleton/skeleton.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { formatTimestamp } from '../../core/format';
@@ -22,7 +24,7 @@ import { StatusPillComponent } from './status-pill.component';
 
 @Component({
   selector: 'app-jobs-page',
-  imports: [PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, RunStatusBadgeComponent, NgIcon, StatusPickerComponent, StatusPillComponent, ScanResultsDialogComponent],
+  imports: [FormsModule, ZardInputComponent, PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, RunStatusBadgeComponent, NgIcon, StatusPickerComponent, StatusPillComponent, ScanResultsDialogComponent],
   viewProviders: [provideIcons({ lucidePlus })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -51,6 +53,16 @@ import { StatusPillComponent } from './status-pill.component';
     <app-scan-results-dialog [runId]="dialogRunId()" [(open)]="dialogOpen" />
     <div class="flex flex-1 flex-col gap-4 p-4">
       @if (jobs.jobs().length) {
+        <input
+          z-input
+          type="search"
+          class="max-w-sm"
+          placeholder="Search jobs by company, title or site…"
+          aria-label="Search jobs"
+          data-testid="job-search"
+          [ngModel]="query()"
+          (ngModelChange)="search($event)"
+        />
         <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
           <button z-button zSize="xs" [zType]="filter() === 'all' ? 'secondary' : 'ghost'" (click)="filter.set('all')">
             All <span class="text-muted-foreground tabular-nums">{{ jobs.jobs().length }}</span>
@@ -90,7 +102,9 @@ import { StatusPillComponent } from './status-pill.component';
             </li>
           } @empty {
             <li class="text-muted-foreground flex flex-col items-center gap-3 p-10 text-center text-sm">
-              @if (filter() !== 'all' && jobs.jobs().length) {
+              @if (hits() !== null) {
+                <span class="text-foreground font-medium">No jobs match “{{ query().trim() }}”</span>
+              } @else if (filter() !== 'all' && jobs.jobs().length) {
                 <span class="text-foreground font-medium">No jobs with this status</span>
               } @else {
               <span class="text-foreground font-medium">No jobs yet</span>
@@ -119,9 +133,16 @@ export class JobsPageComponent implements OnInit {
     for (const j of this.jobs.jobs()) if (j.status_id !== null) m.set(j.status_id, (m.get(j.status_id) ?? 0) + 1);
     return m;
   });
+  protected readonly query = signal('');
+  /** Fuzzy-ranked job ids for the current query; null when not searching. */
+  protected readonly hits = signal<number[] | null>(null);
   protected readonly visible = computed(() => {
     const f = this.filter();
-    return f === 'all' ? this.jobs.sorted() : this.jobs.sorted().filter((j) => j.status_id === f);
+    const byStatus = (j: JobDescription) => f === 'all' || j.status_id === f;
+    const ids = this.hits();
+    if (ids === null) return this.jobs.sorted().filter(byStatus);
+    const byId = new Map(this.jobs.jobs().map((j) => [j.id, j]));
+    return ids.flatMap((id) => byId.get(id) ?? []).filter(byStatus);
   });
 
   protected readonly scanStore = inject(ScanStore);
@@ -155,6 +176,20 @@ export class JobsPageComponent implements OnInit {
       (a) => this.mailConnected.set(a !== null),
       () => this.mailConnected.set(false),
     );
+  }
+
+  protected async search(query: string): Promise<void> {
+    this.query.set(query);
+    if (!query.trim()) {
+      this.hits.set(null);
+      return;
+    }
+    try {
+      const ids = await api.searchJobs(query);
+      if (this.query() === query) this.hits.set(ids);
+    } catch (e) {
+      this.toast.error('Search failed', { description: messageFor(e) });
+    }
   }
 
   protected async scan(): Promise<void> {
