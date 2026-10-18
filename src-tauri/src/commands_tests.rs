@@ -771,3 +771,74 @@ async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
     assert_eq!(kept.folder, "INBOX");
     assert_eq!(get_mail_account(&st).await.unwrap().unwrap().folder, "INBOX");
 }
+
+#[tokio::test]
+async fn apply_defaults_round_trip_and_feed_facts() {
+    let (st, _) = state().await;
+    assert_eq!(get_apply_defaults(&st).await.unwrap(), ApplyDefaults::default());
+
+    save_profile(&st, Profile { name: "Diego Hernández".into(), ..Default::default() }).await.unwrap();
+    save_apply_defaults(
+        &st,
+        ApplyDefaults { city: "  Monterrey ".into(), needs_sponsorship: Some(false), ..Default::default() },
+    )
+    .await
+    .unwrap();
+
+    let d = get_apply_defaults(&st).await.unwrap();
+    assert_eq!(d.city, "Monterrey");
+    assert_eq!(d.needs_sponsorship, Some(false));
+
+    let facts = apply_facts(&st).await.unwrap();
+    let keys: Vec<_> = facts.iter().map(|f| f.key).collect();
+    assert!(keys.contains(&"last_name"));
+    assert!(keys.contains(&"city"));
+    assert!(keys.contains(&"needs_sponsorship"));
+    // `apply.` keys are not reachable through the generic UI setting commands.
+    assert!(get_ui_setting(&st, APPLY_DEFAULTS_KEY).await.is_err());
+}
+
+#[tokio::test]
+async fn submitted_application_moves_job_to_applied() {
+    use crate::autofill::window::mark_applied;
+    let (st, events) = state().await;
+    let job = create_job(&st, "Engineer", "Acme", "text", "https://boards.greenhouse.io/acme/jobs/1", None).await.unwrap();
+
+    let applied = st.store.list_job_statuses().await.unwrap().into_iter().find(|s| s.name == "Applied").expect("seeded status");
+    let msg = mark_applied(&st, job).await;
+    assert_eq!(msg, "Submitted. Marked as Applied in cvd.");
+    assert_eq!(get_job(&st, job).await.unwrap().status_id, Some(applied.id));
+    assert!(events.lock().unwrap().iter().any(|(n, v)| n == "job://updated" && v["job_id"] == job));
+
+    assert!(mark_applied(&st, 9999).await.contains("no longer"));
+
+    // Without an "Applied" status cvd only says how to set one up.
+    delete_job_status(&st, applied.id).await.unwrap();
+    assert!(mark_applied(&st, job).await.contains("Add an"));
+    assert!(mark_applied(&st, 0).await.contains("Dev window"));
+}
+
+#[tokio::test]
+async fn edits_teach_and_unteach_labels() {
+    use crate::autofill::field::{FieldKind, FieldSpec};
+    use crate::autofill::window::learn;
+    let (st, _) = state().await;
+    save_profile(&st, Profile { name: "Diego Hernández".into(), email: "d@example.com".into(), ..Default::default() }).await.unwrap();
+    let facts = apply_facts(&st).await.unwrap();
+    let field = |label: &str, kind| FieldSpec { key: "k".into(), kind: Some(kind), label: label.into(), ..Default::default() };
+    let none = std::collections::BTreeMap::new();
+
+    learn(&st, &field("Nombre de pila", FieldKind::Text), "Diego", &facts, false, &none).await;
+    learn(&st, &field("Correo", FieldKind::Text), "d@example.com", &facts, false, &none).await;
+    // Protected fields and non-matching values teach nothing.
+    learn(&st, &field("Gender", FieldKind::Text), "Diego", &facts, false, &none).await;
+    learn(&st, &field("Color", FieldKind::Text), "Blue", &facts, false, &none).await;
+    let mem = st.store.apply_memory().await.unwrap();
+    assert_eq!(mem.get("nombre de pila").map(String::as_str), Some("first_name"));
+    assert_eq!(mem.get("correo").map(String::as_str), Some("email"));
+    assert_eq!(mem.len(), 2);
+
+    // The user replaces a remembered fill with something else: forget it.
+    learn(&st, &field("Correo", FieldKind::Text), "other@example.com", &facts, true, &mem).await;
+    assert!(!st.store.apply_memory().await.unwrap().contains_key("correo"));
+}

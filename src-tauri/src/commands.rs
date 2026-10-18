@@ -5,6 +5,7 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
+use crate::autofill::{build_facts, ApplyDefaults, Fact, APPLY_DEFAULTS_KEY};
 use crate::company::{self, agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS}, coordinator::ResearchCoordinator};
 use crate::search::{ExaSearch, SearchProvider, EXA};
 use crate::state::ResearchEnv;
@@ -601,6 +602,27 @@ pub async fn set_ui_setting(st: &AppState, key: &str, value: &str) -> Res<()> {
     Ok(st.store.set_setting(key, value).await?)
 }
 
+// ---- auto-apply ----
+
+pub async fn get_apply_defaults(st: &AppState) -> Res<ApplyDefaults> {
+    Ok(ApplyDefaults::from_setting(st.store.get_setting(APPLY_DEFAULTS_KEY).await?.as_deref()))
+}
+
+pub async fn save_apply_defaults(st: &AppState, defaults: ApplyDefaults) -> Res<()> {
+    let json = serde_json::to_string(&defaults.trimmed()).map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(st.store.set_setting(APPLY_DEFAULTS_KEY, &json).await?)
+}
+
+/// What auto-apply would offer as candidates, for the Profile page preview.
+pub async fn apply_facts(st: &AppState) -> Res<Vec<Fact>> {
+    use chrono::Datelike as _;
+    let profile = get_profile(st).await?;
+    let entries = st.store.list_entries(false).await?;
+    let defaults = get_apply_defaults(st).await?;
+    let now = chrono::Local::now();
+    Ok(build_facts(&profile, &entries, &defaults, (now.year(), now.month())))
+}
+
 // ---- models ----
 
 pub async fn engine_status(st: &AppState) -> Res<crate::state::EngineStatus> {
@@ -1162,6 +1184,22 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_remote_models(st: S<'_>, refresh: bool, role: Option<String>) -> Res<Vec<ProviderModels>> {
         super::list_remote_models(&st, refresh, role.as_deref().unwrap_or("decision")).await
+    }
+    #[tauri::command]
+    pub async fn get_apply_defaults(st: S<'_>) -> Res<ApplyDefaults> {
+        super::get_apply_defaults(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_apply_defaults(st: S<'_>, defaults: ApplyDefaults) -> Res<()> {
+        super::save_apply_defaults(&st, defaults).await
+    }
+    #[tauri::command]
+    pub async fn apply_facts(st: S<'_>) -> Res<Vec<Fact>> {
+        super::apply_facts(&st).await
+    }
+    #[tauri::command]
+    pub async fn start_apply(app: tauri::AppHandle, st: S<'_>, job_id: i64) -> Res<bool> {
+        crate::autofill::window::start_apply(&app, &st, job_id).await
     }
     #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {

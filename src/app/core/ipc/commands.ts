@@ -5,6 +5,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { toAppError } from './errors';
 import type {
   Company,
+  ApplyDefaults,
+  ApplyFact,
   CompanyProfile,
   Cv,
   Entry,
@@ -44,6 +46,11 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 // ---- profile & library ----
 export const getProfile = () => call<Profile>('get_profile');
 export const saveProfile = (profile: Profile) => call<void>('save_profile', { profile });
+export const getApplyDefaults = () => call<ApplyDefaults>('get_apply_defaults');
+export const saveApplyDefaults = (defaults: ApplyDefaults) => call<void>('save_apply_defaults', { defaults });
+export const applyFacts = () => call<ApplyFact[]>('apply_facts');
+/** `false`: the posting's site isn't supported, nothing was opened. */
+export const startApply = (jobId: number) => call<boolean>('start_apply', { jobId });
 export const listEntries = (includeArchived: boolean) => call<Entry[]>('list_entries', { includeArchived });
 export const saveEntry = (input: EntryInput) => call<number>('save_entry', { input });
 export const deleteEntry = (id: number) => call<void>('delete_entry', { id });

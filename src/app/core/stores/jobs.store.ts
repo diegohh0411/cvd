@@ -2,6 +2,7 @@ import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { messageFor } from '../ipc/errors';
+import { onJobUpdated } from '../ipc/events';
 import type { JobDescription, MatchRun } from '../ipc/types';
 
 export const RECENT_JOBS = 5;
@@ -16,6 +17,13 @@ export class JobsStore {
 
   readonly sorted = computed(() => [...this.jobs()].sort((a, b) => b.id - a.id));
   readonly recent = computed(() => this.sorted().slice(0, RECENT_JOBS));
+
+  constructor() {
+    // Auto-apply marks jobs Applied from its own window.
+    void onJobUpdated(({ job_id, status_id }) =>
+      this.jobs.update((js) => js.map((j) => (j.id === job_id ? { ...j, status_id } : j))),
+    ).catch(() => undefined);
+  }
 
   async load(): Promise<void> {
     this.loading.set(true);

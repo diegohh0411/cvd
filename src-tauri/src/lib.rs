@@ -1,3 +1,4 @@
+mod autofill;
 mod commands;
 mod company;
 #[allow(dead_code)]
@@ -51,6 +52,12 @@ pub fn run() {
             );
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
+            app.manage(autofill::window::Sessions::default());
+            // Dev hook: open an apply window on any supported posting, with no job attached.
+            #[cfg(debug_assertions)]
+            if let Ok(url) = std::env::var("CVD_APPLY_URL") {
+                autofill::window::open_window(app.handle(), 0, &url, "Apply (dev)")?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -79,6 +86,9 @@ pub fn run() {
             ipc::list_cvs,
             ipc::get_ui_setting,
             ipc::set_ui_setting,
+            ipc::get_apply_defaults,
+            ipc::save_apply_defaults,
+            ipc::apply_facts,
             ipc::engine_status,
             ipc::cancel_download,
             ipc::get_ranked,
@@ -114,6 +124,8 @@ pub fn run() {
             ipc::add_connection,
             ipc::rename_connection,
             ipc::list_remote_models,
+            ipc::start_apply,
+            autofill::window::autofill_bridge,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

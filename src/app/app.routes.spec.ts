@@ -7,6 +7,7 @@ import { ZardSidebarService } from '@/shared/components/sidebar/sidebar.service'
 import { flush, mockTauri, type TauriMock } from '../testing/tauri-mock';
 import { pageProviders } from '../testing/providers';
 import { modelsRedirect, routes } from './app.routes';
+import { EMPTY_DEFAULTS, flagToValue, valueToFlag } from './features/profile/apply-defaults.component';
 import { ProfilePageComponent } from './features/profile/profile-page.component';
 
 const PROFILE = { name: 'Ada', headline: '', email: '', phone: '', location: '', links: [], summary: '' };
@@ -45,7 +46,7 @@ describe('ProfilePageComponent', () => {
   let t: TauriMock;
 
   it('shows the stored profile and saves it', async () => {
-    t = mockTauri({ get_profile: PROFILE, save_profile: null });
+    t = mockTauri({ get_profile: PROFILE, save_profile: null, get_apply_defaults: EMPTY_DEFAULTS, apply_facts: [] });
     TestBed.configureTestingModule({ providers: pageProviders() });
     const f = TestBed.createComponent(ProfilePageComponent);
     f.detectChanges();
@@ -56,5 +57,44 @@ describe('ProfilePageComponent', () => {
     save.click();
     await flush();
     expect(t.callsTo('save_profile')[0]['profile']).toMatchObject({ name: 'Ada' });
+  });
+});
+
+describe('ApplyDefaultsComponent', () => {
+  const button = (el: HTMLElement, text: string) => [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)!;
+
+  it('maps tri-state flags to select values', () => {
+    expect([null, true, false].map(flagToValue)).toEqual(['', 'yes', 'no']);
+    expect(['', 'yes', 'no', 'x'].map(valueToFlag)).toEqual([null, true, false, null]);
+  });
+
+  it('loads defaults, saves edits and shows the fact preview', async () => {
+    const t = mockTauri({
+      get_profile: PROFILE,
+      get_apply_defaults: { ...EMPTY_DEFAULTS, city: 'Monterrey', needs_sponsorship: false },
+      save_apply_defaults: null,
+      apply_facts: [{ key: 'city', variants: ['Monterrey'] }],
+    });
+    TestBed.configureTestingModule({ providers: pageProviders() });
+    const f = TestBed.createComponent(ProfilePageComponent);
+    f.detectChanges();
+    await flush();
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector<HTMLInputElement>('#ad-city')!.value).toBe('Monterrey');
+    expect(el.querySelector<HTMLSelectElement>('#ad-needs_sponsorship')!.value).toBe('no');
+    expect(el.querySelector('details')!.textContent).toContain('Monterrey');
+
+    const relocate = el.querySelector<HTMLSelectElement>('#ad-willing_to_relocate')!;
+    relocate.value = 'yes';
+    relocate.dispatchEvent(new Event('change'));
+    button(el, 'Save defaults').click();
+    await flush();
+    expect(t.callsTo('save_apply_defaults')[0]['defaults']).toMatchObject({
+      city: 'Monterrey',
+      needs_sponsorship: false,
+      willing_to_relocate: true,
+    });
+    expect(t.callsTo('apply_facts').length).toBe(2);
   });
 });

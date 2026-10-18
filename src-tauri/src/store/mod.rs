@@ -1,4 +1,5 @@
 pub mod types;
+mod apply_memory;
 mod companies;
 mod email;
 pub use email::{Outcome, ProcessedEmail, NewProcessed, ScanStatus, ScanRun};

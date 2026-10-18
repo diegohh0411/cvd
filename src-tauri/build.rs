@@ -1,6 +1,10 @@
 fn main() {
     copy_llama_dylibs();
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(&["autofill_bridge"])),
+    )
+    .expect("failed to run tauri-build");
 }
 
 /// Dev builds run the `llama-server` sidecar straight from `target/<profile>`,
