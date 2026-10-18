@@ -1038,6 +1038,10 @@ pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>>
     Ok(st.store.list_pending_reviews().await?.into_iter().map(scan_view).collect())
 }
 
+pub async fn list_job_emails(st: &AppState, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st.store.list_job_emails(job_id).await?.into_iter().map(scan_view).collect())
+}
+
 pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
     Ok(scan_view(st.store.apply_suggestion(message_id).await?))
 }
@@ -1313,6 +1317,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_scan_results(st: S<'_>, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
         super::list_scan_results(&st, run_id).await
+    }
+    #[tauri::command]
+    pub async fn list_job_emails(st: S<'_>, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+        super::list_job_emails(&st, job_id).await
     }
     #[tauri::command]
     pub async fn list_pending_reviews(st: S<'_>) -> Res<Vec<ProcessedEmailView>> {

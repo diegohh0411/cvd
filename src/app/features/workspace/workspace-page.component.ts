@@ -18,6 +18,7 @@ import { JobPropertiesComponent } from '../jobs/job-properties.component';
 import { MatchReadiness } from '../jobs/match-readiness';
 import { WorkspaceCardsComponent } from './cards.component';
 import { defaultFileName, ExportService } from './export.service';
+import { EmailsTabComponent } from './emails-tab.component';
 import { ExportsTabComponent } from './exports-tab.component';
 import { JdEditorComponent } from './jd-editor.component';
 import { CompanyPanelComponent, contextBadge } from '../companies/company-panel.component';
@@ -26,11 +27,12 @@ import { PdfPreviewComponent } from './pdf-preview.component';
 import { SelectionListComponent } from './selection-list.component';
 import { WorkspaceStore } from './workspace.store';
 
-export type Tab = 'jd' | 'selection' | 'exports';
+export type Tab = 'jd' | 'selection' | 'exports' | 'emails';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'jd', label: 'JD' },
   { id: 'selection', label: 'Selection' },
   { id: 'exports', label: 'Exports' },
+  { id: 'emails', label: 'Emails' },
 ];
 
 /** What to tell the user about a failed run, and whether Retry makes sense. */
@@ -61,6 +63,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
     SelectionListComponent,
     PdfPreviewComponent,
     ExportsTabComponent,
+    EmailsTabComponent,
     BlockerAlertComponent,
     JobPropertiesComponent,
     JdEditorComponent,
@@ -194,6 +197,9 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
                   }
                   @case ('exports') {
                     <app-exports-tab [jobId]="jobIdNum()" [version]="exports()" (restore)="restore($event)" />
+                  }
+                  @case ('emails') {
+                    <app-emails-tab [jobId]="jobIdNum()" />
                   }
                 }
               </div>

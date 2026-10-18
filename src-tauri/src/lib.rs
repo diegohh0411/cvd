@@ -114,6 +114,7 @@ pub fn run() {
             ipc::get_scan_status,
             ipc::list_scan_results,
             ipc::list_pending_reviews,
+            ipc::list_job_emails,
             ipc::apply_suggestion,
             ipc::dismiss_suggestion,
             ipc::set_provider_key,
