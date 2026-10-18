@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-job-status"
+description = "Enables the update_job_status command without any pre-configured scope."
+commands.allow = ["update_job_status"]
+
+[[permission]]
+identifier = "deny-update-job-status"
+description = "Denies the update_job_status command without any pre-configured scope."
+commands.deny = ["update_job_status"]

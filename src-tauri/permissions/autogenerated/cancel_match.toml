@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-match"
+description = "Enables the cancel_match command without any pre-configured scope."
+commands.allow = ["cancel_match"]
+
+[[permission]]
+identifier = "deny-cancel-match"
+description = "Denies the cancel_match command without any pre-configured scope."
+commands.deny = ["cancel_match"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-cv"
+description = "Enables the export_cv command without any pre-configured scope."
+commands.allow = ["export_cv"]
+
+[[permission]]
+identifier = "deny-export-cv"
+description = "Denies the export_cv command without any pre-configured scope."
+commands.deny = ["export_cv"]

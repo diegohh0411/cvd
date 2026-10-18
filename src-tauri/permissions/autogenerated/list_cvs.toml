@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-cvs"
+description = "Enables the list_cvs command without any pre-configured scope."
+commands.allow = ["list_cvs"]
+
+[[permission]]
+identifier = "deny-list-cvs"
+description = "Denies the list_cvs command without any pre-configured scope."
+commands.deny = ["list_cvs"]

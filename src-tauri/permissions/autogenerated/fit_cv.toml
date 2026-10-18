@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fit-cv"
+description = "Enables the fit_cv command without any pre-configured scope."
+commands.allow = ["fit_cv"]
+
+[[permission]]
+identifier = "deny-fit-cv"
+description = "Denies the fit_cv command without any pre-configured scope."
+commands.deny = ["fit_cv"]
