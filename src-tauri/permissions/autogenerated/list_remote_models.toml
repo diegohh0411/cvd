@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-remote-models"
+description = "Enables the list_remote_models command without any pre-configured scope."
+commands.allow = ["list_remote_models"]
+
+[[permission]]
+identifier = "deny-list-remote-models"
+description = "Denies the list_remote_models command without any pre-configured scope."
+commands.deny = ["list_remote_models"]

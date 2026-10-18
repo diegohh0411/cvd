@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-system-ram-gb"
+description = "Enables the system_ram_gb command without any pre-configured scope."
+commands.allow = ["system_ram_gb"]
+
+[[permission]]
+identifier = "deny-system-ram-gb"
+description = "Denies the system_ram_gb command without any pre-configured scope."
+commands.deny = ["system_ram_gb"]

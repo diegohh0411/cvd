@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-ranked"
+description = "Enables the get_ranked command without any pre-configured scope."
+commands.allow = ["get_ranked"]
+
+[[permission]]
+identifier = "deny-get-ranked"
+description = "Denies the get_ranked command without any pre-configured scope."
+commands.deny = ["get_ranked"]
