@@ -568,7 +568,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn researched_profile_reaches_state() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (st, log, events) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
@@ -599,7 +598,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn skip_background_scores_and_research_finishes() {
         let (st, log, events) = setup(research(Arc::default(), Duration::from_millis(300), Ok(acme()))).await;
         let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
@@ -619,7 +617,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn skip_cancel_scores_and_research_cancelled() {
         let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
         let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
@@ -634,7 +631,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn research_failure_scores_without_context() {
         let (st, _, _) = setup(research(Arc::default(), Duration::ZERO, Err(ResearchError::Budget))).await;
         let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
@@ -645,7 +641,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn no_research_model_scores_without_context() {
         let (st, events) = state().await;
         st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
@@ -662,7 +657,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn rescore_creates_new_run_with_current_profile() {
         let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
         let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
@@ -679,7 +673,6 @@ mod company_flow {
     }
 
     #[tokio::test]
-    #[ignore = "LLM company research disabled via COMPANY_RESEARCH_ENABLED"]
     async fn edit_then_refresh_overwrites() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (st, _, _) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
