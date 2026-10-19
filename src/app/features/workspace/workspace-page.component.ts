@@ -168,7 +168,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
         }
 
         @if (ws.phase() !== 'loading') {
-          <div class="grid min-h-0 flex-1 gap-4" [class.xl:grid-cols-2]="ws.phase() === 'review'">
+          <div class="grid min-h-0 flex-1 gap-4" [class.xl:grid-cols-2]="showPreview()">
             <div class="flex min-w-0 flex-col gap-3">
               <div role="tablist" aria-label="Workspace" class="bg-muted text-muted-foreground inline-flex w-fit rounded-lg p-1">
                 @for (t of tabs; track t.id) {
@@ -204,8 +204,8 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
                 }
               </div>
             </div>
-            @if (ws.phase() === 'review') {
-              <div class="min-w-0 xl:sticky xl:top-16 xl:h-[calc(100vh-5rem)]">
+            @if (showPreview()) {
+              <div class="min-h-0 min-w-0 overflow-hidden xl:sticky xl:top-16 xl:h-[calc(100vh-5rem)]">
                 <app-pdf-preview [pdf]="ws.pdf()" [error]="ws.fitError()" [busy]="ws.fitting()" />
               </div>
             }
@@ -233,6 +233,7 @@ export class WorkspacePageComponent {
 
   protected readonly tabs = TABS;
   protected readonly tab = signal<Tab>('jd');
+  protected readonly showPreview = computed(() => this.ws.phase() === 'review' && this.tab() === 'selection');
   protected readonly exporting = signal(false);
   protected readonly exports = signal(0);
   protected readonly confirmRematch = signal(false);
