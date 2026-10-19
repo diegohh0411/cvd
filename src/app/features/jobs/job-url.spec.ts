@@ -17,12 +17,12 @@ describe('job-url', () => {
     expect(urlHost('https://www.acme.com/careers/1')).toBe('acme.com');
   });
 
-  it('offers autofill only on supported ATS hosts', () => {
+  it('offers autofill on any HTTPS posting', () => {
     expect(canAutofill('https://job-boards.greenhouse.io/acme/jobs/1')).toBe(true);
-    expect(canAutofill('https://jobs.lever.co/acme/1')).toBe(true);
+    expect(canAutofill('https://acme.wd5.myworkdayjobs.com/careers/job/1')).toBe(true);
+    expect(canAutofill('https://acme.com/careers')).toBe(true);
     expect(canAutofill('http://boards.greenhouse.io/acme')).toBe(false);
-    expect(canAutofill('https://greenhouse.io.evil.com/x')).toBe(false);
-    expect(canAutofill('https://acme.com/careers')).toBe(false);
+    expect(canAutofill('not a url')).toBe(false);
     expect(canAutofill('')).toBe(false);
   });
 });

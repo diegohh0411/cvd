@@ -1,0 +1,138 @@
+{
+ "url": "synthetic: SmartRecruiters-style one-page form (jobs.smartrecruiters.com)",
+ "fields": [
+  {
+   "key": "r1",
+   "kind": "text",
+   "label": "First name",
+   "placeholder": "",
+   "autocomplete": "given-name",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": "first_name"
+  },
+  {
+   "key": "r2",
+   "kind": "text",
+   "label": "Last name",
+   "placeholder": "",
+   "autocomplete": "family-name",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": "last_name"
+  },
+  {
+   "key": "r3",
+   "kind": "email",
+   "label": "Email",
+   "placeholder": "",
+   "autocomplete": "email",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": "email"
+  },
+  {
+   "key": "r4",
+   "kind": "email",
+   "label": "Confirm your email",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "email"
+  },
+  {
+   "key": "r5",
+   "kind": "text",
+   "label": "Location",
+   "placeholder": "City, Country",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "location_full",
+    "city"
+   ]
+  },
+  {
+   "key": "r6",
+   "kind": "tel",
+   "label": "Phone number",
+   "placeholder": "",
+   "autocomplete": "tel",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "phone"
+  },
+  {
+   "key": "r7",
+   "kind": "url",
+   "label": "LinkedIn profile",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "linkedin"
+  },
+  {
+   "key": "r8",
+   "kind": "url",
+   "label": "Website, blog or portfolio",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "website"
+  },
+  {
+   "key": "r9",
+   "kind": "textarea",
+   "label": "Message to the hiring team",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "r10",
+   "kind": "checkbox",
+   "label": "I agree to the privacy policy",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": null
+  }
+ ]
+}
