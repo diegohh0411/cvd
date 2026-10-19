@@ -82,7 +82,7 @@ pub fn build_questions(jobs: &[JobCtx], statuses: &[JobStatus]) -> BTreeMap<Stri
     questions.insert(
         JOB_RELATED_KEY.to_string(),
         Question::Noul {
-            instructions: "Is this email about a job application, interview, offer, rejection or recruiter contact?".into(),
+            instructions: "Is this email about the user's job search? Yes for application confirmations (e.g. \"your application was submitted/sent/received\", including automated ones from applicant-tracking systems such as Workable, Greenhouse, Lever or LinkedIn), interview invitations, assessments, offers, rejections and recruiter contact. No for newsletters, job alerts, marketing and unrelated mail.".into(),
         },
     );
     questions.insert(
@@ -95,14 +95,14 @@ pub fn build_questions(jobs: &[JobCtx], statuses: &[JobStatus]) -> BTreeMap<Stri
     questions.insert(
         STATUS_CHANGED_KEY.to_string(),
         Question::Noul {
-            instructions: "Does this email change the application status of the job it refers to?"
+            instructions: "Compare what this email says with the matched job's current status in the jobs list. Answer yes if the email shows the user has progressed beyond that status, even if the email itself is an automated confirmation. In particular, a confirmation that the user's application was submitted, sent or received means the user applied, so it is a change for any job still saved/bookmarked/not yet applied. Also yes for interviews, offers and rejections. Answer no only if the email adds nothing beyond the job's current status (e.g. a newsletter, a generic reminder, or a repeat of the status the job already has)."
                 .into(),
         },
     );
     questions.insert(
         NEW_STATUS_KEY.to_string(),
         Question::Choice {
-            instructions: choice_instructions("What is the job's status after this email?", &status_options),
+            instructions: choice_instructions("Which status best describes the job after this email? An application submitted/sent/received confirmation means the applied status; interview invitations mean an interview status; an offer means offer; a rejection means rejected.", &status_options),
             options: status_options.keys().cloned().collect(),
         },
     );
