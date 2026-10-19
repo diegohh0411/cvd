@@ -33,10 +33,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
       - run: bun install --frozen-lockfile
 
       # Sidecar + dylibs that tauri.conf.json bundles; fetched for the build target.
