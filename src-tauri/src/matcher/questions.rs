@@ -96,6 +96,7 @@ pub fn seniority_question() -> Question {
     Question::Choice {
         instructions: SENIORITY_INSTRUCTION.into(),
         options: SENIORITY_OPTIONS.iter().map(|s| s.to_string()).collect(),
+        criteria: BTreeMap::new(),
     }
 }
 
@@ -103,6 +104,7 @@ pub fn role_family_question() -> Question {
     Question::Choice {
         instructions: ROLE_FAMILY_INSTRUCTION.into(),
         options: ROLE_FAMILY_OPTIONS.iter().map(|s| s.to_string()).collect(),
+        criteria: BTreeMap::new(),
     }
 }
 

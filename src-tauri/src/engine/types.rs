@@ -8,9 +8,12 @@ pub enum Question {
     Noul {
         instructions: Value,
     },
+    /// `criteria` optionally describes each option (key = option id), sent as the
+    /// wire `criteria` map; options without an entry are sent undescribed.
     Choice {
         instructions: Value,
         options: Vec<String>,
+        criteria: BTreeMap<String, String>,
     },
     Score {
         instructions: Value,

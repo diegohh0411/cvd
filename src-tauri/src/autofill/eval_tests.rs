@@ -149,6 +149,46 @@ impl Score {
     }
 }
 
+/// The ATS a fixture came from: the URL's host, or the host in parentheses
+/// for synthetic fixtures, with tenant subdomains folded (`acme.wd5.myworkdayjobs.com`
+/// → `myworkdayjobs.com`).
+fn host_of(url: &str) -> String {
+    let raw = if let Some(rest) = url.strip_prefix("synthetic:") {
+        match (rest.rfind('('), rest.rfind(')')) {
+            (Some(a), Some(b)) if a < b => rest[a + 1..b].trim().to_string(),
+            _ => return "synthetic".into(),
+        }
+    } else {
+        tauri::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_else(|| "unknown".into())
+    };
+    let parts: Vec<&str> = raw.split('.').collect();
+    let keep = if parts.len() > 2
+        && ["greenhouse", "myworkdayjobs", "smartrecruiters"].contains(&parts[parts.len() - 2])
+    {
+        2
+    } else {
+        parts.len().min(3)
+    };
+    parts[parts.len() - keep..].join(".")
+}
+
+#[test]
+fn hosts_group_tenants() {
+    assert_eq!(
+        host_of("https://job-boards.greenhouse.io/anthropic/jobs/1"),
+        "greenhouse.io"
+    );
+    assert_eq!(
+        host_of("synthetic: Workday-style (acme.wd5.myworkdayjobs.com)"),
+        "myworkdayjobs.com"
+    );
+    assert_eq!(host_of("https://jobs.lever.co/palantir/1"), "jobs.lever.co");
+    assert_eq!(host_of("synthetic: no host"), "synthetic");
+}
+
 async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
     let facts = eval_facts();
     let resume = Resume {
@@ -156,6 +196,7 @@ async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
         b64: String::new(),
     };
     let mut total = Score::default();
+    let mut by_host: BTreeMap<String, Score> = BTreeMap::new();
     for (name, fx) in fixtures() {
         let specs: Vec<FieldSpec> = fx
             .fields
@@ -206,7 +247,11 @@ async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
             }
         }
         println!("{name} ({}): {}", fx.url, score.line());
+        by_host.entry(host_of(&fx.url)).or_default().add(&score);
         total.add(&score);
+    }
+    for (host, score) in &by_host {
+        println!("HOST {host}: {}", score.line());
     }
     println!("TOTAL: {}", total.line());
     total

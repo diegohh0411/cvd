@@ -19,10 +19,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
       # tauri-build requires the externalBin sidecar to exist at compile time.
       - run: bash src-tauri/scripts/fetch-llama-server.sh
 

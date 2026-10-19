@@ -296,10 +296,10 @@ fn missing_company_still_gets_a_label() {
     assert_eq!(job_label("", ""), "Untitled job");
 
     let questions = build_questions(&[job(12, "", "Engineer")], &statuses());
-    let Question::Choice { instructions, .. } = &questions["matched_job"] else {
+    let Question::Choice { criteria, .. } = &questions["matched_job"] else {
         panic!("matched_job must be a choice");
     };
-    let label = instructions["options"]["job_12"].as_str().unwrap();
+    let label = &criteria["job_12"];
     assert!(label.contains("Engineer"));
 }
 

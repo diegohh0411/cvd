@@ -62,51 +62,69 @@ fn status_key(id: i64) -> String {
     format!("status_{id}")
 }
 
-fn choice_instructions(question: &str, options: &BTreeMap<String, String>) -> Value {
-    json!({ "question": question, "options": options })
+/// What each status means for an email, keyed by lowercase status name.
+/// Statuses are user-editable, so unknown names are sent undescribed.
+fn status_hint(name: &str) -> Option<&'static str> {
+    match name.trim().to_lowercase().as_str() {
+        "bookmarked" | "saved" => Some("Saved, but the user has not applied yet"),
+        "applied" => Some("The user has submitted an application: a confirmation that it was submitted, sent or received, or that it is under review"),
+        "interview" | "interviewing" => Some("The user is invited to, or scheduled for, an interview, call or assessment"),
+        "offer" => Some("The user received a job offer"),
+        "rejected" => Some("The company turned the user down, or the application was closed without an offer"),
+        _ => None,
+    }
 }
 
 pub fn build_questions(jobs: &[JobCtx], statuses: &[JobStatus]) -> BTreeMap<String, Question> {
-    let mut job_options: BTreeMap<String, String> = jobs
+    let mut job_criteria: BTreeMap<String, String> = jobs
         .iter()
         .map(|j| (job_key(j.id), job_label(&j.company, &j.title)))
         .collect();
-    job_options.insert(NO_MATCH_KEY.to_string(), "No matching job".to_string());
+    job_criteria.insert(
+        NO_MATCH_KEY.to_string(),
+        "None of the listed jobs".to_string(),
+    );
 
-    let status_options: BTreeMap<String, String> = statuses
+    let status_criteria: BTreeMap<String, String> = statuses
         .iter()
-        .map(|s| (status_key(s.id), s.name.clone()))
+        .map(|s| {
+            let desc = match status_hint(&s.name) {
+                Some(hint) => format!("{}: {hint}", s.name),
+                None => s.name.clone(),
+            };
+            (status_key(s.id), desc)
+        })
         .collect();
 
     let mut questions = BTreeMap::new();
     questions.insert(
         JOB_RELATED_KEY.to_string(),
         Question::Noul {
-            instructions: "Is this email about a job application, interview, offer, rejection or recruiter contact?".into(),
+            instructions: "The email concerns the user's own job search: an application confirmation (including automated ones from applicant-tracking systems), an interview, an assessment, an offer, a rejection, or recruiter contact. Newsletters, job alerts and marketing do not count.".into(),
         },
     );
     questions.insert(
         MATCHED_JOB_KEY.to_string(),
         Question::Choice {
-            instructions: choice_instructions("Which job does this email refer to?", &job_options),
-            options: job_options.keys().cloned().collect(),
+            instructions:
+                "Which job in `jobs` does the email refer to? Match on company and role title."
+                    .into(),
+            options: job_criteria.keys().cloned().collect(),
+            criteria: job_criteria,
         },
     );
     questions.insert(
         STATUS_CHANGED_KEY.to_string(),
         Question::Noul {
-            instructions: "Does this email change the application status of the job it refers to?"
-                .into(),
+            instructions: "The email shows the matched job has moved past the `status` it has in `jobs`. For example, an application-submitted confirmation for a job that is still bookmarked, an interview invitation, an offer or a rejection. It does not hold if the email only repeats what that status already says.".into(),
         },
     );
     questions.insert(
         NEW_STATUS_KEY.to_string(),
         Question::Choice {
-            instructions: choice_instructions(
-                "What is the job's status after this email?",
-                &status_options,
-            ),
-            options: status_options.keys().cloned().collect(),
+            instructions: "What is the status of the matched job after this email?".into(),
+            options: status_criteria.keys().cloned().collect(),
+            criteria: status_criteria,
         },
     );
     questions

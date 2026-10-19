@@ -1,22 +1,53 @@
 use super::field::{FieldKind, FieldSpec, FillAction};
-use super::window::{facts_matching, is_supported_url, plan, Resume, Session};
+use super::window::{
+    facts_matching, host_decision, is_known_ats, is_openable_url, plan, HostDecision, Resume,
+    Session,
+};
 use super::Fact;
 
 #[test]
-fn supported_hosts() {
-    assert!(is_supported_url(
+fn opens_any_https_page() {
+    assert!(is_openable_url(
         "https://job-boards.greenhouse.io/anthropic/jobs/1"
     ));
-    assert!(is_supported_url("https://boards.greenhouse.io/acme/jobs/1"));
-    assert!(is_supported_url("https://jobs.lever.co/acme/123/apply"));
-    assert!(is_supported_url(
+    assert!(is_openable_url(
+        "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/x/apply"
+    ));
+    assert!(is_openable_url("https://acme.com/careers?gh_jid=1"));
+    assert!(!is_openable_url("http://acme.com/careers"));
+    assert!(!is_openable_url("file:///etc/passwd"));
+    assert!(!is_openable_url("not a url"));
+}
+
+#[test]
+fn known_ats_hosts() {
+    assert!(is_known_ats("https://boards.greenhouse.io/acme/jobs/1"));
+    assert!(is_known_ats("https://jobs.lever.co/acme/123/apply"));
+    assert!(is_known_ats(
         "https://jobs.ashbyhq.com/acme/123/application"
     ));
-    assert!(!is_supported_url("http://boards.greenhouse.io/acme"));
-    assert!(!is_supported_url("https://greenhouse.io.evil.com/x"));
-    assert!(!is_supported_url("https://evilgreenhouse.io/x"));
-    assert!(!is_supported_url("https://acme.com/careers?gh_jid=1"));
-    assert!(!is_supported_url("not a url"));
+    assert!(!is_known_ats("http://boards.greenhouse.io/acme"));
+    assert!(!is_known_ats("https://greenhouse.io.evil.com/x"));
+    assert!(!is_known_ats("https://evilgreenhouse.io/x"));
+    assert!(!is_known_ats("https://acme.com/careers"));
+}
+
+#[test]
+fn hosts_need_consent_unless_known_or_allowed() {
+    let mut s = Session::default();
+    assert_eq!(
+        host_decision(&s, "job-boards.greenhouse.io"),
+        HostDecision::Allowed
+    );
+    assert_eq!(host_decision(&s, "acme.com"), HostDecision::Ask);
+    s.allowed.insert("acme.com".into());
+    assert_eq!(host_decision(&s, "acme.com"), HostDecision::Allowed);
+    assert_eq!(host_decision(&s, "ads.example"), HostDecision::Ask);
+    s.denied.insert("ads.example".into());
+    assert_eq!(host_decision(&s, "ads.example"), HostDecision::Denied);
+    // A refusal wins even over the known list.
+    s.denied.insert("jobs.lever.co".into());
+    assert_eq!(host_decision(&s, "jobs.lever.co"), HostDecision::Denied);
 }
 
 fn field(key: &str, kind: FieldKind, label: &str) -> FieldSpec {

@@ -62,6 +62,7 @@ fn wire_request_matches_spike() {
             options: ["backend", "frontend", "data_ml", "other"]
                 .map(String::from)
                 .to_vec(),
+            criteria: BTreeMap::new(),
         },
     );
     qs.insert(

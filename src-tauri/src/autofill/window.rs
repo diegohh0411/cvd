@@ -1,13 +1,14 @@
 //! The apply window and the one command its remote page may call.
 //! `capabilities/apply.json` grants `autofill_bridge` to `apply-*` windows on
-//! the hosts in [`SUPPORTED_HOSTS`]; the handler re-checks both.
+//! any HTTPS page. Fills only reach hosts the user agreed to (see
+//! [`host_decision`]); docs/superpowers/specs/2026-10-19-universal-autofill-design.md.
 
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use super::field::{FieldKind, FieldSpec, FillAction, MAX_FIELDS};
@@ -25,32 +26,64 @@ const LABEL_PREFIX: &str = "apply-";
 const MAX_MESSAGE_BYTES: usize = 400_000;
 const MAX_RESUME_BYTES: u64 = 10 * 1024 * 1024;
 
-/// Hosts the bridge works on. Keep in sync with `capabilities/apply.json`,
-/// which Tauri fixes at build time.
-pub const SUPPORTED_HOSTS: &[&str] = &["greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com"];
+/// ATS hosts cvd was tuned on. They fill without asking; any other host asks
+/// the user first.
+pub const KNOWN_ATS_HOSTS: &[&str] = &["greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com"];
 
-pub fn is_supported_url(url: &str) -> bool {
-    let Ok(u) = tauri::Url::parse(url) else {
-        return false;
-    };
+/// The host of an `https` URL, lowercased. `None` for anything else.
+pub fn https_host(url: &str) -> Option<String> {
+    let u = tauri::Url::parse(url).ok()?;
     if u.scheme() != "https" {
-        return false;
+        return None;
     }
-    let host = u.host_str().unwrap_or("");
-    SUPPORTED_HOSTS
+    u.host_str()
+        .filter(|h| !h.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
+/// Any HTTPS page can open in the apply window.
+pub fn is_openable_url(url: &str) -> bool {
+    https_host(url).is_some()
+}
+
+pub fn is_known_ats_host(host: &str) -> bool {
+    KNOWN_ATS_HOSTS
         .iter()
         .any(|h| host == *h || host.ends_with(&format!(".{h}")))
+}
+
+#[cfg(test)]
+pub fn is_known_ats(url: &str) -> bool {
+    https_host(url).is_some_and(|h| is_known_ats_host(&h))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum HostDecision {
+    Allowed,
+    Denied,
+    Ask,
+}
+
+/// Whether `host` may receive fills in this window.
+pub fn host_decision(session: &Session, host: &str) -> HostDecision {
+    if session.denied.contains(host) {
+        HostDecision::Denied
+    } else if session.allowed.contains(host) || is_known_ats_host(host) {
+        HostDecision::Allowed
+    } else {
+        HostDecision::Ask
+    }
 }
 
 fn job_id_of(label: &str) -> Option<i64> {
     label.strip_prefix(LABEL_PREFIX)?.parse().ok()
 }
 
-/// Opens (or focuses) the apply window for a job. `false` means the posting's
-/// host isn't supported and the caller should open it in the browser instead.
+/// Opens (or focuses) the apply window for a job. `false` means the posting
+/// isn't an HTTPS page and the caller should open it in the browser instead.
 pub async fn start_apply(app: &AppHandle, st: &AppState, job_id: i64) -> Result<bool, AppError> {
     let job = crate::commands::get_job(st, job_id).await?;
-    if !is_supported_url(&job.url) {
+    if !is_openable_url(&job.url) {
         return Ok(false);
     }
     let title = match (job.title.trim(), job.company.trim()) {
@@ -70,6 +103,10 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
     }
     if let Some(sessions) = app.try_state::<Sessions>() {
         sessions.reset(&label);
+        // Opening the posting is consent for its own host.
+        let mut session = Session::default();
+        session.allowed.extend(https_host(url));
+        sessions.put(&label, session);
     }
     let parsed = url
         .parse()
@@ -77,7 +114,7 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
     WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
         .title(title)
         .inner_size(1100.0, 900.0)
-        .initialization_script(INIT_SCRIPT)
+        .initialization_script_for_all_frames(INIT_SCRIPT)
         .build()
         .map_err(|e| AppError::Io(e.to_string()))?;
     Ok(())
@@ -126,6 +163,12 @@ pub struct Session {
     /// Fields cvd filled, by key, with the fact it used.
     pub filled: HashMap<String, &'static str>,
     pub submitted: bool,
+    /// Hosts the user agreed may receive fills (plus the posting's own host).
+    pub allowed: BTreeSet<String>,
+    /// Hosts the user declined; cvd stays quiet there.
+    pub denied: BTreeSet<String>,
+    /// A consent dialog is open for this window.
+    pub asking: bool,
 }
 
 /// Sessions by window label.
@@ -279,18 +322,40 @@ pub async fn handle_bridge(
     let job_id =
         job_id_of(&label).ok_or_else(|| AppError::NotFound("Not an apply window".into()))?;
     let url = window.url().map_err(|e| AppError::Io(e.to_string()))?;
-    if !is_supported_url(url.as_str()) {
-        return Err(AppError::NotFound(
-            "Autofill is not available on this page".into(),
-        ));
-    }
     if msg.to_string().len() > MAX_MESSAGE_BYTES {
         return Err(AppError::Io("Message too large".into()));
     }
+    // The top page, then the frame the fields live in (set by the top frame's
+    // relay from the browser's `event.origin`). Both must be allowed.
+    let top = https_host(url.as_str())
+        .ok_or_else(|| AppError::NotFound("Autofill only works on HTTPS pages".into()))?;
+    let mut hosts = vec![top];
+    if let Some(frame) = msg
+        .get("origin")
+        .and_then(Value::as_str)
+        .and_then(https_host)
+    {
+        if !hosts.contains(&frame) {
+            hosts.push(frame);
+        }
+    }
+    let all_allowed = |s: &Session| {
+        hosts
+            .iter()
+            .all(|h| host_decision(s, h) == HostDecision::Allowed)
+    };
     let fields = match serde_json::from_value(msg) {
-        Ok(PageMessage::Fields { fields }) => fields,
+        Ok(PageMessage::Fields { fields }) => {
+            if !consent(window, sessions, &label, &hosts).await {
+                return Ok(());
+            }
+            fields
+        }
         Ok(PageMessage::Rejected { key, value }) => {
             let mut session = sessions.get(&label);
+            if !all_allowed(&session) {
+                return Ok(());
+            }
             let tries = {
                 let ex = session.excluded.entry(key.clone()).or_default();
                 ex.push(value);
@@ -308,6 +373,9 @@ pub async fn handle_bridge(
         }
         Ok(PageMessage::UserEdit { key, value }) => {
             let session = sessions.get(&label);
+            if !all_allowed(&session) {
+                return Ok(());
+            }
             if let Some(field) = session.fields.get(&key) {
                 let facts = crate::commands::apply_facts(st).await?;
                 learn(
@@ -391,6 +459,64 @@ pub async fn handle_bridge(
         }
     }
     send(window, &actions)
+}
+
+/// Asks the user, in a native dialog the page can't draw or answer, before a
+/// new host receives any profile data. `false` means don't fill (declined, or
+/// a dialog is already open).
+async fn consent(
+    window: &WebviewWindow,
+    sessions: &Sessions,
+    label: &str,
+    hosts: &[String],
+) -> bool {
+    for host in hosts {
+        let session = sessions.get(label);
+        match host_decision(&session, host) {
+            HostDecision::Allowed => continue,
+            HostDecision::Denied => return false,
+            HostDecision::Ask if session.asking => return false,
+            HostDecision::Ask => {}
+        }
+        let mut session = session;
+        session.asking = true;
+        sessions.put(label, session);
+        let ok = ask_host(window, host).await;
+        let mut session = sessions.get(label);
+        session.asking = false;
+        if ok {
+            session.allowed.insert(host.clone());
+        } else {
+            session.denied.insert(host.clone());
+        }
+        sessions.put(label, session);
+        if !ok {
+            let _ = notice(
+                window,
+                &format!("Autofill is off on {host}. Reopen the application to change that."),
+            );
+            return false;
+        }
+    }
+    true
+}
+
+async fn ask_host(window: &WebviewWindow, host: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .dialog()
+        .message(format!(
+            "{host} is asking for application details. cvd can fill this form with your profile (name, contact details, links, CV). Only allow this on sites you trust."
+        ))
+        .title(format!("Autofill on {host}?"))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom("Fill this form".into(), "Not now".into()))
+        .parent(window)
+        .show(move |ok| {
+            let _ = tx.send(ok);
+        });
+    rx.await.unwrap_or(false)
 }
 
 #[cfg(debug_assertions)]

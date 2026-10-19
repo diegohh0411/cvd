@@ -17,9 +17,19 @@ fn wire_question(q: &Question) -> Value {
         Question::Choice {
             instructions,
             options,
+            criteria,
         } => {
-            let criteria: Map<String, Value> =
-                options.iter().map(|o| (o.clone(), Value::Null)).collect();
+            let criteria: Map<String, Value> = options
+                .iter()
+                .map(|o| {
+                    (
+                        o.clone(),
+                        criteria
+                            .get(o)
+                            .map_or(Value::Null, |d| Value::String(d.clone())),
+                    )
+                })
+                .collect();
             json!({"type": "choice", "instructions": instructions, "criteria": criteria})
         }
         Question::Score {

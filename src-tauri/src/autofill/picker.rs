@@ -186,6 +186,7 @@ fn choice(
             "already_filled": already,
         }),
         options: options.keys().cloned().collect(),
+        criteria: BTreeMap::new(),
     }
 }
 

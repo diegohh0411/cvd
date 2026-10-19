@@ -50,6 +50,7 @@ fn oracle(wants: &[(&str, &str, &str, f64)]) -> FakeDecisionEngine {
         let Question::Choice {
             instructions,
             options,
+            ..
         } = q
         else {
             panic!("only choice questions")
