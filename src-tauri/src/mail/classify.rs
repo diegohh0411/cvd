@@ -102,7 +102,10 @@ pub fn build_questions(jobs: &[JobCtx], statuses: &[JobStatus]) -> BTreeMap<Stri
     questions.insert(
         NEW_STATUS_KEY.to_string(),
         Question::Choice {
-            instructions: choice_instructions("What is the job's status after this email?", &status_options),
+            instructions: choice_instructions(
+                "What is the job's status after this email?",
+                &status_options,
+            ),
             options: status_options.keys().cloned().collect(),
         },
     );
@@ -156,7 +159,9 @@ fn answer<'a>(answers: &'a BTreeMap<String, Answer>, key: &str) -> Result<&'a An
 fn yes_probability(answers: &BTreeMap<String, Answer>, key: &str) -> Result<f64, EngineError> {
     match answer(answers, key)? {
         Answer::Noul { p } => Ok(*p),
-        _ => Err(EngineError::BadResponse(format!("expected a yes/no answer for {key}"))),
+        _ => Err(EngineError::BadResponse(format!(
+            "expected a yes/no answer for {key}"
+        ))),
     }
 }
 
@@ -165,13 +170,21 @@ fn choice_answer<'a>(
     key: &str,
 ) -> Result<(&'a str, &'a BTreeMap<String, f64>), EngineError> {
     match answer(answers, key)? {
-        Answer::Choice { choice, probabilities } => Ok((choice.as_str(), probabilities)),
-        _ => Err(EngineError::BadResponse(format!("expected a choice for {key}"))),
+        Answer::Choice {
+            choice,
+            probabilities,
+        } => Ok((choice.as_str(), probabilities)),
+        _ => Err(EngineError::BadResponse(format!(
+            "expected a choice for {key}"
+        ))),
     }
 }
 
 /// Unknown option keys are rejected, never mapped to a nearby job or status.
-fn matched_job(answers: &BTreeMap<String, Answer>, jobs: &[JobCtx]) -> Result<Option<i64>, EngineError> {
+fn matched_job(
+    answers: &BTreeMap<String, Answer>,
+    jobs: &[JobCtx],
+) -> Result<Option<i64>, EngineError> {
     let (choice, _) = choice_answer(answers, MATCHED_JOB_KEY)?;
     if choice == NO_MATCH_KEY {
         return Ok(None);
@@ -183,7 +196,10 @@ fn matched_job(answers: &BTreeMap<String, Answer>, jobs: &[JobCtx]) -> Result<Op
 }
 
 /// Confidence is the probability the engine gave the chosen status.
-fn new_status(answers: &BTreeMap<String, Answer>, statuses: &[JobStatus]) -> Result<(i64, f64), EngineError> {
+fn new_status(
+    answers: &BTreeMap<String, Answer>,
+    statuses: &[JobStatus],
+) -> Result<(i64, f64), EngineError> {
     let (choice, probabilities) = choice_answer(answers, NEW_STATUS_KEY)?;
     let status = statuses
         .iter()

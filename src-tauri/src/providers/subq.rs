@@ -30,8 +30,15 @@ pub struct SubQProvider {
 
 impl SubQProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("reqwest client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("reqwest client");
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key,
+            http,
+        }
     }
 
     async fn get(&self, path: &str) -> Result<Value, ProviderError> {
@@ -49,7 +56,9 @@ impl SubQProvider {
         if !status.is_success() {
             return Err(ProviderError::BadResponse(format!("HTTP {status}")));
         }
-        resp.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))
+        resp.json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))
     }
 
     /// Checks the key against `/v1/models`, which rejects bad keys with 401.
@@ -95,12 +104,19 @@ impl Provider for SubQProvider {
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        let engine = HttpSystemOneEngine::new(SUBQ_NAME, self.base_url.clone(), self.api_key.clone(), model_id.into())
-            .with_max_questions(SUBQ_MAX_QUESTIONS);
+        let engine = HttpSystemOneEngine::new(
+            SUBQ_NAME,
+            self.base_url.clone(),
+            self.api_key.clone(),
+            model_id.into(),
+        )
+        .with_max_questions(SUBQ_MAX_QUESTIONS);
         Ok(Arc::new(engine))
     }
 
     fn chat_endpoint(&self, _model_id: &str) -> Result<ChatEndpoint, ProviderError> {
-        Err(ProviderError::Missing("SubQ Snap only makes decisions; pick an OpenRouter model for company research.".into()))
+        Err(ProviderError::Missing(
+            "SubQ Snap only makes decisions; pick an OpenRouter model for company research.".into(),
+        ))
     }
 }

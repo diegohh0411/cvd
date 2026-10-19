@@ -89,8 +89,12 @@ fn copy_llama_dylibs() {
     }
     // OUT_DIR is target/<profile>/build/<pkg>/out.
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let Some(profile_dir) = out.ancestors().nth(3) else { return };
-    let Ok(entries) = std::fs::read_dir("binaries") else { return };
+    let Some(profile_dir) = out.ancestors().nth(3) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir("binaries") else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "dylib") {

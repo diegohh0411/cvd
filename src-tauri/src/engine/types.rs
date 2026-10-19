@@ -5,16 +5,32 @@ use std::collections::BTreeMap;
 /// question refers to (e.g. `{"entry": {...}, "question": "... `entry` ..."}`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Question {
-    Noul { instructions: Value },
-    Choice { instructions: Value, options: Vec<String> },
-    Score { instructions: Value, legend: BTreeMap<u8, String> },
+    Noul {
+        instructions: Value,
+    },
+    Choice {
+        instructions: Value,
+        options: Vec<String>,
+    },
+    Score {
+        instructions: Value,
+        legend: BTreeMap<u8, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
-    Noul { p: f64 },
-    Choice { choice: String, probabilities: BTreeMap<String, f64> },
-    Score { score: f64, probabilities: BTreeMap<String, f64> },
+    Noul {
+        p: f64,
+    },
+    Choice {
+        choice: String,
+        probabilities: BTreeMap<String, f64>,
+    },
+    Score {
+        score: f64,
+        probabilities: BTreeMap<String, f64>,
+    },
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]

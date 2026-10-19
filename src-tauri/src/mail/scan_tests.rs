@@ -24,7 +24,10 @@ struct FakeMail {
 
 impl FakeMail {
     fn new(headers: Vec<MailHeader>) -> Self {
-        let bodies = headers.iter().map(|h| (h.uid, format!("body of {}", h.uid))).collect();
+        let bodies = headers
+            .iter()
+            .map(|h| (h.uid, format!("body of {}", h.uid)))
+            .collect();
         Self {
             headers,
             bodies,
@@ -82,7 +85,12 @@ fn probs(pairs: &[(&str, f64)]) -> std::collections::BTreeMap<String, f64> {
 async fn seeded() -> (Store, i64, i64, i64) {
     let store = Store::open("sqlite::memory:").await.unwrap();
     let applied = store.find_job_status("Applied").await.unwrap().unwrap().id;
-    let interviewing = store.find_job_status("Interviewing").await.unwrap().unwrap().id;
+    let interviewing = store
+        .find_job_status("Interviewing")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
     let job = store
         .create_jd("Engineer", "Acme", "raw", "", Some(applied))
         .await
@@ -91,7 +99,13 @@ async fn seeded() -> (Store, i64, i64, i64) {
 }
 
 /// Every question answered from fixed values. `job` and `status` are option keys.
-fn scripted(job_related: f64, job: String, status_changed: f64, status: String, confidence: f64) -> FakeDecisionEngine {
+fn scripted(
+    job_related: f64,
+    job: String,
+    status_changed: f64,
+    status: String,
+    confidence: f64,
+) -> FakeDecisionEngine {
     FakeDecisionEngine::new(move |_, key, _| match key {
         "job_related" => Answer::Noul { p: job_related },
         "matched_job" => Answer::Choice {
@@ -185,7 +199,9 @@ async fn skips_processed_messages_without_fetching_bodies() {
         .unwrap();
     let mail = FakeMail::new(vec![header(1, "<a>"), header(2, "<b>")]);
 
-    run(&store, &mail, &ignoring(), &unreachable_chat()).await.unwrap();
+    run(&store, &mail, &ignoring(), &unreachable_chat())
+        .await
+        .unwrap();
 
     assert_eq!(mail.fetched(), vec![2]);
 }
@@ -195,7 +211,9 @@ async fn ignored_email_is_recorded_without_chat_call() {
     let (store, _, _, _) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>")]);
 
-    let summary = run(&store, &mail, &ignoring(), &unreachable_chat()).await.unwrap();
+    let summary = run(&store, &mail, &ignoring(), &unreachable_chat())
+        .await
+        .unwrap();
 
     assert_eq!(summary.checked, 1);
     assert_eq!(summary.job_related, 0);
@@ -210,13 +228,22 @@ async fn applied_email_updates_job_status() {
     let chat = chat_endpoint(&server).await;
     let (store, job, applied, interviewing) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>")]);
-    let engine = scripted(0.95, format!("job_{job}"), 0.95, format!("status_{interviewing}"), 0.9);
+    let engine = scripted(
+        0.95,
+        format!("job_{job}"),
+        0.95,
+        format!("status_{interviewing}"),
+        0.9,
+    );
 
     let summary = run(&store, &mail, &engine, &chat).await.unwrap();
 
     assert_eq!(summary.applied, 1);
     assert_eq!(summary.failed, 0);
-    assert_eq!(store.get_jd(job).await.unwrap().unwrap().status_id, Some(interviewing));
+    assert_eq!(
+        store.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(interviewing)
+    );
     let row = store.get_processed("<a>").await.unwrap().unwrap();
     assert_eq!(row.outcome, Outcome::Applied);
     assert_eq!(row.previous_status_id, Some(applied));
@@ -230,12 +257,21 @@ async fn pending_email_leaves_job_status_unchanged() {
     let chat = chat_endpoint(&server).await;
     let (store, job, applied, interviewing) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>")]);
-    let engine = scripted(0.95, format!("job_{job}"), 0.6, format!("status_{interviewing}"), 0.9);
+    let engine = scripted(
+        0.95,
+        format!("job_{job}"),
+        0.6,
+        format!("status_{interviewing}"),
+        0.9,
+    );
 
     let summary = run(&store, &mail, &engine, &chat).await.unwrap();
 
     assert_eq!(summary.pending, 1);
-    assert_eq!(store.get_jd(job).await.unwrap().unwrap().status_id, Some(applied));
+    assert_eq!(
+        store.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(applied)
+    );
     let row = store.get_processed("<a>").await.unwrap().unwrap();
     assert_eq!(row.outcome, Outcome::PendingReview);
     assert_eq!(row.suggested_status_id, Some(interviewing));
@@ -248,14 +284,23 @@ async fn no_change_email_gets_summary_and_outcome_no_change() {
     let chat = chat_endpoint(&server).await;
     let (store, job, applied, _) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>")]);
-    let engine = scripted(0.95, format!("job_{job}"), 0.9, format!("status_{applied}"), 0.95);
+    let engine = scripted(
+        0.95,
+        format!("job_{job}"),
+        0.9,
+        format!("status_{applied}"),
+        0.95,
+    );
 
     let summary = run(&store, &mail, &engine, &chat).await.unwrap();
 
     assert_eq!(summary.no_change, 1);
     let row = store.get_processed("<a>").await.unwrap().unwrap();
     assert_eq!(row.outcome, Outcome::NoChange);
-    assert_eq!(row.summary.as_deref(), Some("Your application moved forward."));
+    assert_eq!(
+        row.summary.as_deref(),
+        Some("Your application moved forward.")
+    );
 }
 
 #[tokio::test]
@@ -263,7 +308,13 @@ async fn bad_engine_response_is_retried_next_run() {
     let (store, job, _, interviewing) = seeded().await;
     let mail = FakeMail::new(vec![header(1, "<a>")]);
     // Unknown job option, so classification returns BadResponse.
-    let bad = scripted(0.95, "job_999".into(), 0.95, format!("status_{interviewing}"), 0.9);
+    let bad = scripted(
+        0.95,
+        "job_999".into(),
+        0.95,
+        format!("status_{interviewing}"),
+        0.9,
+    );
 
     let first = run(&store, &mail, &bad, &unreachable_chat()).await.unwrap();
 
@@ -271,8 +322,16 @@ async fn bad_engine_response_is_retried_next_run() {
     assert!(store.get_processed("<a>").await.unwrap().is_none());
 
     let server = MockServer::start().await;
-    let good = scripted(0.95, format!("job_{job}"), 0.95, format!("status_{interviewing}"), 0.9);
-    let second = run(&store, &mail, &good, &chat_endpoint(&server).await).await.unwrap();
+    let good = scripted(
+        0.95,
+        format!("job_{job}"),
+        0.95,
+        format!("status_{interviewing}"),
+        0.9,
+    );
+    let second = run(&store, &mail, &good, &chat_endpoint(&server).await)
+        .await
+        .unwrap();
 
     assert_eq!(second.applied, 1);
     assert!(store.get_processed("<a>").await.unwrap().is_some());
@@ -288,7 +347,10 @@ async fn fatal_engine_error_fails_the_run() {
 
     let result = run(&store, &mail, &engine, &unreachable_chat()).await;
 
-    assert!(matches!(result, Err(AppError::EngineUnavailable(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(AppError::EngineUnavailable(_))),
+        "{result:?}"
+    );
     let run = store.get_scan_run(1).await.unwrap().unwrap();
     assert_eq!(run.status, ScanStatus::Failed);
     assert!(run.error.is_some());
@@ -302,7 +364,10 @@ async fn imap_check_failure_fails_run() {
 
     let result = run(&store, &mail, &ignoring(), &unreachable_chat()).await;
 
-    assert!(matches!(result, Err(AppError::MailUnavailable(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(AppError::MailUnavailable(_))),
+        "{result:?}"
+    );
     let run = store.get_scan_run(1).await.unwrap().unwrap();
     assert_eq!(run.status, ScanStatus::Failed);
 }

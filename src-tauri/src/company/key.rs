@@ -77,7 +77,10 @@ pub fn normalize_name(name: &str) -> String {
 
 /// The posting's host as a company domain, unless it is a job board.
 pub fn domain_from_url(url: &str) -> Option<String> {
-    let host = reqwest::Url::parse(url.trim()).ok()?.host_str()?.to_lowercase();
+    let host = reqwest::Url::parse(url.trim())
+        .ok()?
+        .host_str()?
+        .to_lowercase();
     let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
     (!is_job_board(&host) && host.contains('.')).then_some(host)
 }
@@ -85,5 +88,7 @@ pub fn domain_from_url(url: &str) -> Option<String> {
 /// Hosts that list many companies' postings, so they never identify one.
 pub fn is_job_board(host: &str) -> bool {
     let host = host.trim().trim_start_matches("www.").to_lowercase();
-    JOB_BOARDS.iter().any(|b| host == *b || host.ends_with(&format!(".{b}")))
+    JOB_BOARDS
+        .iter()
+        .any(|b| host == *b || host.ends_with(&format!(".{b}")))
 }

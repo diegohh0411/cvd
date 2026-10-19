@@ -60,13 +60,13 @@ describe('selection model', () => {
     expect(counts(RANKED, SELECTION)).toEqual({ entries: 2, totalEntries: 3, bullets: 3, totalBullets: 6 });
   });
 
-  it('lists bullets in DB order and reorders them without touching positions', () => {
+  it('lists bullets by score and reorders them without touching positions', () => {
     const view = buildView(RANKED, SELECTION, NO_OVERRIDES);
     const entry = view.flatMap((g) => g.entries).find((e) => e.bullets.length > 1)!;
-    const dbOrder = entry.bullets.map((b) => b.id);
+    const defaultOrder = entry.bullets.map((b) => b.id);
     const next = reorderBullets(NO_OVERRIDES, view, entry.id, 0, 1)!;
     const moved = buildView(RANKED, SELECTION, next).flatMap((g) => g.entries).find((e) => e.id === entry.id)!;
-    expect(moved.bullets.map((b) => b.id)).toEqual([dbOrder[1], dbOrder[0], ...dbOrder.slice(2)]);
+    expect(moved.bullets.map((b) => b.id)).toEqual([defaultOrder[1], defaultOrder[0], ...defaultOrder.slice(2)]);
     expect(toOverrides(next)).toContainEqual({ BulletOrder: next.bulletOrder });
   });
 });

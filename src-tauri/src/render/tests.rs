@@ -55,11 +55,17 @@ fn one_page_minimal() {
 
 #[test]
 fn ats_text_extractable() {
-    let bullets = vec!["Reduced build time by half".to_string(), "Mentored four engineers".to_string()];
+    let bullets = vec![
+        "Reduced build time by half".to_string(),
+        "Mentored four engineers".to_string(),
+    ];
     let out = compile(&doc(bullets.clone(), 0)).unwrap();
     let text = squash(&text_of(&out.pdf));
     for b in &bullets {
-        assert!(text.contains(&squash(b)), "missing bullet {b:?} in {text:?}");
+        assert!(
+            text.contains(&squash(b)),
+            "missing bullet {b:?} in {text:?}"
+        );
     }
     assert!(text.contains("Experience"));
     assert!(text.contains("Skills"));
@@ -79,7 +85,11 @@ fn fill_reported() {
     assert!(long.pages >= 2, "pages = {}", long.pages);
     let short = compile(&doc(n_bullets(2), 0)).unwrap();
     assert_eq!(short.pages, 1);
-    assert!(short.fill > 0.0 && short.fill < 0.5, "fill = {}", short.fill);
+    assert!(
+        short.fill > 0.0 && short.fill < 0.5,
+        "fill = {}",
+        short.fill
+    );
 }
 
 #[test]

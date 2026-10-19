@@ -13,7 +13,12 @@ pub struct Fact {
 }
 
 /// Builds every fact that has a value. `today` is `(year, month)`.
-pub fn build_facts(profile: &Profile, entries: &[Entry], defaults: &ApplyDefaults, today: (i32, u32)) -> Vec<Fact> {
+pub fn build_facts(
+    profile: &Profile,
+    entries: &[Entry],
+    defaults: &ApplyDefaults,
+    today: (i32, u32),
+) -> Vec<Fact> {
     let mut out = Vec::new();
     let mut push = |key: &'static str, variants: Vec<String>| {
         let mut v: Vec<String> = Vec::new();
@@ -29,7 +34,11 @@ pub fn build_facts(profile: &Profile, entries: &[Entry], defaults: &ApplyDefault
 
     // Identity. "Diego Hernández Herrera": first token is the first name, the rest the
     // last name, which keeps both Spanish surnames together. Defaults override the split.
-    let full = profile.name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let full = profile
+        .name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let (split_first, split_last) = match full.split_once(' ') {
         Some((f, l)) => (f.to_string(), l.to_string()),
         None => (full.clone(), String::new()),
@@ -86,7 +95,10 @@ pub fn build_facts(profile: &Profile, entries: &[Entry], defaults: &ApplyDefault
     push("website", website);
 
     // Experience.
-    let mut jobs: Vec<&Entry> = entries.iter().filter(|e| e.kind == EntryKind::Experience && !e.archived).collect();
+    let mut jobs: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| e.kind == EntryKind::Experience && !e.archived)
+        .collect();
     jobs.sort_by(|a, b| b.start_date.cmp(&a.start_date));
     if let Some(current) = jobs.iter().find(|e| e.end_date.is_none()) {
         push("current_title", vec![current.title.clone()]);
@@ -102,13 +114,20 @@ pub fn build_facts(profile: &Profile, entries: &[Entry], defaults: &ApplyDefault
     push("willing_to_relocate", yes_no(defaults.willing_to_relocate));
     push("notice_period", vec![defaults.notice_period.clone()]);
     push("earliest_start", vec![defaults.earliest_start.clone()]);
-    push("salary_expectation", vec![defaults.salary_expectation.clone()]);
+    push(
+        "salary_expectation",
+        vec![defaults.salary_expectation.clone()],
+    );
 
     out
 }
 
 fn or(preferred: &str, fallback: &str) -> String {
-    if preferred.trim().is_empty() { fallback.to_string() } else { preferred.trim().to_string() }
+    if preferred.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        preferred.trim().to_string()
+    }
 }
 
 fn yes_no(v: Option<bool>) -> Vec<String> {
@@ -165,7 +184,11 @@ fn phone_variants(raw: &str) -> Vec<String> {
 
 fn host_of(link: &str) -> String {
     let rest = link.split_once("://").map_or(link, |(_, r)| r);
-    rest.split(['/', '?', '#']).next().unwrap_or("").trim_start_matches("www.").to_ascii_lowercase()
+    rest.split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.")
+        .to_ascii_lowercase()
 }
 
 /// URL fields usually reject a bare host, so the `https://` form comes first.

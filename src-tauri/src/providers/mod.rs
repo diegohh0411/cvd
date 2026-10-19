@@ -32,8 +32,14 @@ pub struct ModelRef {
 impl ModelRef {
     pub fn parse(s: &str) -> ModelRef {
         match s.split_once(':') {
-            Some((provider, id)) => ModelRef { provider: provider.into(), id: id.into() },
-            None => ModelRef { provider: LOCAL.into(), id: s.into() },
+            Some((provider, id)) => ModelRef {
+                provider: provider.into(),
+                id: id.into(),
+            },
+            None => ModelRef {
+                provider: LOCAL.into(),
+                id: s.into(),
+            },
         }
     }
 

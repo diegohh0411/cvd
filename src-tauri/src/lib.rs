@@ -1,7 +1,7 @@
 mod autofill;
 mod commands;
-mod job_search;
 mod company;
+mod job_search;
 #[allow(dead_code)]
 mod mail;
 // Some items in these modules are only used by tests or by later plans.
@@ -9,17 +9,17 @@ mod mail;
 mod engine;
 #[allow(dead_code)]
 mod matcher;
+pub mod mcp;
 #[allow(dead_code)]
 mod models;
 mod providers;
 #[allow(dead_code)]
 mod render;
 mod search;
-mod web;
 mod state;
 #[allow(dead_code)]
 pub mod store;
-pub mod mcp;
+mod web;
 
 use std::sync::Arc;
 

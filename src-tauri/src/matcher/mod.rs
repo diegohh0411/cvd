@@ -4,9 +4,7 @@ use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::{
-    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question,
-};
+use crate::engine::{decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question};
 use crate::store::types::*;
 use crate::store::{Store, StoreError};
 
@@ -31,10 +29,15 @@ impl Default for MatchConfig {
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
     /// Waiting for company research (see `company://research` for its steps).
-    Researching { company_id: i64 },
+    Researching {
+        company_id: i64,
+    },
     ReadingJd,
     /// `done`/`total` count questions across the run's batched requests.
-    Scoring { done: usize, total: usize },
+    Scoring {
+        done: usize,
+        total: usize,
+    },
     Done,
 }
 
@@ -88,7 +91,17 @@ pub async fn run_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, jd_id, cfg, company, &cancel, &on_progress).await,
+        execute(
+            store,
+            engine,
+            run_id,
+            jd_id,
+            cfg,
+            company,
+            &cancel,
+            &on_progress,
+        )
+        .await,
     )
     .await
 }
@@ -108,7 +121,17 @@ pub async fn resume_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, run.jd_id, cfg, company, &cancel, &on_progress).await,
+        execute(
+            store,
+            engine,
+            run_id,
+            run.jd_id,
+            cfg,
+            company,
+            &cancel,
+            &on_progress,
+        )
+        .await,
     )
     .await
 }
@@ -411,7 +434,12 @@ pub fn rank(store_scores: &[ScoreRow], entries: &[Entry], skills: &[Skill]) -> R
     let mut tags: Vec<(String, f64)> = store_scores
         .iter()
         .filter(|r| r.target_type == TargetType::Meta && r.score >= TAG_THRESHOLD)
-        .filter_map(|r| Some((r.question.strip_prefix(questions::TAG_PREFIX)?.to_string(), r.score)))
+        .filter_map(|r| {
+            Some((
+                r.question.strip_prefix(questions::TAG_PREFIX)?.to_string(),
+                r.score,
+            ))
+        })
         .collect();
     tags.sort_by(|a, b| desc(&a.1, &b.1));
 

@@ -20,15 +20,31 @@ pub struct ExaSearch {
 
 impl ExaSearch {
     pub fn new(base_url: String, api_key: String) -> Self {
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("reqwest client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("reqwest client");
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key,
+            http,
+        }
     }
 }
 
 fn to_hit(r: &Value) -> Option<SearchHit> {
-    let s = |k: &str| r.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    let s = |k: &str| {
+        r.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let url = s("url");
-    (!url.is_empty()).then(|| SearchHit { title: s("title"), snippet: s("text"), url })
+    (!url.is_empty()).then(|| SearchHit {
+        title: s("title"),
+        snippet: s("text"),
+        url,
+    })
 }
 
 #[async_trait]
@@ -57,12 +73,17 @@ impl SearchProvider for ExaSearch {
             return Err(ProviderError::KeyRejected("Exa"));
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(ProviderError::Network("Exa rate limit reached; try again later".into()));
+            return Err(ProviderError::Network(
+                "Exa rate limit reached; try again later".into(),
+            ));
         }
         if !status.is_success() {
             return Err(ProviderError::BadResponse(format!("HTTP {status}")));
         }
-        let v: Value = resp.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))?;
+        let v: Value = resp
+            .json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))?;
         let results = v
             .get("results")
             .and_then(Value::as_array)

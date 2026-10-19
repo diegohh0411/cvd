@@ -24,8 +24,15 @@ pub struct TypeSafeProvider {
 
 impl TypeSafeProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("reqwest client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("reqwest client");
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key,
+            http,
+        }
     }
 
     async fn get(&self, path: &str) -> Result<Value, ProviderError> {
@@ -43,7 +50,9 @@ impl TypeSafeProvider {
         if !status.is_success() {
             return Err(ProviderError::BadResponse(format!("HTTP {status}")));
         }
-        resp.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))
+        resp.json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))
     }
 
     /// `GET /v1/models` answers 401 for a bad key.
@@ -92,10 +101,17 @@ impl Provider for TypeSafeProvider {
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        Ok(Arc::new(HttpSystemOneEngine::new(TYPESAFE_NAME, self.base_url.clone(), self.api_key.clone(), model_id.into())))
+        Ok(Arc::new(HttpSystemOneEngine::new(
+            TYPESAFE_NAME,
+            self.base_url.clone(),
+            self.api_key.clone(),
+            model_id.into(),
+        )))
     }
 
     fn chat_endpoint(&self, _model_id: &str) -> Result<ChatEndpoint, ProviderError> {
-        Err(ProviderError::Missing("Jev only makes decisions; pick an OpenRouter model for company research.".into()))
+        Err(ProviderError::Missing(
+            "Jev only makes decisions; pick an OpenRouter model for company research.".into(),
+        ))
     }
 }

@@ -34,7 +34,10 @@ pub async fn summarize(
     });
 
     let mut request = client
-        .post(format!("{}/chat/completions", ep.base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/chat/completions",
+            ep.base_url.trim_end_matches('/')
+        ))
         .json(&body);
     if let Some(key) = &ep.api_key {
         request = request.bearer_auth(key);
@@ -65,7 +68,9 @@ pub async fn summarize(
         .unwrap_or("")
         .trim();
     if text.is_empty() {
-        return Err(AppError::EngineUnavailable("empty summary from chat model".into()));
+        return Err(AppError::EngineUnavailable(
+            "empty summary from chat model".into(),
+        ));
     }
     Ok(text.to_string())
 }

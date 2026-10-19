@@ -55,7 +55,8 @@ fn fixtures() -> Vec<(String, Fixture)> {
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .map(|p| {
             let name = p.file_stem().unwrap().to_string_lossy().into_owned();
-            let f: Fixture = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let f: Fixture = serde_json::from_str(&std::fs::read_to_string(&p).unwrap())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             (name, f)
         })
         .collect();
@@ -72,7 +73,11 @@ fn eval_facts() -> Vec<super::Fact> {
         email: "ana@example.com".into(),
         phone: "+34 612 345 678".into(),
         location: "Madrid, Spain".into(),
-        links: vec!["linkedin.com/in/ana-lopez".into(), "github.com/analopez".into(), "analopez.dev".into()],
+        links: vec![
+            "linkedin.com/in/ana-lopez".into(),
+            "github.com/analopez".into(),
+            "analopez.dev".into(),
+        ],
         summary: String::new(),
     };
     let entry = Entry {
@@ -124,7 +129,13 @@ impl Score {
     }
 
     fn line(&self) -> String {
-        let pct = |n: usize, d: usize| if d == 0 { 0.0 } else { 100.0 * n as f64 / d as f64 };
+        let pct = |n: usize, d: usize| {
+            if d == 0 {
+                0.0
+            } else {
+                100.0 * n as f64 / d as f64
+            }
+        };
         format!(
             "correct {}/{} ({:.0}%), wrong {} ({:.1}% of fills), missed {}, rightly left {}",
             self.correct,
@@ -140,12 +151,30 @@ impl Score {
 
 async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
     let facts = eval_facts();
-    let resume = Resume { name: "cv.pdf".into(), b64: String::new() };
+    let resume = Resume {
+        name: "cv.pdf".into(),
+        b64: String::new(),
+    };
     let mut total = Score::default();
     for (name, fx) in fixtures() {
-        let specs: Vec<FieldSpec> = fx.fields.iter().map(|f| serde_json::from_value(f.spec.clone()).unwrap()).collect();
-        let expected: BTreeMap<String, Vec<Option<String>>> = specs.iter().zip(&fx.fields).map(|(s, f)| (s.key.clone(), f.accepted())).collect();
-        let actions = plan(specs.clone(), &facts, Some(&resume), engine, &mut Session::default()).await;
+        let specs: Vec<FieldSpec> = fx
+            .fields
+            .iter()
+            .map(|f| serde_json::from_value(f.spec.clone()).unwrap())
+            .collect();
+        let expected: BTreeMap<String, Vec<Option<String>>> = specs
+            .iter()
+            .zip(&fx.fields)
+            .map(|(s, f)| (s.key.clone(), f.accepted()))
+            .collect();
+        let actions = plan(
+            specs.clone(),
+            &facts,
+            Some(&resume),
+            engine,
+            &mut Session::default(),
+        )
+        .await;
         let mut score = Score::default();
         for a in &actions {
             let got = match a {
@@ -154,7 +183,11 @@ async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
                 FillAction::NeedsUser { .. } => None,
             };
             let want = expected.get(a.key()).cloned().unwrap_or_else(|| vec![None]);
-            let label = specs.iter().find(|s| s.key == a.key()).map(|s| s.label.as_str()).unwrap_or("");
+            let label = specs
+                .iter()
+                .find(|s| s.key == a.key())
+                .map(|s| s.label.as_str())
+                .unwrap_or("");
             match &got {
                 Some(_) if want.contains(&got) => score.correct += 1,
                 Some(g) => {
@@ -182,7 +215,12 @@ async fn run(engine: Option<&dyn DecisionEngine>) -> Score {
 #[tokio::test]
 async fn eval_rules_only() {
     let s = run(None).await;
-    assert_eq!(s.wrong, 0, "rules must never fill a field wrongly: {}", s.line());
+    assert_eq!(
+        s.wrong,
+        0,
+        "rules must never fill a field wrongly: {}",
+        s.line()
+    );
 }
 
 /// Prints every question and answer when `CVD_EVAL_VERBOSE` is set.
@@ -202,16 +240,40 @@ impl DecisionEngine for Logged {
         let answers = self.0.decide(state, questions).await?;
         if std::env::var("CVD_EVAL_VERBOSE").is_ok() {
             for (id, q) in questions {
-                let crate::engine::Question::Choice { instructions, .. } = q else { continue };
-                let Some(crate::engine::Answer::Choice { choice, probabilities }) = answers.get(id) else { continue };
+                let crate::engine::Question::Choice { instructions, .. } = q else {
+                    continue;
+                };
+                let Some(crate::engine::Answer::Choice {
+                    choice,
+                    probabilities,
+                }) = answers.get(id)
+                else {
+                    continue;
+                };
                 let opts = &instructions["options"];
                 let mut probs: Vec<(String, f64)> = probabilities
                     .iter()
-                    .map(|(k, p)| (opts.get(k).and_then(|v| v.as_str()).unwrap_or(k).to_string(), *p))
+                    .map(|(k, p)| {
+                        (
+                            opts.get(k)
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(k)
+                                .to_string(),
+                            *p,
+                        )
+                    })
                     .collect();
                 probs.sort_by(|a, b| b.1.total_cmp(&a.1));
-                let top: Vec<String> = probs.iter().take(3).map(|(t, p)| format!("{t:.40} {p:.2}")).collect();
-                println!("    Q {:?} -> {choice} | {}", instructions["field"]["label"].as_str().unwrap_or(""), top.join(" ; "));
+                let top: Vec<String> = probs
+                    .iter()
+                    .take(3)
+                    .map(|(t, p)| format!("{t:.40} {p:.2}"))
+                    .collect();
+                println!(
+                    "    Q {:?} -> {choice} | {}",
+                    instructions["field"]["label"].as_str().unwrap_or(""),
+                    top.join(" ; ")
+                );
             }
         }
         Ok(answers)
@@ -224,9 +286,17 @@ async fn eval_live() {
     use crate::providers::{Provider, TypeSafeProvider, TYPESAFE_BASE};
     let key = std::env::var("CVD_EVAL_TYPESAFE_KEY").expect("set CVD_EVAL_TYPESAFE_KEY");
     let model = std::env::var("CVD_EVAL_MODEL").unwrap_or_else(|_| "jev-latest".into());
-    let engine = Logged(TypeSafeProvider::new(TYPESAFE_BASE.into(), key).engine(&model).unwrap());
+    let engine = Logged(
+        TypeSafeProvider::new(TYPESAFE_BASE.into(), key)
+            .engine(&model)
+            .unwrap(),
+    );
     println!("model: typesafe:{model}");
     let s = run(Some(&engine)).await;
     // Release gate from the spec: wrong fills ≤ 2 % of fills.
-    assert!(s.wrong * 50 <= s.correct + s.wrong, "too many wrong fills: {}", s.line());
+    assert!(
+        s.wrong * 50 <= s.correct + s.wrong,
+        "too many wrong fills: {}",
+        s.line()
+    );
 }

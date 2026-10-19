@@ -47,7 +47,7 @@ export interface SectionView {
 export interface OverrideState {
   targets: Record<string, 'include' | 'exclude'>;
   order: number[] | null;
-  /** Bullet ids in render order within their entry; absent = stored (DB) order. */
+  /** Bullet ids in render order within their entry; absent = score order. */
   bulletOrder?: number[] | null;
 }
 
@@ -140,7 +140,7 @@ export function buildView(ranked: Ranked, selection: Selection | null, s: Overri
     const wantEntry = s.targets[key({ Entry: re.entry.id })] === 'include';
     const selectedBullets = new Set(sel?.bullet_ids ?? []);
     const bullets: BulletView[] = [...re.bullets]
-      .sort((a, b) => (bpos.get(a[0].id) ?? Number.MAX_SAFE_INTEGER) - (bpos.get(b[0].id) ?? Number.MAX_SAFE_INTEGER) || a[0].position - b[0].position || a[0].id - b[0].id)
+      .sort((a, b) => (bpos.get(a[0].id) ?? Number.MAX_SAFE_INTEGER) - (bpos.get(b[0].id) ?? Number.MAX_SAFE_INTEGER) || b[1] - a[1] || a[0].position - b[0].position || a[0].id - b[0].id)
       .map(([b, score]) => ({
         id: b.id,
         text: b.text,

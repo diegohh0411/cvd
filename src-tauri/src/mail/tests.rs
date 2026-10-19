@@ -375,7 +375,13 @@ async fn missing_answer_is_bad_response() {
     }
     let email = EmailInput::new("Hi", "x@example.com", "");
 
-    let got = classify(&NoAnswers, &email, &[job(12, "Acme", "Engineer")], &statuses()).await;
+    let got = classify(
+        &NoAnswers,
+        &email,
+        &[job(12, "Acme", "Engineer")],
+        &statuses(),
+    )
+    .await;
 
     assert!(matches!(got, Err(EngineError::BadResponse(_))), "{got:?}");
 }
@@ -446,7 +452,10 @@ async fn empty_content_is_an_error() {
 
     let got = summarize_fixture(&server).await;
 
-    assert!(matches!(got, Err(AppError::EngineUnavailable(_))), "{got:?}");
+    assert!(
+        matches!(got, Err(AppError::EngineUnavailable(_))),
+        "{got:?}"
+    );
 }
 
 #[tokio::test]

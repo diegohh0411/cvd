@@ -1,8 +1,8 @@
-pub mod types;
 mod apply_memory;
 mod companies;
 mod email;
-pub use email::{Outcome, ProcessedEmail, NewProcessed, ScanStatus, ScanRun};
+pub mod types;
+pub use email::{NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanStatus};
 
 #[cfg(test)]
 mod tests;
@@ -447,14 +447,20 @@ impl Store {
             return Err(StoreError::Invalid("skill name must not be empty".into()));
         }
         let mut tx = self.pool.begin().await?;
-        if sqlx::query("SELECT 1 FROM skill WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.is_none() {
-            return Ok(None);
-        }
-        let other: Option<i64> = sqlx::query_scalar("SELECT id FROM skill WHERE name = ? AND id != ?")
-            .bind(name)
+        if sqlx::query("SELECT 1 FROM skill WHERE id = ?")
             .bind(id)
             .fetch_optional(&mut *tx)
-            .await?;
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let other: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM skill WHERE name = ? AND id != ?")
+                .bind(name)
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let target = match other {
             Some(target) => {
                 sqlx::query(
@@ -465,7 +471,10 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
-                sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM skill WHERE id = ?")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
                 target
             }
             None => id,
@@ -486,7 +495,10 @@ impl Store {
 
     /// Deletes a skill and unlinks it from every entry. Returns false when it does not exist.
     pub async fn delete_skill(&self, id: i64) -> Result<bool> {
-        let done = sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&self.pool).await?;
+        let done = sqlx::query("DELETE FROM skill WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(done.rows_affected() > 0)
     }
 
@@ -503,9 +515,11 @@ impl Store {
     ) -> Result<i64> {
         let status_id = match status_id {
             Some(id) => Some(id),
-            None => sqlx::query_scalar("SELECT id FROM job_status ORDER BY position, id LIMIT 1")
-                .fetch_optional(&self.pool)
-                .await?,
+            None => {
+                sqlx::query_scalar("SELECT id FROM job_status ORDER BY position, id LIMIT 1")
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
         };
         Ok(sqlx::query(
             "INSERT INTO job_description (title, company, raw_text, url, status_id) VALUES (?, ?, ?, ?, ?)",
@@ -522,7 +536,12 @@ impl Store {
 
     /// Sets a job's tracking fields; `status_id: None` clears the status.
     /// Returns false when the job does not exist.
-    pub async fn update_jd_tracking(&self, id: i64, status_id: Option<i64>, url: &str) -> Result<bool> {
+    pub async fn update_jd_tracking(
+        &self,
+        id: i64,
+        status_id: Option<i64>,
+        url: &str,
+    ) -> Result<bool> {
         let done = sqlx::query("UPDATE job_description SET status_id = ?, url = ? WHERE id = ?")
             .bind(status_id)
             .bind(url.trim())
@@ -590,7 +609,10 @@ impl Store {
 
     /// Deletes a status; jobs using it lose their status.
     pub async fn delete_job_status(&self, id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM job_status WHERE id = ?").bind(id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM job_status WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -764,7 +786,10 @@ impl Store {
     }
 
     pub async fn delete_secret(&self, provider: &str) -> Result<()> {
-        sqlx::query("DELETE FROM secrets WHERE provider = ?").bind(provider).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM secrets WHERE provider = ?")
+            .bind(provider)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

@@ -25,7 +25,8 @@ pub struct ApplyDefaults {
 impl ApplyDefaults {
     /// A missing or unreadable row reads as empty defaults.
     pub fn from_setting(raw: Option<&str>) -> Self {
-        raw.and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default()
+        raw.and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default()
     }
 
     pub fn trimmed(self) -> Self {

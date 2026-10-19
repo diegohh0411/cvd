@@ -34,7 +34,7 @@ pub enum Override {
     Exclude(Target),
     Order(Vec<i64>),
     /// Bullet ids in the order they should render within their entry; bullets
-    /// not listed follow in stored position order.
+    /// not listed follow in score order.
     BulletOrder(Vec<i64>),
 }
 
@@ -59,7 +59,15 @@ pub fn fit(
     floor: f64,
     overrides: &[Override],
 ) -> Result<FitResult, RenderError> {
-    fit_with(ranked, profile, budget, floor, overrides, &mut super::compile).map(|r| r.0)
+    fit_with(
+        ranked,
+        profile,
+        budget,
+        floor,
+        overrides,
+        &mut super::compile,
+    )
+    .map(|r| r.0)
 }
 
 /// Builds the document for a saved `selection` (render order kept; entries
@@ -71,8 +79,11 @@ pub fn selection_doc(
     style: StyleStep,
 ) -> CvDoc {
     let mut sections: Vec<CvSection> = Vec::new();
-    for heading in [SectionHeading::Experience, SectionHeading::Projects, SectionHeading::Education]
-    {
+    for heading in [
+        SectionHeading::Experience,
+        SectionHeading::Projects,
+        SectionHeading::Education,
+    ] {
         let items: Vec<CvItem> = selection
             .entries
             .iter()
@@ -95,7 +106,12 @@ pub fn selection_doc(
             sections.push(CvSection { heading, items });
         }
     }
-    CvDoc { profile: profile.clone(), sections, skills: selection.skills.clone(), style }
+    CvDoc {
+        profile: profile.clone(),
+        sections,
+        skills: selection.skills.clone(),
+        style,
+    }
 }
 
 /// One entry in the working selection (`idx` into `Ranked.entries`).
@@ -171,13 +187,20 @@ pub(crate) fn fit_with<'c>(
         if bullets.is_empty() {
             continue;
         }
-        let mut chosen: Vec<i64> =
-            bullets.iter().map(|b| b.0).filter(|&b| included(Target::Bullet(b))).collect();
+        let mut chosen: Vec<i64> = bullets
+            .iter()
+            .map(|b| b.0)
+            .filter(|&b| included(Target::Bullet(b)))
+            .collect();
         if chosen.is_empty() && included(Target::Entry(re.entry.id)) {
             chosen.push(bullets[0].0);
         }
         if !chosen.is_empty() {
-            picks.push(Pick { idx, bullets: chosen, pinned: true });
+            picks.push(Pick {
+                idx,
+                bullets: chosen,
+                pinned: true,
+            });
         }
     }
     // Base: the top-scoring eligible entry with its top bullet.
@@ -188,7 +211,11 @@ pub(crate) fn fit_with<'c>(
         match picks.iter_mut().find(|p| p.idx == idx) {
             Some(p) if !p.bullets.contains(&first) => p.bullets.push(first),
             Some(_) => {}
-            None => picks.push(Pick { idx, bullets: vec![first], pinned: false }),
+            None => picks.push(Pick {
+                idx,
+                bullets: vec![first],
+                pinned: false,
+            }),
         }
     }
 
@@ -236,7 +263,11 @@ pub(crate) fn fit_with<'c>(
         let top: Vec<i64> = bullets.iter().take(2).map(|b| b.0).collect();
         for n in (1..=top.len()).rev() {
             let mut next = picks.clone();
-            next.push(Pick { idx, bullets: top[..n].to_vec(), pinned: false });
+            next.push(Pick {
+                idx,
+                bullets: top[..n].to_vec(),
+                pinned: false,
+            });
             if let Ok(c) = f.try_fit(&next)? {
                 picks = next;
                 compiled = c;
@@ -284,7 +315,11 @@ pub(crate) fn fit_with<'c>(
             let top: Vec<i64> = eligible[idx].iter().take(2).map(|b| b.0).collect();
             for n in (1..=top.len()).rev() {
                 let mut next = picks.clone();
-                next.push(Pick { idx, bullets: top[..n].to_vec(), pinned: false });
+                next.push(Pick {
+                    idx,
+                    bullets: top[..n].to_vec(),
+                    pinned: false,
+                });
                 let c = f.compile_at(&next)?;
                 if c.pages <= pages {
                     picks = next;
@@ -295,8 +330,12 @@ pub(crate) fn fit_with<'c>(
         }
     }
 
-    let result =
-        FitResult { selection: f.selection(&picks), style: f.style, compiled, overflow: false };
+    let result = FitResult {
+        selection: f.selection(&picks),
+        style: f.style,
+        compiled,
+        overflow: false,
+    };
     Ok((result, f.compiles))
 }
 
@@ -331,13 +370,20 @@ impl Fitter<'_, '_> {
     }
 
     /// Picks grouped by section; entries in explicit, then library (`sort_hint`),
-    /// then date-desc order; bullets in explicit, then stored position order.
+    /// then date-desc order; bullets in explicit, then score-desc (then stored position) order.
     fn sorted(&self, picks: &[Pick]) -> Vec<(SectionHeading, Vec<Pick>)> {
-        let pos = |e: &Entry| self.order.iter().position(|&id| id == e.id).unwrap_or(usize::MAX);
+        let pos = |e: &Entry| {
+            self.order
+                .iter()
+                .position(|&id| id == e.id)
+                .unwrap_or(usize::MAX)
+        };
         let mut out = Vec::new();
-        for heading in
-            [SectionHeading::Experience, SectionHeading::Projects, SectionHeading::Education]
-        {
+        for heading in [
+            SectionHeading::Experience,
+            SectionHeading::Projects,
+            SectionHeading::Education,
+        ] {
             let mut items: Vec<Pick> = picks
                 .iter()
                 .filter(|p| section_of(self.entry(p).kind) == heading)
@@ -357,11 +403,26 @@ impl Fitter<'_, '_> {
             });
             for p in &mut items {
                 let entry = &self.ranked.entries[p.idx].entry;
-                let bpos =
-                    |id: i64| self.bullet_order.iter().position(|&b| b == id).unwrap_or(usize::MAX);
-                p.bullets.sort_by_key(|id| {
-                    (bpos(*id), entry.bullets.iter().find(|b| b.id == *id).map(|b| b.position))
-                });
+                let bpos = |id: i64| {
+                    self.bullet_order
+                        .iter()
+                        .position(|&b| b == id)
+                        .unwrap_or(usize::MAX)
+                };
+                let ranked_bullets = &self.ranked.entries[p.idx].bullets;
+                let key = |id: i64| {
+                    let score = ranked_bullets
+                        .iter()
+                        .find(|(b, _)| b.id == id)
+                        .map_or(0.0, |b| b.1);
+                    let position = entry
+                        .bullets
+                        .iter()
+                        .find(|b| b.id == id)
+                        .map(|b| b.position);
+                    (bpos(id), std::cmp::Reverse(ordered_float(score)), position)
+                };
+                p.bullets.sort_by_key(|id| key(*id));
             }
             out.push((heading, items));
         }
@@ -394,7 +455,12 @@ impl Fitter<'_, '_> {
                     .collect(),
             })
             .collect();
-        CvDoc { profile: self.profile.clone(), sections, skills: self.skills.clone(), style }
+        CvDoc {
+            profile: self.profile.clone(),
+            sections,
+            skills: self.skills.clone(),
+            style,
+        }
     }
 
     fn selection(&self, picks: &[Pick]) -> Selection {
@@ -408,8 +474,16 @@ impl Fitter<'_, '_> {
                 pinned: p.pinned,
             })
             .collect();
-        Selection { entries, skills: self.skills.clone() }
+        Selection {
+            entries,
+            skills: self.skills.clone(),
+        }
     }
+}
+
+/// Total-order key for a score (scores are finite, non-NaN).
+fn ordered_float(x: f64) -> i64 {
+    (x * 1e6).round() as i64
 }
 
 fn section_of(kind: EntryKind) -> SectionHeading {
@@ -427,10 +501,14 @@ fn dates(e: &Entry) -> String {
 
 /// `2026-08` (or `2026-08-15`) → `Aug 2026`; anything else passes through.
 pub(crate) fn month_year(d: &str) -> String {
-    const MONTHS: [&str; 12] =
-        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let mut parts = d.splitn(3, '-');
-    match (parts.next(), parts.next().and_then(|m| m.parse::<usize>().ok())) {
+    match (
+        parts.next(),
+        parts.next().and_then(|m| m.parse::<usize>().ok()),
+    ) {
         (Some(y), Some(m @ 1..=12)) if y.len() == 4 => format!("{} {y}", MONTHS[m - 1]),
         _ => d.to_string(),
     }

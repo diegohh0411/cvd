@@ -5,8 +5,8 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use typst::foundations::{Dict, IntoValue};
 use typst::layout::{Frame, FrameItem};
-use typst_layout::PagedDocument;
 use typst_as_lib::{TypstEngine, TypstTemplateMainFile};
+use typst_layout::PagedDocument;
 use typst_pdf::PdfOptions;
 
 use crate::store::types::Profile;
@@ -107,7 +107,14 @@ impl StyleStep {
             1 => (10.0, 0.55, 5.0, 11.0),
             _ => (10.0, 0.45, 3.0, 7.0),
         };
-        StyleParams { font_size, leading, gap, section_gap, margin_x: MARGIN_X, margin_y: MARGIN_Y }
+        StyleParams {
+            font_size,
+            leading,
+            gap,
+            section_gap,
+            margin_x: MARGIN_X,
+            margin_y: MARGIN_Y,
+        }
     }
 }
 
@@ -127,7 +134,12 @@ struct TemplateData<'a> {
 
 fn engine() -> &'static TypstEngine<TypstTemplateMainFile> {
     static ENGINE: OnceLock<TypstEngine<TypstTemplateMainFile>> = OnceLock::new();
-    ENGINE.get_or_init(|| TypstEngine::builder().main_file(TEMPLATE).fonts(FONTS).build())
+    ENGINE.get_or_init(|| {
+        TypstEngine::builder()
+            .main_file(TEMPLATE)
+            .fonts(FONTS)
+            .build()
+    })
 }
 
 pub fn compile(doc: &CvDoc) -> Result<Compiled, RenderError> {
@@ -136,7 +148,10 @@ pub fn compile(doc: &CvDoc) -> Result<Compiled, RenderError> {
         sections: doc
             .sections
             .iter()
-            .map(|s| TemplateSection { heading: s.heading.as_str(), items: &s.items })
+            .map(|s| TemplateSection {
+                heading: s.heading.as_str(),
+                items: &s.items,
+            })
             .collect(),
         skills: &doc.skills,
         style: doc.style.params(),
@@ -152,12 +167,19 @@ pub fn compile(doc: &CvDoc) -> Result<Compiled, RenderError> {
     let pdf = typst_pdf::pdf(&document, &PdfOptions::default())
         .map_err(|e| RenderError::Pdf(format!("{e:?}")))?;
 
-    let last = document.pages().last().ok_or_else(|| RenderError::Compile("no pages".into()))?;
+    let last = document
+        .pages()
+        .last()
+        .ok_or_else(|| RenderError::Compile("no pages".into()))?;
     let content_height = last.frame.height().to_pt() - 2.0 * MARGIN_Y;
     let used = max_y(&last.frame) - MARGIN_Y;
     let fill = (used / content_height).clamp(0.0, 1.0) as f32;
 
-    Ok(Compiled { pages: document.pages().len(), fill, pdf })
+    Ok(Compiled {
+        pages: document.pages().len(),
+        fill,
+        pdf,
+    })
 }
 
 /// Lowest y-extent (in pt, from the frame top) of any visible item.

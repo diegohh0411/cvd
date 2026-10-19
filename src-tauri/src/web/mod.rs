@@ -27,7 +27,10 @@ pub enum FetchError {
     #[error("too many or invalid redirects for {0}")]
     Redirect(String),
     #[error("HTTP {status} for {url}")]
-    Status { status: reqwest::StatusCode, url: String },
+    Status {
+        status: reqwest::StatusCode,
+        url: String,
+    },
     #[error("could not read {url}: {reason}")]
     Body { url: String, reason: String },
     #[error("the page has no readable text")]
@@ -45,7 +48,9 @@ fn page_text(html: &str) -> String {
         .and_then(|mut r| r.parse().ok())
         .map(|a| collapse(&a.text_content))
         .filter(|t| !t.is_empty());
-    readable.unwrap_or_else(|| collapse(&html2text::from_read(html.as_bytes(), 120).unwrap_or_default()))
+    readable.unwrap_or_else(|| {
+        collapse(&html2text::from_read(html.as_bytes(), 120).unwrap_or_default())
+    })
 }
 
 fn private_v4(ip: std::net::Ipv4Addr) -> bool {
@@ -67,14 +72,19 @@ fn private_ip(ip: std::net::IpAddr) -> bool {
                 return private_v4(v4);
             }
             let first = v6.segments()[0];
-            v6.is_loopback() || v6.is_unspecified() || (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
         }
     }
 }
 
 /// True when every address the URL's host resolves to is public.
 async fn is_public(url: &reqwest::Url) -> bool {
-    let Some(host) = url.host_str() else { return false };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     let host = host.trim_start_matches('[').trim_end_matches(']');
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         return !private_ip(ip);
@@ -102,7 +112,11 @@ fn no_redirect_client() -> &'static reqwest::Client {
 
 /// Reads a page as readable text, following redirects by hand so each hop is checked.
 /// Longer text is cut to `max_chars` and ends with "…".
-pub async fn fetch_text(url: &str, policy: FetchPolicy, max_chars: usize) -> Result<String, FetchError> {
+pub async fn fetch_text(
+    url: &str,
+    policy: FetchPolicy,
+    max_chars: usize,
+) -> Result<String, FetchError> {
     let mut current = match reqwest::Url::parse(url) {
         Ok(u) if matches!(u.scheme(), "http" | "https") => u,
         _ => return Err(FetchError::Scheme(url.into())),
@@ -114,10 +128,14 @@ pub async fn fetch_text(url: &str, policy: FetchPolicy, max_chars: usize) -> Res
         if !local_ok && !is_public(&current).await {
             return Err(FetchError::Private(current.to_string()));
         }
-        let r = http.get(current.clone()).send().await.map_err(|e| FetchError::Request {
-            url: url.into(),
-            reason: e.to_string(),
-        })?;
+        let r = http
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| FetchError::Request {
+                url: url.into(),
+                reason: e.to_string(),
+            })?;
         if !r.status().is_redirection() {
             break r;
         }
@@ -134,7 +152,10 @@ pub async fn fetch_text(url: &str, policy: FetchPolicy, max_chars: usize) -> Res
         }
     };
     if !resp.status().is_success() {
-        return Err(FetchError::Status { status: resp.status(), url: url.into() });
+        return Err(FetchError::Status {
+            status: resp.status(),
+            url: url.into(),
+        });
     }
     let mut body = Vec::new();
     let mut resp = resp;
@@ -142,7 +163,12 @@ pub async fn fetch_text(url: &str, policy: FetchPolicy, max_chars: usize) -> Res
         match resp.chunk().await {
             Ok(Some(c)) if body.len() < PAGE_BYTES => body.extend_from_slice(&c),
             Ok(_) => break,
-            Err(e) => return Err(FetchError::Body { url: url.into(), reason: e.to_string() }),
+            Err(e) => {
+                return Err(FetchError::Body {
+                    url: url.into(),
+                    reason: e.to_string(),
+                })
+            }
         }
     }
     let text = page_text(&String::from_utf8_lossy(&body));

@@ -62,7 +62,11 @@ fn bind_profile<'q>(
 
 impl Store {
     /// Looks a company up by domain, then normalized name, then alias.
-    pub async fn find_company(&self, domain: Option<&str>, normalized: &str) -> Result<Option<Company>> {
+    pub async fn find_company(
+        &self,
+        domain: Option<&str>,
+        normalized: &str,
+    ) -> Result<Option<Company>> {
         if let Some(d) = domain {
             if let Some(r) = sqlx::query("SELECT * FROM company WHERE domain = ?")
                 .bind(d)
@@ -87,20 +91,29 @@ impl Store {
         r.as_ref().map(company_from_row).transpose()
     }
 
-    pub async fn create_company(&self, name: &str, normalized: &str, domain: Option<&str>) -> Result<Company> {
-        let id = sqlx::query("INSERT INTO company (name, normalized_name, domain) VALUES (?, ?, ?)")
-            .bind(name)
-            .bind(normalized)
-            .bind(domain)
-            .execute(&self.pool)
-            .await?
-            .last_insert_rowid();
+    pub async fn create_company(
+        &self,
+        name: &str,
+        normalized: &str,
+        domain: Option<&str>,
+    ) -> Result<Company> {
+        let id =
+            sqlx::query("INSERT INTO company (name, normalized_name, domain) VALUES (?, ?, ?)")
+                .bind(name)
+                .bind(normalized)
+                .bind(domain)
+                .execute(&self.pool)
+                .await?
+                .last_insert_rowid();
         self.get_company(id).await
     }
 
     /// Errors with `RowNotFound` if it does not exist.
     pub async fn get_company(&self, id: i64) -> Result<Company> {
-        let r = sqlx::query("SELECT * FROM company WHERE id = ?").bind(id).fetch_one(&self.pool).await?;
+        let r = sqlx::query("SELECT * FROM company WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
         company_from_row(&r)
     }
 
@@ -129,7 +142,12 @@ impl Store {
         self.get_company(id).await
     }
 
-    pub async fn mark_research_failed(&self, id: i64, error: &str, retry_after: &str) -> Result<()> {
+    pub async fn mark_research_failed(
+        &self,
+        id: i64,
+        error: &str,
+        retry_after: &str,
+    ) -> Result<()> {
         sqlx::query(
             "UPDATE company SET status = 'failed', fail_count = fail_count + 1, last_error = ?, retry_after = ?
              WHERE id = ?",
@@ -144,17 +162,23 @@ impl Store {
 
     /// A manual edit; keeps `researched_at`, so the TTL still applies.
     pub async fn edit_company(&self, id: i64, profile: &CompanyProfile) -> Result<Company> {
-        let sql = format!("UPDATE company SET {PROFILE_SET}, edited_at = CURRENT_TIMESTAMP WHERE id = ?");
-        bind_profile(sqlx::query(&sql), profile)?.bind(id).execute(&self.pool).await?;
+        let sql =
+            format!("UPDATE company SET {PROFILE_SET}, edited_at = CURRENT_TIMESTAMP WHERE id = ?");
+        bind_profile(sqlx::query(&sql), profile)?
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         self.get_company(id).await
     }
 
     pub async fn add_alias(&self, normalized: &str, company_id: i64) -> Result<()> {
-        sqlx::query("INSERT OR IGNORE INTO company_alias (normalized_name, company_id) VALUES (?, ?)")
-            .bind(normalized)
-            .bind(company_id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO company_alias (normalized_name, company_id) VALUES (?, ?)",
+        )
+        .bind(normalized)
+        .bind(company_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -169,14 +193,23 @@ impl Store {
             "UPDATE company_alias SET company_id = ?1 WHERE company_id = ?2",
             "UPDATE job_description SET company_id = ?1 WHERE company_id = ?2",
         ] {
-            sqlx::query(sql).bind(into).bind(from).execute(&mut *tx).await?;
+            sqlx::query(sql)
+                .bind(into)
+                .bind(from)
+                .execute(&mut *tx)
+                .await?;
         }
-        sqlx::query("DELETE FROM company WHERE id = ?").bind(from).execute(&mut *tx).await?;
-        sqlx::query("INSERT OR IGNORE INTO company_alias (normalized_name, company_id) VALUES (?, ?)")
-            .bind(&name)
-            .bind(into)
+        sqlx::query("DELETE FROM company WHERE id = ?")
+            .bind(from)
             .execute(&mut *tx)
             .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO company_alias (normalized_name, company_id) VALUES (?, ?)",
+        )
+        .bind(&name)
+        .bind(into)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(())
     }

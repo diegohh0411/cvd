@@ -56,14 +56,24 @@ fn ranked(mut entries: Vec<RankedEntry>) -> Ranked {
     entries.sort_by(|a, b| b.score.total_cmp(&a.score));
     Ranked {
         entries,
-        skills: vec![(Skill { id: 1, name: "Rust".into(), category: String::new() }, 0.9)],
+        skills: vec![(
+            Skill {
+                id: 1,
+                name: "Rust".into(),
+                category: String::new(),
+            },
+            0.9,
+        )],
         seniority: String::new(),
         tags: vec![],
     }
 }
 
 fn all_bullets(sel: &Selection) -> Vec<i64> {
-    sel.entries.iter().flat_map(|e| e.bullet_ids.clone()).collect()
+    sel.entries
+        .iter()
+        .flat_map(|e| e.bullet_ids.clone())
+        .collect()
 }
 
 #[test]
@@ -72,9 +82,21 @@ fn selection_doc_keeps_chosen_bullets_in_selection_order() {
     let b = entry(2, 3.0, "2020-01", 2).entry;
     let sel = Selection {
         entries: vec![
-            SelectedEntry { entry_id: 2, bullet_ids: vec![200], pinned: false },
-            SelectedEntry { entry_id: 1, bullet_ids: vec![100, 102], pinned: true },
-            SelectedEntry { entry_id: 99, bullet_ids: vec![1], pinned: false },
+            SelectedEntry {
+                entry_id: 2,
+                bullet_ids: vec![200],
+                pinned: false,
+            },
+            SelectedEntry {
+                entry_id: 1,
+                bullet_ids: vec![100, 102],
+                pinned: true,
+            },
+            SelectedEntry {
+                entry_id: 99,
+                bullet_ids: vec![1],
+                pinned: false,
+            },
         ],
         skills: vec!["Rust".into()],
     };
@@ -86,12 +108,19 @@ fn selection_doc_keeps_chosen_bullets_in_selection_order() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].title, b.title);
     assert_eq!(items[0].bullets, vec![b.bullets[0].text.clone()]);
-    assert_eq!(items[1].bullets, vec![a.bullets[0].text.clone(), a.bullets[2].text.clone()]);
+    assert_eq!(
+        items[1].bullets,
+        vec![a.bullets[0].text.clone(), a.bullets[2].text.clone()]
+    );
 }
 
 #[test]
 fn never_exceeds_budget() {
-    let r = ranked((0..25).map(|i| entry(i + 1, 4.0 - i as f64 * 0.1, &format!("20{:02}-01", i), 5)).collect());
+    let r = ranked(
+        (0..25)
+            .map(|i| entry(i + 1, 4.0 - i as f64 * 0.1, &format!("20{:02}-01", i), 5))
+            .collect(),
+    );
     let out = fit(&r, &profile(), 1, 0.0, &[]).unwrap();
     assert_eq!(out.compiled.pages, 1);
     assert!(!out.overflow);
@@ -110,7 +139,12 @@ fn drops_bullets_before_entries() {
     let kept = all_bullets(&out.selection);
     assert!(kept.len() < 45, "case must overflow");
     let score = |id: i64| {
-        r.entries.iter().flat_map(|e| e.bullets.iter()).find(|b| b.0.id == id).unwrap().1
+        r.entries
+            .iter()
+            .flat_map(|e| e.bullets.iter())
+            .find(|b| b.0.id == id)
+            .unwrap()
+            .1
     };
     let dropped: Vec<i64> = r
         .entries
@@ -122,24 +156,47 @@ fn drops_bullets_before_entries() {
     // are the lowest-scoring extras.
     assert!(dropped.iter().all(|d| d % 100 >= 2), "dropped {dropped:?}");
     let max_dropped = dropped.iter().map(|&d| score(d)).fold(f64::MIN, f64::max);
-    let min_kept_extra =
-        kept.iter().filter(|&&b| b % 100 >= 2).map(|&b| score(b)).fold(f64::MAX, f64::min);
-    assert!(max_dropped <= min_kept_extra, "{max_dropped} > {min_kept_extra}");
+    let min_kept_extra = kept
+        .iter()
+        .filter(|&&b| b % 100 >= 2)
+        .map(|&b| score(b))
+        .fold(f64::MAX, f64::min);
+    assert!(
+        max_dropped <= min_kept_extra,
+        "{max_dropped} > {min_kept_extra}"
+    );
     assert!(out.compiled.pages == 1);
 }
 
 #[test]
 fn min_one_bullet() {
-    let r = ranked((0..12).map(|i| entry(i + 1, 4.0 - i as f64 * 0.2, "2020-01", 3)).collect());
+    let r = ranked(
+        (0..12)
+            .map(|i| entry(i + 1, 4.0 - i as f64 * 0.2, "2020-01", 3))
+            .collect(),
+    );
     let out = fit(&r, &profile(), 1, 0.0, &[]).unwrap();
-    assert!(out.selection.entries.iter().all(|e| !e.bullet_ids.is_empty()));
+    assert!(out
+        .selection
+        .entries
+        .iter()
+        .all(|e| !e.bullet_ids.is_empty()));
 }
 
 #[test]
 fn floor_respected() {
     // Page already full enough, so no below-floor filler is added.
-    let r = ranked(vec![entry(1, 3.5, "2022-01", 1), entry(2, 1.0, "2021-01", 1)]);
-    let mut compile_fn = |_: &CvDoc| Ok(Compiled { pages: 1, fill: 0.8, pdf: vec![] });
+    let r = ranked(vec![
+        entry(1, 3.5, "2022-01", 1),
+        entry(2, 1.0, "2021-01", 1),
+    ]);
+    let mut compile_fn = |_: &CvDoc| {
+        Ok(Compiled {
+            pages: 1,
+            fill: 0.8,
+            pdf: vec![],
+        })
+    };
     let (out, _) = fit_with(&r, &profile(), 1, 2.0, &[], &mut compile_fn).unwrap();
     let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
     assert_eq!(ids, vec![1]);
@@ -147,16 +204,29 @@ fn floor_respected() {
 
 /// Fake compile: each bullet fills 0.2 of a page; over 1.0 spills to page 2.
 fn fill_by_bullets(doc: &CvDoc) -> Result<Compiled, RenderError> {
-    let n: usize = doc.sections.iter().flat_map(|s| &s.items).map(|i| i.bullets.len()).sum();
+    let n: usize = doc
+        .sections
+        .iter()
+        .flat_map(|s| &s.items)
+        .map(|i| i.bullets.len())
+        .sum();
     let used = 0.2 * n as f32;
-    Ok(Compiled { pages: if used <= 1.0 { 1 } else { 2 }, fill: used.min(1.0), pdf: vec![] })
+    Ok(Compiled {
+        pages: if used <= 1.0 { 1 } else { 2 },
+        fill: used.min(1.0),
+        pdf: vec![],
+    })
 }
 
 #[test]
 fn sparse_page_gets_below_floor_filler_volunteer_first() {
     let mut vol = entry(3, 0.5, "2019-01", 2);
     vol.entry.kind = EntryKind::Volunteer;
-    let r = ranked(vec![entry(1, 3.5, "2022-01", 1), entry(2, 1.0, "2021-01", 2), vol]);
+    let r = ranked(vec![
+        entry(1, 3.5, "2022-01", 1),
+        entry(2, 1.0, "2021-01", 2),
+        vol,
+    ]);
     let mut compile_fn = fill_by_bullets;
     let (out, _) = fit_with(&r, &profile(), 1, 2.0, &[], &mut compile_fn).unwrap();
     // Base 0.2 + volunteer 0.4 = 0.6 < 0.75, so entry 2 then lands at 1.0.
@@ -208,6 +278,16 @@ fn library_sort_hint_orders_entries_before_date() {
 }
 
 #[test]
+fn bullets_default_to_score_order() {
+    let mut e = entry(1, 3.0, "2023-01", 3);
+    e.bullets[2].1 = 3.9; // bullet 102 scores highest but sits last in the DB
+    let r = ranked(vec![e]);
+    let inc = |i| Override::Include(Target::Bullet(i));
+    let out = fit(&r, &profile(), 1, 0.0, &[inc(100), inc(101), inc(102)]).unwrap();
+    assert_eq!(all_bullets(&out.selection), vec![102, 100, 101]);
+}
+
+#[test]
 fn bullet_order_override_reorders_bullets() {
     let r = ranked(vec![entry(1, 3.0, "2023-01", 3)]);
     let inc = |i| Override::Include(Target::Bullet(i));
@@ -230,9 +310,18 @@ fn tighten_before_drop() {
         entry(4, 2.5, "2019-01", 1),
     ]);
     let mut compile_fn = |doc: &CvDoc| {
-        let n: usize = doc.sections.iter().flat_map(|s| &s.items).map(|i| i.bullets.len()).sum();
+        let n: usize = doc
+            .sections
+            .iter()
+            .flat_map(|s| &s.items)
+            .map(|i| i.bullets.len())
+            .sum();
         let cap = 3 + doc.style.0 as usize;
-        Ok(Compiled { pages: if n <= cap { 1 } else { 2 }, fill: 0.5, pdf: vec![] })
+        Ok(Compiled {
+            pages: if n <= cap { 1 } else { 2 },
+            fill: 0.5,
+            pdf: vec![],
+        })
     };
     let (out, _) = fit_with(&r, &profile(), 1, 0.0, &[], &mut compile_fn).unwrap();
     assert_eq!(out.selection.entries.len(), 4);
@@ -254,12 +343,22 @@ fn oversized_terminates() {
 
 #[test]
 fn override_exclude_wins() {
-    let r = ranked(vec![entry(1, 3.9, "2022-01", 1), entry(2, 3.5, "2021-01", 1)]);
+    let r = ranked(vec![
+        entry(1, 3.9, "2022-01", 1),
+        entry(2, 3.5, "2021-01", 1),
+    ]);
     let mut compile_fn = |doc: &CvDoc| {
         let n: usize = doc.sections.iter().map(|s| s.items.len()).sum();
-        Ok(Compiled { pages: if n <= 1 { 1 } else { 2 }, fill: 0.5, pdf: vec![] })
+        Ok(Compiled {
+            pages: if n <= 1 { 1 } else { 2 },
+            fill: 0.5,
+            pdf: vec![],
+        })
     };
-    let ov = [Override::Include(Target::Entry(1)), Override::Exclude(Target::Entry(1))];
+    let ov = [
+        Override::Include(Target::Entry(1)),
+        Override::Exclude(Target::Entry(1)),
+    ];
     let (out, _) = fit_with(&r, &profile(), 1, 0.0, &ov, &mut compile_fn).unwrap();
     let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
     assert_eq!(ids, vec![2]);

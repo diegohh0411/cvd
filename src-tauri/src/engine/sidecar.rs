@@ -21,7 +21,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const BATCH: &str = "16384";
 
 pub trait Launcher: Send + Sync {
-    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError>;
+    fn spawn(
+        &self,
+        model: &Path,
+        port: u16,
+        kind: ModelKind,
+    ) -> Result<Box<dyn Child>, EngineError>;
 }
 
 pub trait Child: Send {
@@ -115,7 +120,9 @@ impl LlamaSidecar {
         let mut restarted = false;
         loop {
             if self.shut_down.load(Ordering::SeqCst) {
-                return Err(EngineError::Unavailable("llama-server was shut down".into()));
+                return Err(EngineError::Unavailable(
+                    "llama-server was shut down".into(),
+                ));
             }
             match *slot {
                 Some(p) if self.child_alive() => return Ok(p),
@@ -180,7 +187,10 @@ impl LlamaSidecar {
 
     async fn start(&self) -> Result<u16, Failure> {
         let port = self.pick_port().map_err(Failure::Final)?;
-        let child = self.launcher.spawn(&self.model_path, port, self.kind).map_err(Failure::Final)?;
+        let child = self
+            .launcher
+            .spawn(&self.model_path, port, self.kind)
+            .map_err(Failure::Final)?;
         {
             let mut slot = self.child.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(child);
@@ -188,7 +198,9 @@ impl LlamaSidecar {
                 if let Some(mut c) = slot.take() {
                     c.kill();
                 }
-                return Err(Failure::Final(EngineError::Unavailable("decision engine was shut down".into())));
+                return Err(Failure::Final(EngineError::Unavailable(
+                    "decision engine was shut down".into(),
+                )));
             }
         }
         let url = format!("http://127.0.0.1:{port}/health");
@@ -197,21 +209,35 @@ impl LlamaSidecar {
             if !self.child_alive() {
                 return Err(Failure::Dead("llama-server exited during startup".into()));
             }
-            if let Ok(r) = self.http.get(&url).timeout(Duration::from_secs(2)).send().await {
+            if let Ok(r) = self
+                .http
+                .get(&url)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await
+            {
                 if r.status().is_success() {
                     return Ok(port);
                 }
             }
             if Instant::now() >= deadline {
-                return Err(Failure::Dead("llama-server did not become healthy within 60 s".into()));
+                return Err(Failure::Dead(
+                    "llama-server did not become healthy within 60 s".into(),
+                ));
             }
             tokio::time::sleep(HEALTH_POLL).await;
         }
     }
 
-    async fn attempt(&self, slot: &mut Option<u16>, body: &Value) -> Result<BTreeMap<String, Answer>, Failure> {
+    async fn attempt(
+        &self,
+        slot: &mut Option<u16>,
+        body: &Value,
+    ) -> Result<BTreeMap<String, Answer>, Failure> {
         let port = match *slot {
-            Some(_) if !self.child_alive() => return Err(Failure::Dead("llama-server exited".into())),
+            Some(_) if !self.child_alive() => {
+                return Err(Failure::Dead("llama-server exited".into()))
+            }
             Some(p) => p,
             None => {
                 let p = self.start().await?;
@@ -230,7 +256,9 @@ impl LlamaSidecar {
         let bytes = resp.bytes().await.map_err(transport)?;
         match serde_json::from_slice::<Value>(&bytes) {
             Ok(v) => parse_wire_response(v).map_err(Failure::Final),
-            Err(e) if status.is_success() => Err(Failure::Final(EngineError::BadResponse(format!("invalid JSON: {e}")))),
+            Err(e) if status.is_success() => Err(Failure::Final(EngineError::BadResponse(
+                format!("invalid JSON: {e}"),
+            ))),
             Err(_) => Err(Failure::Final(EngineError::BadResponse(format!(
                 "HTTP {status}: {}",
                 String::from_utf8_lossy(&bytes)
@@ -259,7 +287,9 @@ impl DecisionEngine for LlamaSidecar {
         let mut restarted = false;
         loop {
             if self.shut_down.load(Ordering::SeqCst) {
-                return Err(EngineError::Unavailable("decision engine was shut down".into()));
+                return Err(EngineError::Unavailable(
+                    "decision engine was shut down".into(),
+                ));
             }
             match self.attempt(&mut slot, &body).await {
                 Ok(answers) => return Ok(answers),
@@ -304,9 +334,16 @@ impl Child for TauriChild {
 }
 
 impl Launcher for TauriLauncher {
-    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
+    fn spawn(
+        &self,
+        model: &Path,
+        port: u16,
+        kind: ModelKind,
+    ) -> Result<Box<dyn Child>, EngineError> {
         use tauri_plugin_shell::{process::CommandEvent, ShellExt};
-        let unavailable = |e: tauri_plugin_shell::Error| EngineError::Unavailable(format!("cannot start llama-server: {e}"));
+        let unavailable = |e: tauri_plugin_shell::Error| {
+            EngineError::Unavailable(format!("cannot start llama-server: {e}"))
+        };
         let (mut rx, child) = self
             .0
             .shell()
@@ -327,7 +364,10 @@ impl Launcher for TauriLauncher {
             }
             flag.store(false, Ordering::SeqCst);
         });
-        Ok(Box::new(TauriChild { child: Some(child), alive }))
+        Ok(Box::new(TauriChild {
+            child: Some(child),
+            alive,
+        }))
     }
 }
 

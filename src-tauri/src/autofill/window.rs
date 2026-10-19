@@ -10,13 +10,13 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use super::field::{FieldKind, FillAction, FieldSpec, MAX_FIELDS};
+use super::field::{FieldKind, FieldSpec, FillAction, MAX_FIELDS};
 use super::matcher::{decide_with, is_learnable, normalize, Decision};
 use super::picker::loosely_matches;
 use super::picker::{candidates, pick_all, Pending, Pick};
 use super::Fact;
-use crate::engine::DecisionEngine;
 use crate::commands::AppError;
+use crate::engine::DecisionEngine;
 use crate::state::AppState;
 
 const INIT_SCRIPT: &str = include_str!("inject.js");
@@ -30,12 +30,16 @@ const MAX_RESUME_BYTES: u64 = 10 * 1024 * 1024;
 pub const SUPPORTED_HOSTS: &[&str] = &["greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com"];
 
 pub fn is_supported_url(url: &str) -> bool {
-    let Ok(u) = tauri::Url::parse(url) else { return false };
+    let Ok(u) = tauri::Url::parse(url) else {
+        return false;
+    };
     if u.scheme() != "https" {
         return false;
     }
     let host = u.host_str().unwrap_or("");
-    SUPPORTED_HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}")))
+    SUPPORTED_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")))
 }
 
 fn job_id_of(label: &str) -> Option<i64> {
@@ -67,7 +71,9 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
     if let Some(sessions) = app.try_state::<Sessions>() {
         sessions.reset(&label);
     }
-    let parsed = url.parse().map_err(|_| AppError::NotFound(format!("Not a valid URL: {url}")))?;
+    let parsed = url
+        .parse()
+        .map_err(|_| AppError::NotFound(format!("Not a valid URL: {url}")))?;
     WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
         .title(title)
         .inner_size(1100.0, 900.0)
@@ -80,14 +86,25 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum PageMessage {
-    Fields { fields: Vec<FieldSpec> },
+    Fields {
+        fields: Vec<FieldSpec>,
+    },
     /// The page didn't keep a value cvd set.
-    Rejected { key: String, value: String },
+    Rejected {
+        key: String,
+        value: String,
+    },
     /// The user changed a field. The value is compared to facts, never stored.
-    UserEdit { key: String, value: String },
+    UserEdit {
+        key: String,
+        value: String,
+    },
     /// The page shows an application confirmation after the user submitted.
     Submitted,
-    Status { filled: usize, needs: Vec<Value> },
+    Status {
+        filled: usize,
+        needs: Vec<Value>,
+    },
     #[serde(other)]
     Other,
 }
@@ -129,24 +146,42 @@ pub async fn plan(
 ) -> Vec<FillAction> {
     let mut actions: Vec<Option<FillAction>> = Vec::new();
     let mut pending: Vec<(usize, Pending, String)> = Vec::new();
-    let fields: Vec<FieldSpec> = fields.into_iter().take(MAX_FIELDS).map(FieldSpec::sanitized).filter(|f| !f.key.is_empty()).collect();
+    let fields: Vec<FieldSpec> = fields
+        .into_iter()
+        .take(MAX_FIELDS)
+        .map(FieldSpec::sanitized)
+        .filter(|f| !f.key.is_empty())
+        .collect();
     for f in fields {
         session.fields.insert(f.key.clone(), f.clone());
         let excluded = session.excluded.get(&f.key).cloned().unwrap_or_default();
         let decision = match decide_with(&f, facts, &session.memory) {
             // A value the page rejected goes back to the model with that value excluded.
-            Decision::Fill { value, .. } if excluded.contains(&value) => Decision::Unsure("The page rejected this value".into()),
+            Decision::Fill { value, .. } if excluded.contains(&value) => {
+                Decision::Unsure("The page rejected this value".into())
+            }
             d => d,
         };
         let action = match decision {
             Decision::Fill { fact, value } => {
                 session.already.insert(f.label.clone(), fact);
                 session.filled.insert(f.key.clone(), fact);
-                Some(FillAction::Set { key: f.key, value, fact })
+                Some(FillAction::Set {
+                    key: f.key,
+                    value,
+                    fact,
+                })
             }
             Decision::Resume => Some(match resume {
-                Some(r) => FillAction::File { key: f.key, name: r.name.clone(), b64: r.b64.clone() },
-                None => FillAction::NeedsUser { key: f.key, reason: "Export a CV for this job first, or attach one yourself".into() },
+                Some(r) => FillAction::File {
+                    key: f.key,
+                    name: r.name.clone(),
+                    b64: r.b64.clone(),
+                },
+                None => FillAction::NeedsUser {
+                    key: f.key,
+                    reason: "Export a CV for this job first, or attach one yourself".into(),
+                },
             }),
             Decision::NeedsUser(reason) => Some(FillAction::NeedsUser { key: f.key, reason }),
             Decision::Unsure(reason) => {
@@ -154,7 +189,14 @@ pub async fn plan(
                 if engine.is_none() || cands.is_empty() {
                     Some(FillAction::NeedsUser { key: f.key, reason })
                 } else {
-                    pending.push((actions.len(), Pending { field: f, candidates: cands }, reason));
+                    pending.push((
+                        actions.len(),
+                        Pending {
+                            field: f,
+                            candidates: cands,
+                        },
+                        reason,
+                    ));
                     None
                 }
             }
@@ -163,7 +205,13 @@ pub async fn plan(
     }
 
     if let (Some(engine), false) = (engine, pending.is_empty()) {
-        let batch: Vec<Pending> = pending.iter().map(|(_, p, _)| Pending { field: p.field.clone(), candidates: p.candidates.clone() }).collect();
+        let batch: Vec<Pending> = pending
+            .iter()
+            .map(|(_, p, _)| Pending {
+                field: p.field.clone(),
+                candidates: p.candidates.clone(),
+            })
+            .collect();
         let picks = pick_all(engine, &batch, &session.already).await;
         for (n, (i, p, reason)) in pending.into_iter().enumerate() {
             let key = p.field.key.clone();
@@ -171,11 +219,21 @@ pub async fn plan(
                 Ok(Pick::Chosen(c)) => {
                     session.already.insert(p.field.label.clone(), c.fact);
                     session.filled.insert(key.clone(), c.fact);
-                    FillAction::Set { key, value: c.value.clone(), fact: c.fact }
+                    FillAction::Set {
+                        key,
+                        value: c.value.clone(),
+                        fact: c.fact,
+                    }
                 }
                 Ok(Pick::NoneFits) => FillAction::NeedsUser { key, reason },
-                Ok(Pick::LowConfidence) => FillAction::NeedsUser { key, reason: "Not sure enough to fill this".into() },
-                Err(e) => FillAction::NeedsUser { key, reason: format!("Fast Model unavailable: {e}") },
+                Ok(Pick::LowConfidence) => FillAction::NeedsUser {
+                    key,
+                    reason: "Not sure enough to fill this".into(),
+                },
+                Err(e) => FillAction::NeedsUser {
+                    key,
+                    reason: format!("Fast Model unavailable: {e}"),
+                },
             });
         }
     }
@@ -188,13 +246,20 @@ async fn load_resume(st: &AppState, job_id: i64) -> Option<Resume> {
     for cv in st.store.list_cvs(job_id).await.ok()? {
         let Some(path) = cv.pdf_path else { continue };
         let path = std::path::PathBuf::from(path);
-        let Ok(meta) = tokio::fs::metadata(&path).await else { continue };
+        let Ok(meta) = tokio::fs::metadata(&path).await else {
+            continue;
+        };
         if !meta.is_file() || meta.len() > MAX_RESUME_BYTES {
             continue;
         }
-        let Ok(bytes) = tokio::fs::read(&path).await else { continue };
+        let Ok(bytes) = tokio::fs::read(&path).await else {
+            continue;
+        };
         let name = path.file_name()?.to_string_lossy().into_owned();
-        return Some(Resume { name, b64: base64::engine::general_purpose::STANDARD.encode(bytes) });
+        return Some(Resume {
+            name,
+            b64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        });
     }
     None
 }
@@ -204,12 +269,20 @@ async fn active_engine(st: &AppState) -> Option<Arc<dyn DecisionEngine>> {
     st.engine_for(&model).ok()
 }
 
-pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Sessions, msg: Value) -> Result<(), AppError> {
+pub async fn handle_bridge(
+    window: &WebviewWindow,
+    st: &AppState,
+    sessions: &Sessions,
+    msg: Value,
+) -> Result<(), AppError> {
     let label = window.label().to_string();
-    let job_id = job_id_of(&label).ok_or_else(|| AppError::NotFound("Not an apply window".into()))?;
+    let job_id =
+        job_id_of(&label).ok_or_else(|| AppError::NotFound("Not an apply window".into()))?;
     let url = window.url().map_err(|e| AppError::Io(e.to_string()))?;
     if !is_supported_url(url.as_str()) {
-        return Err(AppError::NotFound("Autofill is not available on this page".into()));
+        return Err(AppError::NotFound(
+            "Autofill is not available on this page".into(),
+        ));
     }
     if msg.to_string().len() > MAX_MESSAGE_BYTES {
         return Err(AppError::Io("Message too large".into()));
@@ -237,7 +310,15 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Ses
             let session = sessions.get(&label);
             if let Some(field) = session.fields.get(&key) {
                 let facts = crate::commands::apply_facts(st).await?;
-                learn(st, field, &value, &facts, session.filled.contains_key(&key), &session.memory).await;
+                learn(
+                    st,
+                    field,
+                    &value,
+                    &facts,
+                    session.filled.contains_key(&key),
+                    &session.memory,
+                )
+                .await;
             }
             return Ok(());
         }
@@ -253,7 +334,11 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Ses
         }
         Ok(PageMessage::Status { filled, needs }) => {
             #[cfg(debug_assertions)]
-            eprintln!("[autofill] status: {filled} filled, {} need the user: {}", needs.len(), Value::from(needs.clone()));
+            eprintln!(
+                "[autofill] status: {filled} filled, {} need the user: {}",
+                needs.len(),
+                Value::from(needs.clone())
+            );
             let _ = (filled, needs);
             return Ok(());
         }
@@ -261,23 +346,48 @@ pub async fn handle_bridge(window: &WebviewWindow, st: &AppState, sessions: &Ses
     };
     #[cfg(debug_assertions)]
     if let Ok(dir) = std::env::var("CVD_AUTOFILL_DUMP") {
-        let file = format!("{dir}/{}-{}.json", url.host_str().unwrap_or("page"), chrono::Local::now().format("%H%M%S%3f"));
-        let _ = std::fs::write(file, serde_json::to_string_pretty(&serde_json::json!({ "url": url.as_str(), "fields": fields_json(&fields) })).unwrap_or_default());
+        let file = format!(
+            "{dir}/{}-{}.json",
+            url.host_str().unwrap_or("page"),
+            chrono::Local::now().format("%H%M%S%3f")
+        );
+        let _ = std::fs::write(
+            file,
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "url": url.as_str(), "fields": fields_json(&fields) }),
+            )
+            .unwrap_or_default(),
+        );
     }
     let facts = crate::commands::apply_facts(st).await?;
     let wants_file = fields.iter().any(|f| f.kind == Some(FieldKind::File));
-    let resume = if wants_file { load_resume(st, job_id).await } else { None };
+    let resume = if wants_file {
+        load_resume(st, job_id).await
+    } else {
+        None
+    };
     let engine = active_engine(st).await;
     let mut session = sessions.get(&label);
     session.memory = st.store.apply_memory().await.unwrap_or_default();
-    let actions = plan(fields, &facts, resume.as_ref(), engine.as_deref(), &mut session).await;
+    let actions = plan(
+        fields,
+        &facts,
+        resume.as_ref(),
+        engine.as_deref(),
+        &mut session,
+    )
+    .await;
     sessions.put(&label, session);
     #[cfg(debug_assertions)]
     for a in &actions {
         match a {
-            FillAction::Set { key, value, fact } => eprintln!("[autofill] {key}: set {fact} = {value}"),
+            FillAction::Set { key, value, fact } => {
+                eprintln!("[autofill] {key}: set {fact} = {value}")
+            }
             FillAction::File { key, name, .. } => eprintln!("[autofill] {key}: attach {name}"),
-            FillAction::NeedsUser { key, reason } => eprintln!("[autofill] {key}: needs user ({reason})"),
+            FillAction::NeedsUser { key, reason } => {
+                eprintln!("[autofill] {key}: needs user ({reason})")
+            }
         }
     }
     send(window, &actions)
@@ -308,7 +418,11 @@ pub fn facts_matching(value: &str, facts: &[Fact], picked: bool) -> Vec<&'static
     let mut keys: Vec<&'static str> = facts
         .iter()
         .filter(|f| !super::matcher::is_yes_no(f.key))
-        .filter(|f| f.variants.iter().any(|x| normalize(x) == v || (picked && v.len() >= 3 && loosely_matches(value, x))))
+        .filter(|f| {
+            f.variants
+                .iter()
+                .any(|x| normalize(x) == v || (picked && v.len() >= 3 && loosely_matches(value, x)))
+        })
         .map(|f| f.key)
         .collect();
     keys.dedup();
@@ -318,12 +432,22 @@ pub fn facts_matching(value: &str, facts: &[Fact], picked: bool) -> Vec<&'static
 /// Learns from one edit: a value matching exactly one fact teaches cvd that
 /// this label means that fact. Replacing a remembered fill with something else
 /// makes cvd forget the label.
-pub(crate) async fn learn(st: &AppState, field: &FieldSpec, value: &str, facts: &[Fact], cvd_filled: bool, memory: &BTreeMap<String, String>) {
+pub(crate) async fn learn(
+    st: &AppState,
+    field: &FieldSpec,
+    value: &str,
+    facts: &[Fact],
+    cvd_filled: bool,
+    memory: &BTreeMap<String, String>,
+) {
     if !is_learnable(field) || value.len() > 500 {
         return;
     }
     let label = normalize(&field.label);
-    let picked = matches!(field.kind(), FieldKind::Select | FieldKind::Radio | FieldKind::Combobox);
+    let picked = matches!(
+        field.kind(),
+        FieldKind::Select | FieldKind::Radio | FieldKind::Combobox
+    );
     match facts_matching(value, facts, picked)[..] {
         [key] => {
             let _ = st.store.remember_label(&label, key).await;
@@ -344,16 +468,26 @@ pub(crate) async fn mark_applied(st: &AppState, job_id: i64) -> String {
     let Ok(statuses) = st.store.list_job_statuses().await else {
         return "Submitted. cvd couldn't read your statuses.".into();
     };
-    let Some(applied) = statuses.iter().find(|s| s.name.trim().eq_ignore_ascii_case("applied")) else {
+    let Some(applied) = statuses
+        .iter()
+        .find(|s| s.name.trim().eq_ignore_ascii_case("applied"))
+    else {
         return "Submitted. Add an \"Applied\" status in cvd to track this automatically.".into();
     };
     let Ok(job) = crate::commands::get_job(st, job_id).await else {
         return "Submitted. The job is no longer in cvd.".into();
     };
-    if job.status_id != Some(applied.id) && crate::commands::update_job_tracking(st, job_id, Some(applied.id), &job.url).await.is_err() {
+    if job.status_id != Some(applied.id)
+        && crate::commands::update_job_tracking(st, job_id, Some(applied.id), &job.url)
+            .await
+            .is_err()
+    {
         return "Submitted. cvd couldn't update the job's status.".into();
     }
-    (st.emitter())(JOB_UPDATED_EVENT, serde_json::json!({ "job_id": job_id, "status_id": applied.id }));
+    (st.emitter())(
+        JOB_UPDATED_EVENT,
+        serde_json::json!({ "job_id": job_id, "status_id": applied.id }),
+    );
     format!("Submitted. Marked as {} in cvd.", applied.name)
 }
 
@@ -363,29 +497,44 @@ pub const JOB_UPDATED_EVENT: &str = "job://updated";
 fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
     let json = serde_json::to_string(text).map_err(|e| AppError::Io(e.to_string()))?;
     window
-        .eval(format!("window.__cvdAutofill && window.__cvdAutofill.notice({json})"))
+        .eval(format!(
+            "window.__cvdAutofill && window.__cvdAutofill.notice({json})"
+        ))
         .map_err(|e| AppError::Io(e.to_string()))
 }
 
 fn send(window: &WebviewWindow, actions: &[FillAction]) -> Result<(), AppError> {
     let json = serde_json::to_string(actions).map_err(|e| AppError::Io(e.to_string()))?;
     window
-        .eval(format!("window.__cvdAutofill && window.__cvdAutofill.apply({json})"))
+        .eval(format!(
+            "window.__cvdAutofill && window.__cvdAutofill.apply({json})"
+        ))
         .map_err(|e| AppError::Io(e.to_string()))
 }
 
 impl Sessions {
     fn get(&self, label: &str) -> Session {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).get(label).cloned().unwrap_or_default()
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(label)
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn put(&self, label: &str, session: Session) {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(label.to_string(), session);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(label.to_string(), session);
     }
 
     /// A reopened window starts fresh.
     pub fn reset(&self, label: &str) {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(label);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(label);
     }
 }
 
