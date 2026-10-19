@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "delete_job_status",
     "reorder_job_statuses",
     "list_jobs",
+    "search_jobs",
     "get_job",
     "start_match",
     "cancel_match",
