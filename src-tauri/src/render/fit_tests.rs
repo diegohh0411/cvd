@@ -196,6 +196,31 @@ fn date_order_within_section() {
 }
 
 #[test]
+fn library_sort_hint_orders_entries_before_date() {
+    let mut a = entry(1, 2.0, "2023-01", 1);
+    let mut b = entry(2, 2.0, "2018-01", 1);
+    a.entry.sort_hint = 2;
+    b.entry.sort_hint = 1;
+    let r = ranked(vec![a, b, entry(3, 2.0, "2024-01", 1)]);
+    let out = fit(&r, &profile(), 1, 0.0, &[]).unwrap();
+    let ids: Vec<i64> = out.selection.entries.iter().map(|e| e.entry_id).collect();
+    assert_eq!(ids, vec![2, 1, 3]);
+}
+
+#[test]
+fn bullet_order_override_reorders_bullets() {
+    let r = ranked(vec![entry(1, 3.0, "2023-01", 3)]);
+    let inc = |i| Override::Include(Target::Bullet(i));
+    let base = [inc(100), inc(101), inc(102)];
+    let out = fit(&r, &profile(), 1, 0.0, &base).unwrap();
+    assert_eq!(all_bullets(&out.selection), vec![100, 101, 102]);
+    let mut ov = base.to_vec();
+    ov.push(Override::BulletOrder(vec![102, 100, 101]));
+    let out = fit(&r, &profile(), 1, 0.0, &ov).unwrap();
+    assert_eq!(all_bullets(&out.selection), vec![102, 100, 101]);
+}
+
+#[test]
 fn tighten_before_drop() {
     // Fake compile: one page at step 0 holds 3 bullets, step 1 holds 4.
     let r = ranked(vec![

@@ -47,6 +47,8 @@ export interface SectionView {
 export interface OverrideState {
   targets: Record<string, 'include' | 'exclude'>;
   order: number[] | null;
+  /** Bullet ids in render order within their entry; absent = stored (DB) order. */
+  bulletOrder?: number[] | null;
 }
 
 export const NO_OVERRIDES: OverrideState = { targets: {}, order: null };
@@ -57,6 +59,7 @@ const target = (k: string): Target => (k.startsWith('E:') ? { Entry: Number(k.sl
 export function toOverrides(s: OverrideState): Override[] {
   const out: Override[] = Object.entries(s.targets).map(([k, v]) => (v === 'include' ? { Include: target(k) } : { Exclude: target(k) }));
   if (s.order) out.push({ Order: s.order });
+  if (s.bulletOrder?.length) out.push({ BulletOrder: s.bulletOrder });
   return out;
 }
 
@@ -71,7 +74,12 @@ function set(s: OverrideState, t: Target, v: 'include' | 'exclude' | null): Over
  * Pins a selection as explicit overrides so later refits keep exactly it: the fitter
  * stops filling freed space on its own and only the user's edits change the CV.
  */
-export function freeze(ranked: Ranked, selection: Selection, order: number[] | null = selection.entries.map((e) => e.entry_id)): OverrideState {
+export function freeze(
+  ranked: Ranked,
+  selection: Selection,
+  order: number[] | null = selection.entries.map((e) => e.entry_id),
+  bulletOrder: number[] | null = null,
+): OverrideState {
   const chosen = new Map(selection.entries.map((e) => [e.entry_id, new Set(e.bullet_ids)]));
   const targets: OverrideState['targets'] = {};
   for (const re of ranked.entries) {
@@ -79,7 +87,7 @@ export function freeze(ranked: Ranked, selection: Selection, order: number[] | n
     if (!bullets) targets[key({ Entry: re.entry.id })] = 'exclude';
     for (const [b] of re.bullets) targets[key({ Bullet: b.id })] = bullets?.has(b.id) ? 'include' : 'exclude';
   }
-  return { targets, order };
+  return { targets, order, bulletOrder };
 }
 
 /** Checks or unchecks a whole entry. */
@@ -112,8 +120,19 @@ export function reorder(s: OverrideState, entryIds: number[]): OverrideState {
   return { ...s, order: entryIds };
 }
 
+/** Moves a bullet within its entry's displayed list; the DB position is untouched. */
+export function reorderBullets(s: OverrideState, view: SectionView[], entryId: number, from: number, to: number): OverrideState | null {
+  const entry = view.flatMap((g) => g.entries).find((e) => e.id === entryId);
+  if (!entry || from === to || from < 0 || from >= entry.bullets.length) return null;
+  const ids = entry.bullets.map((b) => b.id);
+  ids.splice(Math.max(0, Math.min(ids.length - 1, to)), 0, ...ids.splice(from, 1));
+  const others = view.flatMap((g) => g.entries).filter((e) => e.id !== entryId).flatMap((e) => e.bullets.map((b) => b.id));
+  return { ...s, bulletOrder: [...others, ...ids] };
+}
+
 /** Grouped, render-ordered view: selected entries in selection order, then the rest by score. */
 export function buildView(ranked: Ranked, selection: Selection | null, s: OverrideState): SectionView[] {
+  const bpos = new Map((s.bulletOrder ?? []).map((id, i) => [id, i]));
   const chosen = new Map((selection?.entries ?? []).map((e, i) => [e.entry_id, { ...e, i }]));
   const sections: Record<Section, EntryView[]> = { Experience: [], Projects: [], Education: [] };
   for (const re of ranked.entries) {
@@ -121,7 +140,7 @@ export function buildView(ranked: Ranked, selection: Selection | null, s: Overri
     const wantEntry = s.targets[key({ Entry: re.entry.id })] === 'include';
     const selectedBullets = new Set(sel?.bullet_ids ?? []);
     const bullets: BulletView[] = [...re.bullets]
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => (bpos.get(a[0].id) ?? Number.MAX_SAFE_INTEGER) - (bpos.get(b[0].id) ?? Number.MAX_SAFE_INTEGER) || a[0].position - b[0].position || a[0].id - b[0].id)
       .map(([b, score]) => ({
         id: b.id,
         text: b.text,

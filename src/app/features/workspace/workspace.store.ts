@@ -26,6 +26,7 @@ import {
   NO_OVERRIDES,
   type OverrideState,
   reorder,
+  reorderBullets,
   toggleBullet,
   freeze,
   toggleEntry,
@@ -330,6 +331,11 @@ export class WorkspaceStore {
     this.edit(reorder(this.base(), entryIds));
   }
 
+  reorderBullets(entryId: number, from: number, to: number): void {
+    const next = reorderBullets(this.base(), this.view(), entryId, from, to);
+    if (next) this.edit(next);
+  }
+
   setBudget(budget: number): void {
     this.budget.set(budget);
     void api.setUiSetting(BUDGET_SETTING, String(budget)).catch(() => undefined);
@@ -340,14 +346,14 @@ export class WorkspaceStore {
   restore(selection: Selection): void {
     const r = this.ranked();
     if (!r) return;
-    this.edit(freeze(r, selection));
+    this.edit(freeze(r, selection, undefined, selection.entries.flatMap((e) => e.bullet_ids)));
   }
 
   /** Overrides to edit from: the matcher's pick is frozen on the first edit so the fitter never re-adds bullets. */
   private base(): OverrideState {
     const r = this.ranked();
     const sel = this.selection();
-    return !this.edited() && r && sel ? freeze(r, sel, this.overrides().order) : this.overrides();
+    return !this.edited() && r && sel ? freeze(r, sel, this.overrides().order, this.overrides().bulletOrder) : this.overrides();
   }
 
   /** Overrides survive leaving the job: the store is route-scoped, so they are kept per run in UI settings. */

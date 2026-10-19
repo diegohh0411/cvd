@@ -33,6 +33,9 @@ pub enum Override {
     Include(Target),
     Exclude(Target),
     Order(Vec<i64>),
+    /// Bullet ids in the order they should render within their entry; bullets
+    /// not listed follow in stored position order.
+    BulletOrder(Vec<i64>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +114,7 @@ struct Fitter<'a, 'c> {
     budget: usize,
     skills: Vec<String>,
     order: Vec<i64>,
+    bullet_order: Vec<i64>,
     compile: &'c mut CompileFn<'c>,
     compiles: usize,
     style: StyleStep,
@@ -132,6 +136,14 @@ pub(crate) fn fit_with<'c>(
         .rev()
         .find_map(|o| match o {
             Override::Order(ids) => Some(ids.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let bullet_order = overrides
+        .iter()
+        .rev()
+        .find_map(|o| match o {
+            Override::BulletOrder(ids) => Some(ids.clone()),
             _ => None,
         })
         .unwrap_or_default();
@@ -192,6 +204,7 @@ pub(crate) fn fit_with<'c>(
         budget: budget.max(1) as usize,
         skills,
         order,
+        bullet_order,
         compile,
         compiles: 0,
         style: StyleStep(0),
@@ -317,8 +330,8 @@ impl Fitter<'_, '_> {
         &self.ranked.entries[p.idx].entry
     }
 
-    /// Picks grouped by section; entries in explicit, then date-desc order;
-    /// bullets in stored position order.
+    /// Picks grouped by section; entries in explicit, then library (`sort_hint`),
+    /// then date-desc order; bullets in explicit, then stored position order.
     fn sorted(&self, picks: &[Pick]) -> Vec<(SectionHeading, Vec<Pick>)> {
         let pos = |e: &Entry| self.order.iter().position(|&id| id == e.id).unwrap_or(usize::MAX);
         let mut out = Vec::new();
@@ -335,12 +348,19 @@ impl Fitter<'_, '_> {
             }
             items.sort_by(|a, b| {
                 let (ea, eb) = (self.entry(a), self.entry(b));
-                pos(ea).cmp(&pos(eb)).then_with(|| eb.start_date.cmp(&ea.start_date))
+                // A zero `sort_hint` means "no library order": those follow the hinted ones.
+                let hint = |e: &Entry| (e.sort_hint <= 0, e.sort_hint);
+                pos(ea)
+                    .cmp(&pos(eb))
+                    .then_with(|| hint(ea).cmp(&hint(eb)))
+                    .then_with(|| eb.start_date.cmp(&ea.start_date))
             });
             for p in &mut items {
                 let entry = &self.ranked.entries[p.idx].entry;
+                let bpos =
+                    |id: i64| self.bullet_order.iter().position(|&b| b == id).unwrap_or(usize::MAX);
                 p.bullets.sort_by_key(|id| {
-                    entry.bullets.iter().find(|b| b.id == *id).map(|b| b.position)
+                    (bpos(*id), entry.bullets.iter().find(|b| b.id == *id).map(|b| b.position))
                 });
             }
             out.push((heading, items));

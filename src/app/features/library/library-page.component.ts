@@ -1,6 +1,7 @@
+import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDropList } from '@angular/cdk/drag-drop';
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
-import { lucidePlus } from '@ng-icons/lucide';
+import { lucideGripVertical, lucidePlus } from '@ng-icons/lucide';
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
@@ -12,6 +13,9 @@ import { emptyInput, LibraryStore, toInput } from '../../core/stores/library.sto
 import { PageHeaderComponent } from '../../shell/page-header.component';
 import { EntryEditorComponent } from './entry-editor.component';
 
+/** Entries with a library order (`sort_hint` > 0) come first, ascending; the rest follow by date. */
+const hintRank = (e: Entry) => (e.sort_hint > 0 ? e.sort_hint : Number.MAX_SAFE_INTEGER);
+
 @Component({
   selector: 'app-library-page',
   imports: [
@@ -22,8 +26,11 @@ import { EntryEditorComponent } from './entry-editor.component';
     ZardSkeletonComponent,
     ...ZardCardImports,
     NgIcon,
+    CdkDropList,
+    CdkDrag,
+    CdkDragHandle,
   ],
-  viewProviders: [provideIcons({ lucidePlus })],
+  viewProviders: [provideIcons({ lucideGripVertical, lucidePlus })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Library', link: '/library/experience' }, { label: label().many }]">
@@ -58,12 +65,22 @@ import { EntryEditorComponent } from './entry-editor.component';
           <button z-button (click)="create()"><ng-icon name="lucidePlus" /> New {{ label().one.toLowerCase() }}</button>
         </div>
       } @else {
-        <ul class="divide-y rounded-xl border" aria-label="Entries">
+        <p class="text-muted-foreground text-xs">Drag to set the default order of these entries on a CV.</p>
+        <ul cdkDropList (cdkDropListDropped)="drop($event)" class="divide-y rounded-xl border" aria-label="Entries">
           @for (e of visible(); track e.id) {
-            <li>
+            <li cdkDrag class="bg-background flex items-center">
               <button
                 type="button"
-                class="hover:bg-muted/50 focus-visible:bg-muted/50 flex w-full flex-col gap-1 px-4 py-3 text-left outline-none"
+                cdkDragHandle
+                class="text-muted-foreground hover:text-foreground cursor-grab px-3"
+                [attr.aria-label]="'Reorder ' + e.title + ' (Alt+Up/Down)'"
+                (keydown)="key($event, e)"
+              >
+                <ng-icon name="lucideGripVertical" class="size-4" />
+              </button>
+              <button
+                type="button"
+                class="hover:bg-muted/50 focus-visible:bg-muted/50 flex w-full flex-col gap-1 py-3 pr-4 text-left outline-none"
                 (click)="open(e)"
               >
                 <div class="flex items-baseline justify-between gap-3">
@@ -107,7 +124,7 @@ export class LibraryPageComponent {
   protected readonly visible = computed(() =>
     this.all()
       .filter((e) => this.showArchived() || !e.archived)
-      .sort((a, b) => (b.end_date ?? '9999').localeCompare(a.end_date ?? '9999') || b.start_date.localeCompare(a.start_date)),
+      .sort((a, b) => hintRank(a) - hintRank(b) || (b.end_date ?? '9999').localeCompare(a.end_date ?? '9999') || b.start_date.localeCompare(a.start_date)),
   );
   protected readonly cards = computed(() => {
     const all = this.all();
@@ -129,6 +146,25 @@ export class LibraryPageComponent {
       })[this.safeKind()],
   );
   protected readonly range = (e: Entry) => formatRange(e.start_date, e.end_date);
+
+  drop(ev: CdkDragDrop<unknown>): void {
+    const list = [...this.visible()];
+    this.reposition(list, ev.previousIndex, ev.currentIndex);
+  }
+
+  key(ev: KeyboardEvent, e: Entry): void {
+    if (!ev.altKey || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+    ev.preventDefault();
+    const list = [...this.visible()];
+    const i = list.findIndex((x) => x.id === e.id);
+    this.reposition(list, i, i + (ev.key === 'ArrowUp' ? -1 : 1));
+  }
+
+  private reposition(list: Entry[], from: number, to: number): void {
+    if (from < 0 || to < 0 || to >= list.length || from === to) return;
+    list.splice(to, 0, ...list.splice(from, 1));
+    void this.library.setOrder(list);
+  }
 
   create(): void {
     this.editor().edit(emptyInput(this.safeKind()));

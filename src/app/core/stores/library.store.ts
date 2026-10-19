@@ -41,6 +41,15 @@ export class LibraryStore {
     return id;
   }
 
+  /** Stores the given display order as each entry's `sort_hint` (1-based) — the default CV order. */
+  async setOrder(ordered: Entry[]): Promise<void> {
+    try {
+      for (const [i, e] of ordered.entries()) if (e.sort_hint !== i + 1) await api.saveEntry({ ...toInput(e), sort_hint: i + 1 });
+    } finally {
+      await this.load();
+    }
+  }
+
   async remove(id: number): Promise<void> {
     await api.deleteEntry(id);
     await this.load();
