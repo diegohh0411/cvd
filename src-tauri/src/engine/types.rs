@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Question {
     Noul { instructions: Value },
-    Choice { instructions: Value, options: Vec<String> },
+    /// `criteria` optionally describes each option (key = option id), sent as the
+    /// wire `criteria` map; options without an entry are sent undescribed.
+    Choice { instructions: Value, options: Vec<String>, criteria: BTreeMap<String, String> },
     Score { instructions: Value, legend: BTreeMap<u8, String> },
 }
 

@@ -11,8 +11,11 @@ pub fn wire_request(state: &str, questions: &BTreeMap<String, Question>) -> Valu
 fn wire_question(q: &Question) -> Value {
     match q {
         Question::Noul { instructions } => json!({"type": "noul", "instructions": instructions}),
-        Question::Choice { instructions, options } => {
-            let criteria: Map<String, Value> = options.iter().map(|o| (o.clone(), Value::Null)).collect();
+        Question::Choice { instructions, options, criteria } => {
+            let criteria: Map<String, Value> = options
+                .iter()
+                .map(|o| (o.clone(), criteria.get(o).map_or(Value::Null, |d| Value::String(d.clone()))))
+                .collect();
             json!({"type": "choice", "instructions": instructions, "criteria": criteria})
         }
         Question::Score { instructions, legend } => {

@@ -42,7 +42,7 @@ fn oracle(wants: &[(&str, &str, &str, f64)]) -> FakeDecisionEngine {
     let wants: HashMap<String, (String, String, f64)> =
         wants.iter().map(|(l, c, w, p)| (l.to_string(), (c.to_string(), w.to_string(), *p))).collect();
     FakeDecisionEngine::new(move |_state, _name, q| {
-        let Question::Choice { instructions, options } = q else { panic!("only choice questions") };
+        let Question::Choice { instructions, options, .. } = q else { panic!("only choice questions") };
         let label = instructions["field"]["label"].as_str().unwrap_or("").to_string();
         let round1 = instructions["question"].as_str().unwrap_or("").starts_with("What kind");
         let texts: BTreeMap<String, String> = instructions["options"]
