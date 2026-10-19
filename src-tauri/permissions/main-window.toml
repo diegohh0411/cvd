@@ -18,6 +18,7 @@ permissions = [
   "allow-delete-job-status",
   "allow-reorder-job-statuses",
   "allow-list-jobs",
+  "allow-search-jobs",
   "allow-get-job",
   "allow-start-match",
   "allow-cancel-match",
