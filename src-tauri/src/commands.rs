@@ -324,11 +324,6 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
     }
 }
 
-/// Master switch for LLM company research. While false, matching scores
-/// without researching (an already-saved profile is still used) and manual
-/// refresh does nothing. Flip to true to restore the feature.
-const COMPANY_RESEARCH_ENABLED: bool = false;
-
 /// Scores `run_id` in a spawned task. A freshly created run has no scores,
 /// so `matcher::resume_match` scores it end to end. Company research runs
 /// first and blocks scoring unless skipped (see `skip_research`).
@@ -410,7 +405,7 @@ async fn company_context(
         },
     };
     store.set_jd_company(jd_id, Some(c.id)).await?;
-    if COMPANY_RESEARCH_ENABLED && company::need(&c, chrono::Utc::now()) == company::Need::Research {
+    if company::need(&c, chrono::Utc::now()) == company::Need::Research {
         on_progress(matcher::Progress::Researching { company_id: c.id });
         let input = ResearchInput {
             name: c.name.clone(),
@@ -478,9 +473,6 @@ pub async fn edit_company(st: &AppState, id: i64, profile: CompanyProfile) -> Re
 /// Researches the company now, ignoring the TTL and any backoff.
 pub async fn refresh_company(st: &AppState, id: i64) -> Res<Company> {
     let c = get_company(st, id).await?;
-    if !COMPANY_RESEARCH_ENABLED {
-        return Ok(c);
-    }
     let input = ResearchInput { name: c.name.clone(), domain: c.domain.clone(), jd_snippet: String::new() };
     Ok(st.coordinator.start(&st.store, c, input, st.research_env().research_fn()).await?)
 }
