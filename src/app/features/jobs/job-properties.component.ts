@@ -72,7 +72,7 @@ export class JobPropertiesComponent {
     this.starting.set(true);
     try {
       if (!(await api.startApply(job.id))) {
-        this.toast.info("Autofill isn't available on this site yet", { description: 'Opened it in your browser instead.' });
+        this.toast.info('Autofill needs an HTTPS link', { description: 'Opened it in your browser instead.' });
         openJobUrl(job.url);
       }
     } catch (e) {

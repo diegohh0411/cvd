@@ -1,0 +1,149 @@
+{
+ "url": "synthetic: Workday-style labels and data-automation ids (acme.wd5.myworkdayjobs.com)",
+ "fields": [
+  {
+   "key": "w1",
+   "kind": "text",
+   "label": "Given Name(s)",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "legalNameSection_firstName",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": [
+    "first_name",
+    "full_name"
+   ]
+  },
+  {
+   "key": "w2",
+   "kind": "text",
+   "label": "Family Name",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "legalNameSection_lastName",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": "last_name"
+  },
+  {
+   "key": "w3",
+   "kind": "email",
+   "label": "Email Address",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": true,
+   "options": [],
+   "expect": "email"
+  },
+  {
+   "key": "w4",
+   "kind": "tel",
+   "label": "Phone Number",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "phone-number",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "phone"
+  },
+  {
+   "key": "w5",
+   "kind": "select",
+   "label": "Phone Device Type",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Select One",
+    "Mobile",
+    "Landline"
+   ],
+   "expect": null
+  },
+  {
+   "key": "w6",
+   "kind": "text",
+   "label": "City",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "addressSection_city",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "city"
+  },
+  {
+   "key": "w7",
+   "kind": "combobox",
+   "label": "How Did You Hear About Us?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Job Board",
+    "Referral",
+    "Company Website"
+   ],
+   "expect": null
+  },
+  {
+   "key": "w8",
+   "kind": "radio",
+   "label": "Have you previously worked for Acme?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Yes",
+    "No"
+   ],
+   "expect": null
+  },
+  {
+   "key": "w9",
+   "kind": "file",
+   "label": "Upload a file (5MB max)",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "Resume/CV",
+   "required": false,
+   "options": [],
+   "expect": "resume"
+  },
+  {
+   "key": "w10",
+   "kind": "textarea",
+   "label": "Cover Letter",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  }
+ ]
+}

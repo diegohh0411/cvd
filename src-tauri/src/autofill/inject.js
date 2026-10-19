@@ -2,15 +2,32 @@
 // cvd, applies the fills cvd sends back, and shows what still needs the user.
 // It never clicks submit: the only clicks are on radio buttons and combobox
 // options it is filling.
+//
+// It runs in every frame. Only the top frame talks to cvd and draws the
+// overlay; child frames (an embedded ATS form, often cross-origin) relay
+// through it with postMessage. The top frame tags each child's messages with
+// the browser-reported origin, so cvd can ask the user about that host.
 (() => {
-  if (window.top !== window || window.__cvdAutofill) return;
+  if (window.__cvdAutofill) return;
+  const isTop = window.top === window;
+  const UP = 'cvd-up';
+  const DOWN = 'cvd-down';
 
-  const send = (msg) => {
+  const invoke = (msg) => {
     try {
       return window.__TAURI_INTERNALS__.invoke('autofill_bridge', { msg }).catch(() => {});
     } catch {
       return Promise.resolve();
     }
+  };
+  const send = (msg) => {
+    if (isTop) return invoke(msg);
+    try {
+      window.top.postMessage({ __cvd: UP, msg }, '*');
+    } catch {
+      /* detached frame */
+    }
+    return Promise.resolve();
   };
   const cap = (s, n = 500) => (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim().slice(0, n);
   const norm = (s) => cap(s).toLowerCase();
@@ -27,6 +44,20 @@
 
   const SKIP_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'search', 'password']);
   const DATE_TYPES = new Set(['date', 'month', 'week', 'datetime-local', 'time']);
+
+  /** querySelectorAll across the document and every open shadow root. */
+  const deepAll = (sel, root = document, out = []) => {
+    out.push(...root.querySelectorAll(sel));
+    for (const el of root.querySelectorAll('*')) if (el.shadowRoot) deepAll(sel, el.shadowRoot, out);
+    return out;
+  };
+
+  /** getElementById in the element's own tree (document or shadow root). */
+  const byId = (el, id) => {
+    if (!id) return null;
+    const root = el && el.getRootNode ? el.getRootNode() : document;
+    return (root.getElementById && root.getElementById(id)) || document.getElementById(id);
+  };
 
   const isVisible = (el) => {
     const r = el.getBoundingClientRect();
@@ -67,11 +98,11 @@
     return '';
   };
 
-  const byIds = (ids) =>
+  const byIds = (ids, el) =>
     cap(
       (ids || '')
         .split(/\s+/)
-        .map((id) => id && document.getElementById(id))
+        .map((id) => byId(el, id))
         .filter(Boolean)
         .map(textWithoutControls)
         .join(' '),
@@ -83,7 +114,7 @@
       if (t) return t;
     }
     return (
-      byIds(el.getAttribute('aria-labelledby')) ||
+      byIds(el.getAttribute('aria-labelledby'), el) ||
       cap(el.getAttribute('aria-label')) ||
       precedingText(el, 'label,legend,[class*="label" i]', 4)
     );
@@ -133,7 +164,7 @@
   const comboOptions = (el) => {
     const rs = reactSelect(el);
     if (rs) return reactOptions(rs).map((o) => cap(o.label, 200)).slice(0, 300);
-    const list = document.getElementById(el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '');
+    const list = byId(el, el.getAttribute('aria-controls') || el.getAttribute('aria-owns'));
     return list ? [...list.querySelectorAll('[role="option"]')].map((o) => cap(o.textContent, 200)).filter(Boolean) : [];
   };
 
@@ -150,6 +181,8 @@
     if (el.disabled || el.readOnly || el.closest('[aria-hidden="true"]') || el.closest('#cvd-autofill-host')) return true;
     const t = (el.getAttribute('type') || '').toLowerCase();
     if (SKIP_TYPES.has(t)) return true;
+    // Never touch payment fields, in any frame.
+    if (/^cc-|\bcc-/i.test(el.getAttribute('autocomplete') || '')) return true;
     // intl-tel-input's country search box.
     if (/iti.*search|search.*iti/i.test((el.id || '') + ' ' + (el.className || ''))) return true;
     // Radios, checkboxes and file inputs are often visually hidden behind custom UI.
@@ -172,7 +205,7 @@
   const extract = () => {
     const out = [];
     const groups = new Map();
-    for (const el of document.querySelectorAll('input,select,textarea')) {
+    for (const el of deepAll('input,select,textarea')) {
       if (skip(el)) continue;
       const kind = kindOf(el);
       if (kind === 'radio') {
@@ -192,7 +225,7 @@
         placeholder: cap(el.getAttribute('placeholder'), 200),
         autocomplete: cap(el.getAttribute('autocomplete'), 100),
         name_attr: cap(el.getAttribute('name'), 200),
-        help: byIds(el.getAttribute('aria-describedby')),
+        help: byIds(el.getAttribute('aria-describedby'), el),
         section: sectionOf(el),
         required: el.required || el.getAttribute('aria-required') === 'true',
         options:
@@ -212,7 +245,7 @@
       if (radios.some((r) => r.checked)) continue;
       const group = radios[0].closest('[role="radiogroup"],fieldset');
       const groupLabel =
-        (group && (byIds(group.getAttribute('aria-labelledby')) || cap(group.getAttribute('aria-label')))) ||
+        (group && (byIds(group.getAttribute('aria-labelledby'), group) || cap(group.getAttribute('aria-label')))) ||
         (group && group.querySelector('legend') && textWithoutControls(group.querySelector('legend'))) ||
         precedingText(radios[0], 'label:not(:has(input)),legend,[class*="label" i]', 5);
       out.push({
@@ -231,7 +264,7 @@
 
   // ---- filling ----
 
-  const elsFor = (key) => [...document.querySelectorAll(`[data-cvd-key="${CSS.escape(key)}"]`)];
+  const elsFor = (key) => deepAll(`[data-cvd-key="${CSS.escape(key)}"]`);
 
   const nativeSet = (el, value) => {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
@@ -253,6 +286,15 @@
     const prev = results.get(key);
     results.set(key, { status, reason: reason || '', label: (prev && prev.label) || (el && (labelOf(el) || el.getAttribute('name'))) || key });
     outline(key, COLORS[status]);
+    if (!isTop) {
+      const r = results.get(key);
+      try {
+        window.top.postMessage({ __cvd: UP, mark: { key, status, reason: cap(r.reason, 200), label: cap(r.label, 200) } }, '*');
+      } catch {
+        /* detached frame */
+      }
+      return;
+    }
     render();
     clearTimeout(statusTimer);
     statusTimer = setTimeout(reportStatus, 1000);
@@ -261,6 +303,7 @@
   // Progress for cvd (shown in the main window later; logged in dev builds).
   let statusTimer;
   const reportStatus = () => {
+    if (!isTop) return;
     const all = [...results.values()];
     send({
       type: 'status',
@@ -302,7 +345,9 @@
       editTimers.set(
         key,
         setTimeout(() => {
-          const value = answerOf(el, key);
+          // Child frames keep what the user types to themselves: relaying it
+          // would show a cross-origin frame's input to the parent page.
+          const value = isTop ? answerOf(el, key) : '';
           if (value) send({ type: 'user_edit', key, value });
         }, 800),
       );
@@ -400,8 +445,77 @@
     mark(key, 'needs', 'Attach your CV yourself');
   };
 
+  // ---- frames (top frame only) ----
+
+  /** Child frame window → { id, origin }. Keys from frame n are `fr<n>|key`. */
+  const frames = new Map();
+  let frameCounter = 0;
+  const FRAME_KEY = /^fr(\d+)\|(.*)$/s;
+  const frameById = (id) => [...frames.entries()].find(([, f]) => f.id === id);
+  const prefixed = (f, key) => `fr${f.id}|${key}`;
+
+  const postDown = (id, payload) => {
+    const hit = frameById(id);
+    if (!hit) return;
+    try {
+      hit[0].postMessage({ __cvd: DOWN, ...payload }, hit[1].origin);
+    } catch {
+      frames.delete(hit[0]);
+    }
+  };
+
+  const onChildMessage = (e) => {
+    const d = e.data;
+    if (!d || d.__cvd !== UP || !e.source || e.source === window) return;
+    if (!/^https:\/\//.test(e.origin)) return; // sandboxed or insecure frames get nothing
+    let f = frames.get(e.source);
+    if (!f) frames.set(e.source, (f = { id: ++frameCounter, origin: e.origin }));
+    if (d.mark && typeof d.mark.key === 'string') {
+      const k = prefixed(f, d.mark.key);
+      results.set(k, { status: d.mark.status, reason: cap(d.mark.reason, 200), label: cap(d.mark.label, 200) || 'Embedded field' });
+      render();
+      clearTimeout(statusTimer);
+      statusTimer = setTimeout(reportStatus, 1000);
+      return;
+    }
+    const m = d.msg;
+    if (!m || typeof m.type !== 'string') return;
+    const msg = { ...m, origin: e.origin };
+    if (Array.isArray(m.fields)) msg.fields = m.fields.slice(0, 300).map((x) => ({ ...x, key: prefixed(f, cap(x && x.key, 200)) }));
+    if (typeof m.key === 'string') msg.key = prefixed(f, m.key);
+    if (msg.type === 'status') return; // the top frame reports for everyone
+    invoke(msg);
+  };
+
+  const onParentMessage = (e) => {
+    const d = e.data;
+    if (e.source !== window.top || !d || d.__cvd !== DOWN) return;
+    if (d.kind === 'apply') apply(d.actions);
+    else if (d.kind === 'focus') focusKey(d.key);
+  };
+
+  const focusKey = (key) => {
+    const el = elsFor(key)[0];
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.focus({ preventScroll: true });
+  };
+
   const apply = (actions) => {
-    for (const a of Array.isArray(actions) ? actions : []) {
+    const list = Array.isArray(actions) ? actions : [];
+    if (isTop) {
+      const byFrame = new Map();
+      for (const a of list) {
+        const m = a && typeof a.key === 'string' && a.key.match(FRAME_KEY);
+        if (!m) continue;
+        const id = Number(m[1]);
+        if (!byFrame.has(id)) byFrame.set(id, []);
+        byFrame.get(id).push({ ...a, key: m[2] });
+      }
+      byFrame.forEach((acts, id) => postDown(id, { kind: 'apply', actions: acts }));
+    }
+    for (const a of list) {
+      if (isTop && a && typeof a.key === 'string' && FRAME_KEY.test(a.key)) continue;
       const els = elsFor(a.key);
       if (!els.length) continue;
       const el = els[0];
@@ -429,7 +543,7 @@
     render();
   };
   const render = () => {
-    if (!document.body) return;
+    if (!isTop || !document.body) return;
     if (!results.size && !noticeText) return;
     if (!host) {
       host = document.createElement('div');
@@ -476,10 +590,9 @@
     };
     root.querySelectorAll('li[data-key]').forEach((li) => {
       li.onclick = () => {
-        const el = elsFor(li.dataset.key)[0];
-        if (!el) return;
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        el.focus({ preventScroll: true });
+        const m = li.dataset.key.match(FRAME_KEY);
+        if (m) postDown(Number(m[1]), { kind: 'focus', key: m[2] });
+        else focusKey(li.dataset.key);
       };
     });
   };
@@ -491,7 +604,7 @@
 
   /** The open listbox that belongs to `el`: its aria-controls target, or a visible one beside it. */
   const listboxFor = (el) => {
-    const own = document.getElementById(el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '');
+    const own = byId(el, el.getAttribute('aria-controls') || el.getAttribute('aria-owns'));
     if (own) return own;
     let anc = el.parentElement;
     for (let i = 0; anc && i < 5; i++, anc = anc.parentElement) {
@@ -577,7 +690,7 @@
     observer.observe(document.documentElement, { childList: true, subtree: true });
     const t0 = Date.now();
     const poll = setInterval(() => {
-      const count = document.querySelectorAll('input,select,textarea').length;
+      const count = deepAll('input,select,textarea').length;
       const quiet = Date.now() - lastMutation >= 500;
       if ((count >= 3 && quiet) || Date.now() - t0 > 20000) {
         clearInterval(poll);
@@ -646,6 +759,7 @@
     send({ type: 'submitted', url: location.href });
   };
 
+  window.addEventListener('message', isTop ? onChildMessage : onParentMessage);
   window.__cvdAutofill = { apply, notice };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
