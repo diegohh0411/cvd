@@ -28,8 +28,18 @@ pub struct HttpSystemOneEngine {
 
 impl HttpSystemOneEngine {
     pub fn new(provider: &'static str, base_url: String, api_key: String, model: String) -> Self {
-        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("reqwest client");
-        Self { provider, base_url, api_key, model, max_questions: None, http }
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .expect("reqwest client");
+        Self {
+            provider,
+            base_url,
+            api_key,
+            model,
+            max_questions: None,
+            http,
+        }
     }
 
     pub fn with_max_questions(mut self, cap: Option<usize>) -> Self {
@@ -39,7 +49,10 @@ impl HttpSystemOneEngine {
 
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
         self.http
-            .post(format!("{}/v1/systemone", self.base_url.trim_end_matches('/')))
+            .post(format!(
+                "{}/v1/systemone",
+                self.base_url.trim_end_matches('/')
+            ))
             .bearer_auth(&self.api_key)
             .json(body)
             .send()
@@ -84,27 +97,46 @@ impl DecisionEngine for HttpSystemOneEngine {
         body["model"] = Value::String(self.model.clone());
 
         let mut resp = self.send(&body).await?;
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS || resp.status().as_u16() == STATUS_OVERLOADED {
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS
+            || resp.status().as_u16() == STATUS_OVERLOADED
+        {
             tokio::time::sleep(retry_after(&resp)).await;
             resp = self.send(&body).await?;
         }
         let status = resp.status();
-        let bytes = resp.bytes().await.map_err(|e| EngineError::Network(e.to_string()))?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| EngineError::Network(e.to_string()))?;
         let json: Option<Value> = serde_json::from_slice(&bytes).ok();
-        let msg = || json.as_ref().map(error_message).unwrap_or_else(|| String::from_utf8_lossy(&bytes).into());
+        let msg = || {
+            json.as_ref()
+                .map(error_message)
+                .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into())
+        };
         match status.as_u16() {
             401 | 403 => Err(EngineError::Unauthorized(self.provider)),
             402 => Err(EngineError::InsufficientCredits(self.provider)),
             429 | STATUS_OVERLOADED => Err(EngineError::RateLimited),
             404 => Err(EngineError::ModelUnavailable(self.model.clone())),
-            400 if msg().contains("does not exist") => Err(EngineError::ModelUnavailable(self.model.clone())),
-            400 if msg().contains("token limit") || String::from_utf8_lossy(&bytes).contains("max_tokens_exceeded") => {
+            400 if msg().contains("does not exist") => {
+                Err(EngineError::ModelUnavailable(self.model.clone()))
+            }
+            400 if msg().contains("token limit")
+                || String::from_utf8_lossy(&bytes).contains("max_tokens_exceeded") =>
+            {
                 Err(EngineError::ContextOverflow)
             }
-            _ if !status.is_success() => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),
+            _ if !status.is_success() => Err(EngineError::BadResponse(format!(
+                "HTTP {status}: {}",
+                msg()
+            ))),
             _ => match json {
                 Some(v) => parse_wire_response(v),
-                None => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),
+                None => Err(EngineError::BadResponse(format!(
+                    "HTTP {status}: {}",
+                    msg()
+                ))),
             },
         }
     }

@@ -63,7 +63,10 @@ fn category(fact: &str) -> &'static str {
 }
 
 fn is_yes_no_options(options: &[String]) -> bool {
-    let firsts: Vec<String> = options.iter().filter_map(|o| normalize(o).split(' ').next().map(str::to_string)).collect();
+    let firsts: Vec<String> = options
+        .iter()
+        .filter_map(|o| normalize(o).split(' ').next().map(str::to_string))
+        .collect();
     firsts.iter().any(|w| w == "yes") && firsts.iter().any(|w| w == "no")
 }
 
@@ -169,7 +172,12 @@ fn field_phrase(f: &FieldSpec) -> String {
     s
 }
 
-fn choice(field: &FieldSpec, already: &BTreeMap<String, &'static str>, question: &str, options: &BTreeMap<String, String>) -> Question {
+fn choice(
+    field: &FieldSpec,
+    already: &BTreeMap<String, &'static str>,
+    question: &str,
+    options: &BTreeMap<String, String>,
+) -> Question {
     Question::Choice {
         instructions: json!({
             "question": question,
@@ -182,7 +190,10 @@ fn choice(field: &FieldSpec, already: &BTreeMap<String, &'static str>, question:
     }
 }
 
-async fn ask(engine: &dyn DecisionEngine, questions: BTreeMap<String, Question>) -> Result<BTreeMap<String, Answer>, EngineError> {
+async fn ask(
+    engine: &dyn DecisionEngine,
+    questions: BTreeMap<String, Question>,
+) -> Result<BTreeMap<String, Answer>, EngineError> {
     let mut out = BTreeMap::new();
     let max = engine.max_questions().max(1);
     let all: Vec<(String, Question)> = questions.into_iter().collect();
@@ -195,16 +206,29 @@ async fn ask(engine: &dyn DecisionEngine, questions: BTreeMap<String, Question>)
 
 fn chosen(a: Option<&Answer>) -> Option<(&str, f64)> {
     match a? {
-        Answer::Choice { choice, probabilities } => Some((choice.as_str(), probabilities.get(choice).copied().unwrap_or(0.0))),
+        Answer::Choice {
+            choice,
+            probabilities,
+        } => Some((
+            choice.as_str(),
+            probabilities.get(choice).copied().unwrap_or(0.0),
+        )),
         _ => None,
     }
 }
 
 /// Runs the category round (for long lists) and the pick round, both batched
 /// across fields. Returns one result per pending field, in order.
-pub async fn pick_all(engine: &dyn DecisionEngine, pending: &[Pending], already: &BTreeMap<String, &'static str>) -> Result<Vec<Pick>, EngineError> {
+pub async fn pick_all(
+    engine: &dyn DecisionEngine,
+    pending: &[Pending],
+    already: &BTreeMap<String, &'static str>,
+) -> Result<Vec<Pick>, EngineError> {
     // Round 1: narrow long lists to one category.
-    let mut narrowed: Vec<Vec<&Candidate>> = pending.iter().map(|p| p.candidates.iter().collect()).collect();
+    let mut narrowed: Vec<Vec<&Candidate>> = pending
+        .iter()
+        .map(|p| p.candidates.iter().collect())
+        .collect();
     // Set when round 1 already decided the outcome.
     let mut early: Vec<Option<Pick>> = (0..pending.len()).map(|_| None).collect();
     let mut round1 = BTreeMap::new();
@@ -220,21 +244,33 @@ pub async fn pick_all(engine: &dyn DecisionEngine, pending: &[Pending], already:
                 facts.push(describe(c.fact));
             }
         }
-        let mut cats: BTreeMap<String, String> = cats.into_iter().map(|(k, v)| (k.clone(), format!("{k}: {}", v.join(", ")))).collect();
+        let mut cats: BTreeMap<String, String> = cats
+            .into_iter()
+            .map(|(k, v)| (k.clone(), format!("{k}: {}", v.join(", "))))
+            .collect();
         cats.insert(NONE.into(), "none of these".into());
-        let q = format!("What kind of applicant detail does {} ask for?", field_phrase(&p.field));
+        let q = format!(
+            "What kind of applicant detail does {} ask for?",
+            field_phrase(&p.field)
+        );
         round1.insert(format!("f{i}"), choice(&p.field, already, &q, &cats));
     }
     if !round1.is_empty() {
         let answers = ask(engine, round1).await?;
         for (i, p) in pending.iter().enumerate() {
-            let Some((cat, prob)) = chosen(answers.get(&format!("f{i}"))) else { continue };
+            let Some((cat, prob)) = chosen(answers.get(&format!("f{i}"))) else {
+                continue;
+            };
             if cat == NONE {
                 early[i] = Some(Pick::NoneFits);
             } else if prob < ACCEPT_P {
                 early[i] = Some(Pick::LowConfidence);
             } else {
-                narrowed[i] = p.candidates.iter().filter(|c| category(c.fact) == cat).collect();
+                narrowed[i] = p
+                    .candidates
+                    .iter()
+                    .filter(|c| category(c.fact) == cat)
+                    .collect();
             }
         }
     }
@@ -251,19 +287,33 @@ pub async fn pick_all(engine: &dyn DecisionEngine, pending: &[Pending], already:
             .iter()
             .enumerate()
             .map(|(j, c)| {
-                let text = if yes_no { describe(c.fact).to_string() } else { format!("{}: {}", describe(c.fact), c.value) };
+                let text = if yes_no {
+                    describe(c.fact).to_string()
+                } else {
+                    format!("{}: {}", describe(c.fact), c.value)
+                };
                 (format!("c{j}"), text)
             })
             .collect();
         opts.insert(NONE.into(), "none of these".into());
         let q = if yes_no {
-            format!("Which of the applicant's stated preferences does {} ask about?", field_phrase(&p.field))
+            format!(
+                "Which of the applicant's stated preferences does {} ask about?",
+                field_phrase(&p.field)
+            )
         } else {
-            format!("Which of the applicant's details should be entered in {}?", field_phrase(&p.field))
+            format!(
+                "Which of the applicant's details should be entered in {}?",
+                field_phrase(&p.field)
+            )
         };
         round2.insert(format!("f{i}"), choice(&p.field, already, &q, &opts));
     }
-    let answers = if round2.is_empty() { BTreeMap::new() } else { ask(engine, round2).await? };
+    let answers = if round2.is_empty() {
+        BTreeMap::new()
+    } else {
+        ask(engine, round2).await?
+    };
 
     Ok(early
         .into_iter()

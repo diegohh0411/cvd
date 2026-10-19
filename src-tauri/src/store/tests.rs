@@ -35,7 +35,11 @@ async fn entry_roundtrip() {
     let e = &entries[0];
     assert_eq!(e.title, "Engineer");
     assert_eq!(e.kind, EntryKind::Experience);
-    let texts: Vec<_> = e.bullets.iter().map(|b| (b.position, b.text.as_str())).collect();
+    let texts: Vec<_> = e
+        .bullets
+        .iter()
+        .map(|b| (b.position, b.text.as_str()))
+        .collect();
     assert_eq!(texts, vec![(0, "a"), (1, "b"), (2, "c")]);
     let mut names: Vec<_> = e.skills.iter().map(|k| k.name.as_str()).collect();
     names.sort();
@@ -163,7 +167,13 @@ async fn list_runs_newest_first_per_job() {
     let a = s.create_run(jd, "clef-flash").await.unwrap();
     let b = s.create_run(jd, "clef-flash").await.unwrap();
     s.create_run(other, "clef-flash").await.unwrap();
-    let ids: Vec<i64> = s.list_runs(jd).await.unwrap().iter().map(|r| r.id).collect();
+    let ids: Vec<i64> = s
+        .list_runs(jd)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.id)
+        .collect();
     assert_eq!(ids, vec![b, a]);
 }
 
@@ -172,11 +182,15 @@ async fn find_entry_by_key_matches_case_insensitively() {
     let s = store().await;
     let id = s.upsert_entry(&input("Engineer", &[], &[])).await.unwrap();
     assert_eq!(
-        s.find_entry_by_key(EntryKind::Experience, "engineer", "ACME", "2022-01").await.unwrap(),
+        s.find_entry_by_key(EntryKind::Experience, "engineer", "ACME", "2022-01")
+            .await
+            .unwrap(),
         Some(id)
     );
     assert_eq!(
-        s.find_entry_by_key(EntryKind::Project, "Engineer", "Acme", "2022-01").await.unwrap(),
+        s.find_entry_by_key(EntryKind::Project, "Engineer", "Acme", "2022-01")
+            .await
+            .unwrap(),
         None
     );
 }
@@ -185,8 +199,13 @@ async fn find_entry_by_key_matches_case_insensitively() {
 async fn file_db_uses_wal() {
     let dir = std::env::temp_dir().join(format!("cvd-wal-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let s = Store::open(&format!("sqlite://{}", dir.join("t.db").display())).await.unwrap();
-    let mode: String = sqlx::query_scalar("PRAGMA journal_mode").fetch_one(&s.pool).await.unwrap();
+    let s = Store::open(&format!("sqlite://{}", dir.join("t.db").display()))
+        .await
+        .unwrap();
+    let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&s.pool)
+        .await
+        .unwrap();
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(mode, "wal");
 }
@@ -213,21 +232,48 @@ async fn open_external_tolerates_newer_schema() {
         .unwrap();
     std::fs::remove_dir_all(&dir).ok();
     assert!(ext.is_ok(), "{:?}", ext.err());
-    assert_eq!(n, known + 1, "external open must not apply migrations to an existing DB");
+    assert_eq!(
+        n,
+        known + 1,
+        "external open must not apply migrations to an existing DB"
+    );
 }
 
 #[tokio::test]
 async fn job_statuses_seeded_and_editable() {
     let s = store().await;
-    let names: Vec<_> = s.list_job_statuses().await.unwrap().into_iter().map(|x| x.name).collect();
+    let names: Vec<_> = s
+        .list_job_statuses()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|x| x.name)
+        .collect();
     assert_eq!(names, ["Bookmarked", "Applied", "Interviewing", "Offer"]);
 
-    let id = s.create_job_status("Rejected", StatusColor::Red).await.unwrap();
-    assert!(s.create_job_status("rejected", StatusColor::Gray).await.is_err(), "names are case-insensitive unique");
+    let id = s
+        .create_job_status("Rejected", StatusColor::Red)
+        .await
+        .unwrap();
+    assert!(
+        s.create_job_status("rejected", StatusColor::Gray)
+            .await
+            .is_err(),
+        "names are case-insensitive unique"
+    );
     assert!(s.create_job_status("  ", StatusColor::Gray).await.is_err());
-    assert!(s.update_job_status(id, "Declined", StatusColor::Pink).await.unwrap());
+    assert!(s
+        .update_job_status(id, "Declined", StatusColor::Pink)
+        .await
+        .unwrap());
 
-    let mut ids: Vec<_> = s.list_job_statuses().await.unwrap().into_iter().map(|x| x.id).collect();
+    let mut ids: Vec<_> = s
+        .list_job_statuses()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|x| x.id)
+        .collect();
     ids.reverse();
     s.reorder_job_statuses(&ids).await.unwrap();
     assert_eq!(s.list_job_statuses().await.unwrap()[0].name, "Declined");
@@ -237,9 +283,15 @@ async fn job_statuses_seeded_and_editable() {
 async fn job_tracking_defaults_and_status_delete_clears() {
     let s = store().await;
     let first = s.list_job_statuses().await.unwrap()[0].id;
-    let jd = s.create_jd("Dev", "Acme", "text", "https://x.dev", None).await.unwrap();
+    let jd = s
+        .create_jd("Dev", "Acme", "text", "https://x.dev", None)
+        .await
+        .unwrap();
     let job = s.get_jd(jd).await.unwrap().unwrap();
-    assert_eq!((job.status_id, job.url.as_str()), (Some(first), "https://x.dev"));
+    assert_eq!(
+        (job.status_id, job.url.as_str()),
+        (Some(first), "https://x.dev")
+    );
 
     s.delete_job_status(first).await.unwrap();
     assert_eq!(s.get_jd(jd).await.unwrap().unwrap().status_id, None);
@@ -250,8 +302,14 @@ async fn job_tracking_defaults_and_status_delete_clears() {
 async fn job_description_text_is_editable() {
     let s = store().await;
     let jd = s.create_jd("Dev", "Acme", "old", "", None).await.unwrap();
-    assert!(s.update_jd_text(jd, "## New\n\nBuild compilers.").await.unwrap());
-    assert_eq!(s.get_jd(jd).await.unwrap().unwrap().raw_text, "## New\n\nBuild compilers.");
+    assert!(s
+        .update_jd_text(jd, "## New\n\nBuild compilers.")
+        .await
+        .unwrap());
+    assert_eq!(
+        s.get_jd(jd).await.unwrap().unwrap().raw_text,
+        "## New\n\nBuild compilers."
+    );
     assert!(!s.update_jd_text(9999, "x").await.unwrap());
 }
 
@@ -260,9 +318,15 @@ async fn secret_roundtrip() {
     let s = store().await;
     assert_eq!(s.get_secret("openrouter").await.unwrap(), None);
     s.set_secret("openrouter", "sk-or-1").await.unwrap();
-    assert_eq!(s.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-1"));
+    assert_eq!(
+        s.get_secret("openrouter").await.unwrap().as_deref(),
+        Some("sk-or-1")
+    );
     s.set_secret("openrouter", "sk-or-2").await.unwrap();
-    assert_eq!(s.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-2"));
+    assert_eq!(
+        s.get_secret("openrouter").await.unwrap().as_deref(),
+        Some("sk-or-2")
+    );
     s.delete_secret("openrouter").await.unwrap();
     assert_eq!(s.get_secret("openrouter").await.unwrap(), None);
 }
@@ -271,7 +335,10 @@ fn profile(industry: &str) -> CompanyProfile {
     CompanyProfile {
         industry: industry.into(),
         tech_stack: vec!["Rust".into()],
-        sources: vec![Source { url: "https://acme.com".into(), title: "Acme".into() }],
+        sources: vec![Source {
+            url: "https://acme.com".into(),
+            title: "Acme".into(),
+        }],
         ..Default::default()
     }
 }
@@ -280,12 +347,25 @@ fn profile(industry: &str) -> CompanyProfile {
 async fn company_lookup_order() {
     let s = store().await;
     let by_name = s.create_company("Acme", "acme", None).await.unwrap();
-    let by_domain = s.create_company("Other", "other", Some("acme.com")).await.unwrap();
-    let hit = s.find_company(Some("acme.com"), "acme").await.unwrap().unwrap();
+    let by_domain = s
+        .create_company("Other", "other", Some("acme.com"))
+        .await
+        .unwrap();
+    let hit = s
+        .find_company(Some("acme.com"), "acme")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(hit.id, by_domain.id);
-    assert_eq!(s.find_company(None, "acme").await.unwrap().unwrap().id, by_name.id);
+    assert_eq!(
+        s.find_company(None, "acme").await.unwrap().unwrap().id,
+        by_name.id
+    );
     s.add_alias("acme corp", by_name.id).await.unwrap();
-    assert_eq!(s.find_company(None, "acme corp").await.unwrap().unwrap().id, by_name.id);
+    assert_eq!(
+        s.find_company(None, "acme corp").await.unwrap().unwrap().id,
+        by_name.id
+    );
     assert!(s.find_company(None, "nobody").await.unwrap().is_none());
     assert_eq!(by_name.status, CompanyStatus::Pending);
 }
@@ -294,11 +374,22 @@ async fn company_lookup_order() {
 async fn save_research_clears_edit() {
     let s = store().await;
     let c = s.create_company("Acme", "acme", None).await.unwrap();
-    s.mark_research_failed(c.id, "boom", "2030-01-01 00:00:00").await.unwrap();
+    s.mark_research_failed(c.id, "boom", "2030-01-01 00:00:00")
+        .await
+        .unwrap();
     let edited = s.edit_company(c.id, &profile("Edited")).await.unwrap();
     assert!(edited.edited_at.is_some());
     assert_eq!(edited.profile.industry, "Edited");
-    let saved = s.save_research(c.id, "Acme Inc", Some("acme.com"), &profile("Fintech"), "lfm").await.unwrap();
+    let saved = s
+        .save_research(
+            c.id,
+            "Acme Inc",
+            Some("acme.com"),
+            &profile("Fintech"),
+            "lfm",
+        )
+        .await
+        .unwrap();
     assert_eq!(saved.edited_at, None);
     assert_eq!(saved.profile, profile("Fintech"));
     assert_eq!(saved.name, "Acme Inc");
@@ -315,8 +406,12 @@ async fn save_research_clears_edit() {
 async fn mark_failed_increments() {
     let s = store().await;
     let c = s.create_company("Acme", "acme", None).await.unwrap();
-    s.mark_research_failed(c.id, "one", "2030-01-01 00:00:00").await.unwrap();
-    s.mark_research_failed(c.id, "two", "2030-01-02 00:00:00").await.unwrap();
+    s.mark_research_failed(c.id, "one", "2030-01-01 00:00:00")
+        .await
+        .unwrap();
+    s.mark_research_failed(c.id, "two", "2030-01-02 00:00:00")
+        .await
+        .unwrap();
     let got = s.get_company(c.id).await.unwrap();
     assert_eq!(got.fail_count, 2);
     assert_eq!(got.last_error, "two");
@@ -327,16 +422,34 @@ async fn mark_failed_increments() {
 #[tokio::test]
 async fn merge_moves_aliases_and_jobs() {
     let s = store().await;
-    let keep = s.create_company("Acme", "acme", Some("acme.com")).await.unwrap();
-    let dup = s.create_company("Acme Labs", "acme labs", None).await.unwrap();
+    let keep = s
+        .create_company("Acme", "acme", Some("acme.com"))
+        .await
+        .unwrap();
+    let dup = s
+        .create_company("Acme Labs", "acme labs", None)
+        .await
+        .unwrap();
     s.add_alias("acmelabs", dup.id).await.unwrap();
-    let jd = s.create_jd("Dev", "Acme Labs", "text", "", None).await.unwrap();
+    let jd = s
+        .create_jd("Dev", "Acme Labs", "text", "", None)
+        .await
+        .unwrap();
     s.set_jd_company(jd, Some(dup.id)).await.unwrap();
     s.merge_company(dup.id, keep.id).await.unwrap();
     assert!(s.get_company(dup.id).await.is_err());
-    assert_eq!(s.find_company(None, "acmelabs").await.unwrap().unwrap().id, keep.id);
-    assert_eq!(s.find_company(None, "acme labs").await.unwrap().unwrap().id, keep.id);
-    assert_eq!(s.get_jd(jd).await.unwrap().unwrap().company_id, Some(keep.id));
+    assert_eq!(
+        s.find_company(None, "acmelabs").await.unwrap().unwrap().id,
+        keep.id
+    );
+    assert_eq!(
+        s.find_company(None, "acme labs").await.unwrap().unwrap().id,
+        keep.id
+    );
+    assert_eq!(
+        s.get_jd(jd).await.unwrap().unwrap().company_id,
+        Some(keep.id)
+    );
 }
 
 #[tokio::test]
@@ -345,8 +458,17 @@ async fn run_records_company_researched_at() {
     let jd = s.create_jd("Dev", "Acme", "text", "", None).await.unwrap();
     let run = s.create_run(jd, "clef-flash").await.unwrap();
     assert_eq!(s.get_run(run).await.unwrap().company_researched_at, None);
-    s.set_run_company(run, Some("2026-10-08 10:00:00")).await.unwrap();
-    assert_eq!(s.get_run(run).await.unwrap().company_researched_at.as_deref(), Some("2026-10-08 10:00:00"));
+    s.set_run_company(run, Some("2026-10-08 10:00:00"))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.get_run(run)
+            .await
+            .unwrap()
+            .company_researched_at
+            .as_deref(),
+        Some("2026-10-08 10:00:00")
+    );
 }
 
 fn processed(message_id: &str, run_id: i64, outcome: Outcome) -> NewProcessed {
@@ -497,12 +619,19 @@ async fn processed_email_serializes_outcomes_in_snake_case() {
 async fn apply_memory_remembers_repoints_and_forgets() {
     let s = Store::open("sqlite::memory:").await.unwrap();
     assert!(s.apply_memory().await.unwrap().is_empty());
-    s.remember_label("nombre de pila", "first_name").await.unwrap();
-    s.remember_label("nombre de pila", "first_name").await.unwrap();
+    s.remember_label("nombre de pila", "first_name")
+        .await
+        .unwrap();
+    s.remember_label("nombre de pila", "first_name")
+        .await
+        .unwrap();
     s.remember_label("apodo", "first_name").await.unwrap();
     s.remember_label("apodo", "full_name").await.unwrap();
     let m = s.apply_memory().await.unwrap();
-    assert_eq!(m.get("nombre de pila").map(String::as_str), Some("first_name"));
+    assert_eq!(
+        m.get("nombre de pila").map(String::as_str),
+        Some("first_name")
+    );
     assert_eq!(m.get("apodo").map(String::as_str), Some("full_name"));
     s.forget_label("apodo").await.unwrap();
     assert!(!s.apply_memory().await.unwrap().contains_key("apodo"));
@@ -511,8 +640,14 @@ async fn apply_memory_remembers_repoints_and_forgets() {
 #[tokio::test]
 async fn job_emails_are_scoped_to_the_job_newest_first() {
     let s = store().await;
-    let job = s.create_jd("Engineer", "Acme", "text", "", None).await.unwrap();
-    let other = s.create_jd("Designer", "Beta", "text", "", None).await.unwrap();
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", None)
+        .await
+        .unwrap();
+    let other = s
+        .create_jd("Designer", "Beta", "text", "", None)
+        .await
+        .unwrap();
     let run = s.create_scan_run().await.unwrap();
     for (id, job_id, received) in [
         ("msg-old", job, "2026-10-01 09:00:00"),

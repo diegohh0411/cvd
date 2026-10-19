@@ -79,10 +79,21 @@ impl FieldSpec {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum FillAction {
     /// Type `value` into a text-like field, or pick the option with this exact text.
-    Set { key: String, value: String, fact: &'static str },
+    Set {
+        key: String,
+        value: String,
+        fact: &'static str,
+    },
     /// Attach the job's CV PDF.
-    File { key: String, name: String, b64: String },
-    NeedsUser { key: String, reason: String },
+    File {
+        key: String,
+        name: String,
+        b64: String,
+    },
+    NeedsUser {
+        key: String,
+        reason: String,
+    },
 }
 
 impl FillAction {

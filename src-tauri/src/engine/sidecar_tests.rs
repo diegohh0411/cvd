@@ -53,9 +53,17 @@ fn run_stub(port: u16, cfg: StubCfg, alive: Arc<AtomicBool>, hits: Arc<AtomicUsi
             let (status, payload, die) = match path.as_str() {
                 "/health" if health_left_503 > 0 => {
                     health_left_503 -= 1;
-                    ("503 Service Unavailable", r#"{"error":{"code":503,"message":"Loading model"}}"#.to_string(), false)
+                    (
+                        "503 Service Unavailable",
+                        r#"{"error":{"code":503,"message":"Loading model"}}"#.to_string(),
+                        false,
+                    )
                 }
-                "/health" => ("200 OK", r#"{"status":"ok"}"#.to_string(), matches!(cfg.death, Death::AfterHealthy)),
+                "/health" => (
+                    "200 OK",
+                    r#"{"status":"ok"}"#.to_string(),
+                    matches!(cfg.death, Death::AfterHealthy),
+                ),
                 "/v1/systemone" => {
                     hits.fetch_add(1, Ordering::SeqCst);
                     decisions += 1;
@@ -67,7 +75,11 @@ fn run_stub(port: u16, cfg: StubCfg, alive: Arc<AtomicBool>, hits: Arc<AtomicUsi
                         .map(|k| (k.clone(), serde_json::json!({"type": "noul", "noul": 0.7})))
                         .collect();
                     let die = matches!(cfg.death, Death::AfterDecisions(n) if decisions >= n);
-                    ("200 OK", serde_json::json!({ "answers": answers }).to_string(), die)
+                    (
+                        "200 OK",
+                        serde_json::json!({ "answers": answers }).to_string(),
+                        die,
+                    )
                 }
                 _ => ("404 Not Found", "{}".to_string(), false),
             };
@@ -120,9 +132,17 @@ impl StubLauncher {
 }
 
 impl Launcher for StubLauncher {
-    fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
+    fn spawn(
+        &self,
+        model: &Path,
+        port: u16,
+        kind: ModelKind,
+    ) -> Result<Box<dyn Child>, EngineError> {
         let i = self.spawns.fetch_add(1, Ordering::SeqCst);
-        self.args.lock().unwrap().push(server_args(model, port, kind));
+        self.args
+            .lock()
+            .unwrap()
+            .push(server_args(model, port, kind));
         let cfg = self.cfgs[i.min(self.cfgs.len() - 1)];
         let alive = Arc::new(AtomicBool::new(true));
         run_stub(port, cfg, alive.clone(), self.hits.clone());
@@ -130,17 +150,29 @@ impl Launcher for StubLauncher {
     }
 }
 
-const HEALTHY: StubCfg = StubCfg { health_503s: 0, death: Death::Never };
+const HEALTHY: StubCfg = StubCfg {
+    health_503s: 0,
+    death: Death::Never,
+};
 
 fn questions() -> BTreeMap<String, Question> {
     let mut qs = BTreeMap::new();
-    qs.insert("q".to_string(), Question::Noul { instructions: "Rust?".into() });
+    qs.insert(
+        "q".to_string(),
+        Question::Noul {
+            instructions: "Rust?".into(),
+        },
+    );
     qs
 }
 
 fn sidecar(l: StubLauncher) -> (LlamaSidecar, Arc<AtomicUsize>, Arc<Mutex<Vec<Vec<String>>>>) {
     let (spawns, args) = (l.spawns.clone(), l.args.clone());
-    (LlamaSidecar::new(Box::new(l), PathBuf::from("/models/clef.gguf")), spawns, args)
+    (
+        LlamaSidecar::new(Box::new(l), PathBuf::from("/models/clef.gguf")),
+        spawns,
+        args,
+    )
 }
 
 #[tokio::test]
@@ -156,25 +188,43 @@ async fn starts_lazily() {
 
 #[tokio::test]
 async fn waits_for_health() {
-    let l = StubLauncher::new(vec![StubCfg { health_503s: 2, death: Death::Never }]);
+    let l = StubLauncher::new(vec![StubCfg {
+        health_503s: 2,
+        death: Death::Never,
+    }]);
     let (s, spawns, _) = sidecar(l);
-    assert_eq!(s.decide("state", &questions()).await.unwrap()["q"], Answer::Noul { p: 0.7 });
+    assert_eq!(
+        s.decide("state", &questions()).await.unwrap()["q"],
+        Answer::Noul { p: 0.7 }
+    );
     assert_eq!(spawns.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
 async fn restarts_once_then_succeeds() {
-    let dies_after_one = StubCfg { health_503s: 0, death: Death::AfterDecisions(1) };
+    let dies_after_one = StubCfg {
+        health_503s: 0,
+        death: Death::AfterDecisions(1),
+    };
     let (s, spawns, _) = sidecar(StubLauncher::new(vec![dies_after_one, HEALTHY]));
     s.decide("state", &questions()).await.unwrap();
-    assert_eq!(s.decide("state", &questions()).await.unwrap()["q"], Answer::Noul { p: 0.7 });
+    assert_eq!(
+        s.decide("state", &questions()).await.unwrap()["q"],
+        Answer::Noul { p: 0.7 }
+    );
     assert_eq!(spawns.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
 async fn restarts_once_then_fails() {
-    let dies_after_one = StubCfg { health_503s: 0, death: Death::AfterDecisions(1) };
-    let dies_at_once = StubCfg { health_503s: 0, death: Death::AfterHealthy };
+    let dies_after_one = StubCfg {
+        health_503s: 0,
+        death: Death::AfterDecisions(1),
+    };
+    let dies_at_once = StubCfg {
+        health_503s: 0,
+        death: Death::AfterHealthy,
+    };
     let (s, spawns, _) = sidecar(StubLauncher::new(vec![dies_after_one, dies_at_once]));
     s.decide("state", &questions()).await.unwrap();
     let err = s.decide("state", &questions()).await.unwrap_err();
@@ -192,7 +242,10 @@ async fn binds_loopback() {
     assert_eq!(a[host + 1], "127.0.0.1");
     let ub = a.iter().position(|x| x == "-ub").expect("-ub");
     assert_eq!(a[ub + 1], "16384");
-    assert_eq!(a[a.iter().position(|x| x == "-m").unwrap() + 1], "/models/clef.gguf");
+    assert_eq!(
+        a[a.iter().position(|x| x == "-m").unwrap() + 1],
+        "/models/clef.gguf"
+    );
 }
 
 #[tokio::test]
@@ -209,19 +262,31 @@ async fn overflow_body_maps_to_context_overflow() {
             let (status, body) = if req.starts_with("GET /health") {
                 ("200 OK", r#"{"status":"ok"}"#)
             } else {
-                ("500 Internal Server Error", r#"{"error":{"code":500,"message":"input (1921 tokens) is too large to process. increase the physical batch size (current batch size: 512)","type":"server_error"}}"#)
+                (
+                    "500 Internal Server Error",
+                    r#"{"error":{"code":500,"message":"input (1921 tokens) is too large to process. increase the physical batch size (current batch size: 512)","type":"server_error"}}"#,
+                )
             };
-            let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
         }
     });
     struct Fixed;
     impl Launcher for Fixed {
         fn spawn(&self, _: &Path, _: u16, _: ModelKind) -> Result<Box<dyn Child>, EngineError> {
-            Ok(Box::new(StubChild { alive: Arc::new(AtomicBool::new(true)) }))
+            Ok(Box::new(StubChild {
+                alive: Arc::new(AtomicBool::new(true)),
+            }))
         }
     }
     let s = LlamaSidecar::new(Box::new(Fixed), PathBuf::from("m")).with_fixed_port(port);
-    assert_eq!(s.decide("state", &questions()).await, Err(EngineError::ContextOverflow));
+    assert_eq!(
+        s.decide("state", &questions()).await,
+        Err(EngineError::ContextOverflow)
+    );
 }
 
 #[tokio::test]
@@ -230,7 +295,10 @@ async fn shutdown_kills_child_and_refuses_new_work() {
     let (s, spawns, _) = sidecar(l);
     s.decide("state", &questions()).await.unwrap();
     s.shutdown();
-    assert!(matches!(s.decide("state", &questions()).await, Err(EngineError::Unavailable(_))));
+    assert!(matches!(
+        s.decide("state", &questions()).await,
+        Err(EngineError::Unavailable(_))
+    ));
     assert_eq!(spawns.load(Ordering::SeqCst), 1);
 }
 
@@ -249,7 +317,12 @@ async fn real_server_shape() {
         }
     }
     impl Launcher for ProcessLauncher {
-        fn spawn(&self, model: &Path, port: u16, kind: ModelKind) -> Result<Box<dyn Child>, EngineError> {
+        fn spawn(
+            &self,
+            model: &Path,
+            port: u16,
+            kind: ModelKind,
+        ) -> Result<Box<dyn Child>, EngineError> {
             let c = std::process::Command::new(&self.0)
                 .args(server_args(model, port, kind))
                 .stdout(std::process::Stdio::null())
@@ -264,11 +337,19 @@ async fn real_server_shape() {
         .expect("run scripts/fetch-llama-server.sh first")
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("llama-server-"))
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("llama-server-")
+        })
         .expect("llama-server-<triple> in binaries/");
     let s = LlamaSidecar::new(Box::new(ProcessLauncher(bin)), PathBuf::from(model));
     let got = s
-        .decide("Senior Rust engineer, async services, Tokio, PostgreSQL.", &questions())
+        .decide(
+            "Senior Rust engineer, async services, Tokio, PostgreSQL.",
+            &questions(),
+        )
         .await
         .unwrap();
     s.shutdown();

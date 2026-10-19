@@ -52,7 +52,12 @@ mod tests {
     fn jobs() -> Vec<JobDescription> {
         vec![
             job(1, "Stripe", "Backend Engineer", "https://stripe.com/jobs/1"),
-            job(2, "Google", "Software Engineer", "https://careers.google.com/x"),
+            job(
+                2,
+                "Google",
+                "Software Engineer",
+                "https://careers.google.com/x",
+            ),
             job(3, "Acme", "Product Designer", ""),
         ]
     }

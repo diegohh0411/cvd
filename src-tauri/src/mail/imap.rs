@@ -62,7 +62,12 @@ impl ImapSource {
             .map_err(|error| MailError::Protocol(error.to_string()))?;
         let mailboxes = names
             .iter()
-            .filter(|name| !name.attributes().iter().any(|a| matches!(a, NameAttribute::NoSelect)))
+            .filter(|name| {
+                !name
+                    .attributes()
+                    .iter()
+                    .any(|a| matches!(a, NameAttribute::NoSelect))
+            })
             .map(|name| name.name().to_string())
             .collect();
         session

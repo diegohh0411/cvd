@@ -155,7 +155,7 @@ export interface Selection {
 export type Target = { Entry: number } | { Bullet: number };
 
 /** `{ Include: Target }`, `{ Exclude: Target }` or `{ Order: entryIds }`. */
-export type Override = { Include: Target } | { Exclude: Target } | { Order: number[] };
+export type Override = { Include: Target } | { Exclude: Target } | { Order: number[] } | { BulletOrder: number[] };
 
 export interface FitOutput {
   selection: Selection;

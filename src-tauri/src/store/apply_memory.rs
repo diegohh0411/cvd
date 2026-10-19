@@ -7,8 +7,13 @@ use super::{Result, Store};
 
 impl Store {
     pub async fn apply_memory(&self) -> Result<BTreeMap<String, String>> {
-        let rows = sqlx::query("SELECT label_norm, fact_key FROM apply_memory").fetch_all(&self.pool).await?;
-        Ok(rows.iter().map(|r| (r.get("label_norm"), r.get("fact_key"))).collect())
+        let rows = sqlx::query("SELECT label_norm, fact_key FROM apply_memory")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get("label_norm"), r.get("fact_key")))
+            .collect())
     }
 
     /// Records (or re-points) a label; `hits` counts how often it was confirmed.
@@ -28,7 +33,10 @@ impl Store {
     }
 
     pub async fn forget_label(&self, label_norm: &str) -> Result<()> {
-        sqlx::query("DELETE FROM apply_memory WHERE label_norm = ?").bind(label_norm).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM apply_memory WHERE label_norm = ?")
+            .bind(label_norm)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

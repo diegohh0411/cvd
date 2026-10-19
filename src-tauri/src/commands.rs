@@ -6,30 +6,34 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::autofill::{build_facts, ApplyDefaults, Fact, APPLY_DEFAULTS_KEY};
-use crate::company::{self, agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS}, coordinator::ResearchCoordinator};
-use crate::search::{ExaSearch, SearchProvider, EXA};
-use crate::state::ResearchEnv;
-use crate::store::types::{Company, CompanyProfile};
-use crate::store::StoreError;
-use tokio_util::sync::CancellationToken;
-use crate::providers::{
-    kind_of, load_rows, next_id, save_rows, Connection, ModelRef, OpenRouterProvider, ProviderModels, SubQProvider, TypeSafeProvider,
-    OPENROUTER, SUBQ, TYPESAFE,
+use crate::company::{
+    self,
+    agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS},
+    coordinator::ResearchCoordinator,
 };
 use crate::engine::EngineError;
-use crate::matcher::{self, MatchConfig, MatchError, Ranked};
-use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
-use crate::render::fit::{self, Override, Selection};
-use crate::render::{self, Compiled, RenderError, StyleStep};
 use crate::mail::account::{self, MailAccount};
 use crate::mail::imap::{ImapSource, MailSource};
 use crate::mail::scan::{self, ScanDeps};
+use crate::matcher::{self, MatchConfig, MatchError, Ranked};
+use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
+use crate::providers::{
+    kind_of, load_rows, next_id, save_rows, Connection, ModelRef, OpenRouterProvider,
+    ProviderModels, SubQProvider, TypeSafeProvider, OPENROUTER, SUBQ, TYPESAFE,
+};
+use crate::render::fit::{self, Override, Selection};
+use crate::render::{self, Compiled, RenderError, StyleStep};
+use crate::search::{ExaSearch, SearchProvider, EXA};
 use crate::state::AppState;
-use crate::web::{self, FetchPolicy};
+use crate::state::ResearchEnv;
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
+use crate::store::types::{Company, CompanyProfile};
+use crate::store::StoreError;
 use crate::store::{ProcessedEmail, Store};
+use crate::web::{self, FetchPolicy};
+use tokio_util::sync::CancellationToken;
 
 pub const MATCH_EVENT: &str = "match://progress";
 pub const DOWNLOAD_EVENT: &str = "model://download";
@@ -93,7 +97,9 @@ impl From<crate::mail::imap::MailError> for AppError {
         use crate::mail::imap::MailError;
         match e {
             MailError::Auth(_) => Self::MailAuth(e.to_string()),
-            MailError::Connection(_) | MailError::Protocol(_) => Self::MailUnavailable(e.to_string()),
+            MailError::Connection(_) | MailError::Protocol(_) => {
+                Self::MailUnavailable(e.to_string())
+            }
         }
     }
 }
@@ -101,7 +107,9 @@ impl From<crate::mail::imap::MailError> for AppError {
 impl From<StoreError> for AppError {
     fn from(e: StoreError) -> Self {
         match &e {
-            StoreError::Db(sqlx::Error::RowNotFound) | StoreError::NotFound => Self::NotFound("Not found.".into()),
+            StoreError::Db(sqlx::Error::RowNotFound) | StoreError::NotFound => {
+                Self::NotFound("Not found.".into())
+            }
             StoreError::Invalid(m) if m.starts_with("no ") => Self::NotFound(m.clone()),
             StoreError::Invalid(m) => Self::Io(m.clone()),
             _ => Self::Io(e.to_string()),
@@ -115,9 +123,9 @@ impl From<EngineError> for AppError {
             EngineError::ContextOverflow => Self::ContextOverflow(e.to_string()),
             EngineError::Unauthorized(_) => Self::ProviderAuth(e.to_string()),
             EngineError::InsufficientCredits(_) => Self::ProviderCredits(e.to_string()),
-            EngineError::RateLimited | EngineError::Network(_) | EngineError::ModelUnavailable(_) => {
-                Self::ProviderUnavailable(e.to_string())
-            }
+            EngineError::RateLimited
+            | EngineError::Network(_)
+            | EngineError::ModelUnavailable(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
     }
@@ -127,9 +135,8 @@ impl From<crate::providers::ProviderError> for AppError {
     fn from(e: crate::providers::ProviderError) -> Self {
         match e {
             crate::providers::ProviderError::Missing(m) => Self::ModelMissing(m),
-            crate::providers::ProviderError::Unauthorized | crate::providers::ProviderError::KeyRejected(_) => {
-                Self::ProviderAuth(e.to_string())
-            }
+            crate::providers::ProviderError::Unauthorized
+            | crate::providers::ProviderError::KeyRejected(_) => Self::ProviderAuth(e.to_string()),
             crate::providers::ProviderError::Network(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
@@ -217,19 +224,31 @@ pub async fn create_job(
     url: &str,
     status_id: Option<i64>,
 ) -> Res<i64> {
-    Ok(st.store.create_jd(title, company, raw_text, url, status_id).await?)
+    Ok(st
+        .store
+        .create_jd(title, company, raw_text, url, status_id)
+        .await?)
 }
 
-pub async fn update_job_tracking(st: &AppState, id: i64, status_id: Option<i64>, url: &str) -> Res<()> {
+pub async fn update_job_tracking(
+    st: &AppState,
+    id: i64,
+    status_id: Option<i64>,
+    url: &str,
+) -> Res<()> {
     if !st.store.update_jd_tracking(id, status_id, url).await? {
-        return Err(AppError::NotFound(format!("Job description {id} not found.")));
+        return Err(AppError::NotFound(format!(
+            "Job description {id} not found."
+        )));
     }
     Ok(())
 }
 
 pub async fn update_job_description(st: &AppState, id: i64, raw_text: &str) -> Res<()> {
     if !st.store.update_jd_text(id, raw_text).await? {
-        return Err(AppError::NotFound(format!("Job description {id} not found.")));
+        return Err(AppError::NotFound(format!(
+            "Job description {id} not found."
+        )));
     }
     Ok(())
 }
@@ -239,7 +258,9 @@ const JOB_PAGE_CHARS: usize = 30_000;
 
 /// Reads a posting's text from its URL, for when the user didn't paste the description.
 pub async fn fetch_job_description(url: &str) -> Res<String> {
-    web::fetch_text(url, FetchPolicy::PublicOnly, JOB_PAGE_CHARS).await.map_err(|e| AppError::Io(e.to_string()))
+    web::fetch_text(url, FetchPolicy::PublicOnly, JOB_PAGE_CHARS)
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))
 }
 
 // ---- job statuses ----
@@ -253,7 +274,12 @@ pub async fn create_job_status(st: &AppState, name: &str, color: StatusColor) ->
     status_by_id(st, id).await
 }
 
-pub async fn update_job_status(st: &AppState, id: i64, name: &str, color: StatusColor) -> Res<JobStatus> {
+pub async fn update_job_status(
+    st: &AppState,
+    id: i64,
+    name: &str,
+    color: StatusColor,
+) -> Res<JobStatus> {
     if !st.store.update_job_status(id, name, color).await? {
         return Err(AppError::NotFound(format!("Status {id} not found.")));
     }
@@ -320,7 +346,9 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
     if st.cancel_run(run_id) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Match run {run_id} is not running.")))
+        Err(AppError::NotFound(format!(
+            "Match run {run_id} is not running."
+        )))
     }
 }
 
@@ -338,13 +366,34 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
     let skip = st.register_skip(run_id);
     tokio::spawn(async move {
         let progress_emit = emit.clone();
-        let on_progress = move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p }));
-        let context = company_context(&store, &coordinator, &env, run_id, &token, skip, &on_progress).await;
-        skips.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id);
+        let on_progress =
+            move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p }));
+        let context = company_context(
+            &store,
+            &coordinator,
+            &env,
+            run_id,
+            &token,
+            skip,
+            &on_progress,
+        )
+        .await;
+        skips
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&run_id);
         let outcome = match context {
             Ok(ctx) => {
-                matcher::resume_match(&store, &*engine, run_id, MatchConfig::default(), ctx.as_deref(), token, on_progress)
-                    .await
+                matcher::resume_match(
+                    &store,
+                    &*engine,
+                    run_id,
+                    MatchConfig::default(),
+                    ctx.as_deref(),
+                    token,
+                    on_progress,
+                )
+                .await
             }
             Err(e) => Err(e.into()),
         };
@@ -357,9 +406,10 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
         }
         match outcome {
             Ok(_) => {}
-            Err(MatchError::Cancelled { .. }) => {
-                emit(MATCH_EVENT, json!({ "run_id": run_id, "event": { "stage": "cancelled" } }))
-            }
+            Err(MatchError::Cancelled { .. }) => emit(
+                MATCH_EVENT,
+                json!({ "run_id": run_id, "event": { "stage": "cancelled" } }),
+            ),
             Err(e) => emit(
                 MATCH_EVENT,
                 json!({ "run_id": run_id, "event": { "stage": "failed", "error": AppError::from(e) } }),
@@ -384,8 +434,13 @@ async fn company_context(
     on_progress: &(impl Fn(matcher::Progress) + Send + Sync),
 ) -> Result<Option<String>, StoreError> {
     let jd_id = store.get_run(run_id).await?.jd_id;
-    let Some(jd) = store.get_jd(jd_id).await? else { return Ok(None) };
-    let (normalized, domain) = (company::normalize_name(&jd.company), company::domain_from_url(&jd.url));
+    let Some(jd) = store.get_jd(jd_id).await? else {
+        return Ok(None);
+    };
+    let (normalized, domain) = (
+        company::normalize_name(&jd.company),
+        company::domain_from_url(&jd.url),
+    );
     if normalized.is_empty() && domain.is_none() {
         store.set_run_company(run_id, None).await?;
         return Ok(None);
@@ -399,8 +454,14 @@ async fn company_context(
         None => match store.find_company(domain.as_deref(), &normalized).await? {
             Some(c) => c,
             None => {
-                let name = if jd.company.trim().is_empty() { domain.clone().unwrap_or_default() } else { jd.company.trim().to_string() };
-                store.create_company(&name, &normalized, domain.as_deref()).await?
+                let name = if jd.company.trim().is_empty() {
+                    domain.clone().unwrap_or_default()
+                } else {
+                    jd.company.trim().to_string()
+                };
+                store
+                    .create_company(&name, &normalized, domain.as_deref())
+                    .await?
             }
         },
     };
@@ -427,7 +488,12 @@ async fn company_context(
     };
     // Any researched profile beats none, even a stale one whose refresh failed.
     let usable = current.filter(|c| c.researched_at.is_some());
-    store.set_run_company(run_id, usable.as_ref().and_then(|c| c.researched_at.as_deref())).await?;
+    store
+        .set_run_company(
+            run_id,
+            usable.as_ref().and_then(|c| c.researched_at.as_deref()),
+        )
+        .await?;
     Ok(usable.map(|c| company::render(&c.name, c.domain.as_deref(), &c.profile)))
 }
 
@@ -443,7 +509,9 @@ pub async fn skip_research(st: &AppState, run_id: i64, mode: &str) -> Res<()> {
     if st.skip(run_id) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Match run {run_id} is not waiting for company research.")))
+        Err(AppError::NotFound(format!(
+            "Match run {run_id} is not waiting for company research."
+        )))
     }
 }
 
@@ -454,7 +522,10 @@ pub async fn rescore(st: &AppState, run_id: i64) -> Res<i64> {
 }
 
 pub async fn get_company(st: &AppState, id: i64) -> Res<Company> {
-    st.store.get_company(id).await.map_err(|_| AppError::NotFound(format!("Company {id} not found.")))
+    st.store
+        .get_company(id)
+        .await
+        .map_err(|_| AppError::NotFound(format!("Company {id} not found.")))
 }
 
 pub async fn get_job_company(st: &AppState, jd_id: i64) -> Res<Option<Company>> {
@@ -473,8 +544,15 @@ pub async fn edit_company(st: &AppState, id: i64, profile: CompanyProfile) -> Re
 /// Researches the company now, ignoring the TTL and any backoff.
 pub async fn refresh_company(st: &AppState, id: i64) -> Res<Company> {
     let c = get_company(st, id).await?;
-    let input = ResearchInput { name: c.name.clone(), domain: c.domain.clone(), jd_snippet: String::new() };
-    Ok(st.coordinator.start(&st.store, c, input, st.research_env().research_fn()).await?)
+    let input = ResearchInput {
+        name: c.name.clone(),
+        domain: c.domain.clone(),
+        jd_snippet: String::new(),
+    };
+    Ok(st
+        .coordinator
+        .start(&st.store, c, input, st.research_env().research_fn())
+        .await?)
 }
 
 pub async fn list_runs(st: &AppState, jd_id: i64) -> Res<Vec<MatchRun>> {
@@ -507,16 +585,24 @@ pub struct FitOutput {
     pub pdf_base64: String,
 }
 
-pub async fn fit_cv(st: &AppState, run_id: i64, budget: u8, overrides: Vec<Override>) -> Res<FitOutput> {
+pub async fn fit_cv(
+    st: &AppState,
+    run_id: i64,
+    budget: u8,
+    overrides: Vec<Override>,
+) -> Res<FitOutput> {
     if !(1..=2).contains(&budget) {
-        return Err(AppError::Render(format!("page budget must be 1 or 2, got {budget}")));
+        return Err(AppError::Render(format!(
+            "page budget must be 1 or 2, got {budget}"
+        )));
     }
     let ranked = get_ranked(st, run_id).await?;
     let profile = get_profile(st).await?;
     let floor = MatchConfig::default().score_floor;
-    let r = tokio::task::spawn_blocking(move || fit::fit(&ranked, &profile, budget, floor, &overrides))
-        .await
-        .map_err(join_err)??;
+    let r =
+        tokio::task::spawn_blocking(move || fit::fit(&ranked, &profile, budget, floor, &overrides))
+            .await
+            .map_err(join_err)??;
     Ok(FitOutput {
         selection: r.selection,
         pages: r.compiled.pages,
@@ -562,7 +648,8 @@ pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: S
     })
     .await
     .map_err(join_err)??;
-    let selection_json = serde_json::to_string(&selection).map_err(|e| AppError::Io(e.to_string()))?;
+    let selection_json =
+        serde_json::to_string(&selection).map_err(|e| AppError::Io(e.to_string()))?;
     Ok(st
         .store
         .save_cv(&CvInput {
@@ -603,11 +690,14 @@ pub async fn set_ui_setting(st: &AppState, key: &str, value: &str) -> Res<()> {
 // ---- auto-apply ----
 
 pub async fn get_apply_defaults(st: &AppState) -> Res<ApplyDefaults> {
-    Ok(ApplyDefaults::from_setting(st.store.get_setting(APPLY_DEFAULTS_KEY).await?.as_deref()))
+    Ok(ApplyDefaults::from_setting(
+        st.store.get_setting(APPLY_DEFAULTS_KEY).await?.as_deref(),
+    ))
 }
 
 pub async fn save_apply_defaults(st: &AppState, defaults: ApplyDefaults) -> Res<()> {
-    let json = serde_json::to_string(&defaults.trimmed()).map_err(|e| AppError::Io(e.to_string()))?;
+    let json =
+        serde_json::to_string(&defaults.trimmed()).map_err(|e| AppError::Io(e.to_string()))?;
     Ok(st.store.set_setting(APPLY_DEFAULTS_KEY, &json).await?)
 }
 
@@ -618,7 +708,12 @@ pub async fn apply_facts(st: &AppState) -> Res<Vec<Fact>> {
     let entries = st.store.list_entries(false).await?;
     let defaults = get_apply_defaults(st).await?;
     let now = chrono::Local::now();
-    Ok(build_facts(&profile, &entries, &defaults, (now.year(), now.month())))
+    Ok(build_facts(
+        &profile,
+        &entries,
+        &defaults,
+        (now.year(), now.month()),
+    ))
 }
 
 // ---- models ----
@@ -631,7 +726,9 @@ pub fn cancel_download(st: &AppState, id: &str) -> Res<()> {
     if st.cancel_download(id) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Model {id} is not downloading.")))
+        Err(AppError::NotFound(format!(
+            "Model {id} is not downloading."
+        )))
     }
 }
 
@@ -645,7 +742,10 @@ pub fn list_models(st: &AppState) -> Vec<ModelInfo> {
     let installed = models::installed(&st.models_dir);
     REGISTRY
         .iter()
-        .map(|spec| ModelInfo { spec, installed: installed.contains(&spec) })
+        .map(|spec| ModelInfo {
+            spec,
+            installed: installed.contains(&spec),
+        })
         .collect()
 }
 
@@ -675,7 +775,10 @@ async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
     for _ in 0..DOWNLOAD_ATTEMPTS {
         let emit = st.emitter();
         let on_progress = move |done: u64, total: u64| {
-            emit(DOWNLOAD_EVENT, json!({ "id": spec.id, "done": done, "total": total }))
+            emit(
+                DOWNLOAD_EVENT,
+                json!({ "id": spec.id, "done": done, "total": total }),
+            )
         };
         match models::download(spec, &st.models_dir, on_progress).await {
             Ok(_) => return Ok(()),
@@ -697,8 +800,14 @@ fn local_kind(id: &str) -> Res<ModelKind> {
 
 fn require_kind(id: &str, want: ModelKind) -> Res<()> {
     if local_kind(id)? != want {
-        let role = if want == ModelKind::Chat { "Company research" } else { "System One" };
-        return Err(AppError::NotFound(format!("Model {id} can't be used for {role}.")));
+        let role = if want == ModelKind::Chat {
+            "Company research"
+        } else {
+            "System One"
+        };
+        return Err(AppError::NotFound(format!(
+            "Model {id} can't be used for {role}."
+        )));
     }
     Ok(())
 }
@@ -711,7 +820,9 @@ pub async fn set_research_model(st: &AppState, id: &str) -> Res<()> {
     } else {
         st.providers().check(&r)?;
     }
-    st.store.set_setting(crate::state::RESEARCH_MODEL_KEY, id).await?;
+    st.store
+        .set_setting(crate::state::RESEARCH_MODEL_KEY, id)
+        .await?;
     st.reset_research();
     Ok(())
 }
@@ -724,7 +835,9 @@ pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     } else {
         st.providers().check(&r)?;
     }
-    st.store.set_setting(crate::state::ACTIVE_MODEL_KEY, id).await?;
+    st.store
+        .set_setting(crate::state::ACTIVE_MODEL_KEY, id)
+        .await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
@@ -753,20 +866,36 @@ fn known_provider(id: &str) -> Res<()> {
 fn key_status(key: Option<&str>) -> KeyStatus {
     KeyStatus {
         has_key: key.is_some(),
-        last4: key.map(|k| k.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect()),
+        last4: key.map(|k| {
+            k.chars()
+                .rev()
+                .take(4)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+        }),
     }
 }
 
 /// Checks `key` against the provider's own API.
 async fn validate_key(st: &AppState, kind: &str, key: &str) -> Res<()> {
     if kind == EXA {
-        ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
+        ExaSearch::new(st.exa_base.clone(), key.into())
+            .search("test", 1)
+            .await?;
     } else if kind == SUBQ {
-        SubQProvider::new(st.subq_base.clone(), key.into()).validate_key().await?;
+        SubQProvider::new(st.subq_base.clone(), key.into())
+            .validate_key()
+            .await?;
     } else if kind == TYPESAFE {
-        TypeSafeProvider::new(st.typesafe_base.clone(), key.into()).validate_key().await?;
+        TypeSafeProvider::new(st.typesafe_base.clone(), key.into())
+            .validate_key()
+            .await?;
     } else {
-        OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
+        OpenRouterProvider::new(st.openrouter_base.clone(), key.into())
+            .validate_key()
+            .await?;
     }
     Ok(())
 }
@@ -813,18 +942,36 @@ pub async fn list_connections(st: &AppState) -> Res<Vec<ConnectionView>> {
     let rows = load_rows(&st.store).await?;
     let mut out = Vec::new();
     for kind in [OPENROUTER, SUBQ, TYPESAFE] {
-        let extras = rows.iter().filter(|r| r.provider == kind && r.id != kind).map(|r| r.id.clone());
+        let extras = rows
+            .iter()
+            .filter(|r| r.provider == kind && r.id != kind)
+            .map(|r| r.id.clone());
         for id in std::iter::once(kind.to_string()).chain(extras) {
-            let Some(key) = st.store.get_secret(&id).await? else { continue };
-            let label = rows.iter().find(|r| r.id == id).map_or_else(|| kind.to_string(), |r| r.label.clone());
-            out.push(ConnectionView { last4: key_status(Some(&key)).last4, id, provider: kind.into(), label });
+            let Some(key) = st.store.get_secret(&id).await? else {
+                continue;
+            };
+            let label = rows
+                .iter()
+                .find(|r| r.id == id)
+                .map_or_else(|| kind.to_string(), |r| r.label.clone());
+            out.push(ConnectionView {
+                last4: key_status(Some(&key)).last4,
+                id,
+                provider: kind.into(),
+                label,
+            });
         }
     }
     Ok(out)
 }
 
 /// Saves another key for `provider` under a fresh connection id and a label such as "Work".
-pub async fn add_connection(st: &AppState, provider: &str, label: &str, key: &str) -> Res<ConnectionView> {
+pub async fn add_connection(
+    st: &AppState,
+    provider: &str,
+    label: &str,
+    key: &str,
+) -> Res<ConnectionView> {
     if provider != OPENROUTER && provider != SUBQ && provider != TYPESAFE {
         return Err(AppError::NotFound(format!("Unknown provider {provider}.")));
     }
@@ -836,13 +983,26 @@ pub async fn add_connection(st: &AppState, provider: &str, label: &str, key: &st
     validate_key(st, provider, key).await?;
     let mut rows = load_rows(&st.store).await?;
     // The first key of a provider keeps the bare id, so refs stored before connections still resolve.
-    let id = if st.store.get_secret(provider).await?.is_none() { provider.to_string() } else { next_id(provider, &rows) };
+    let id = if st.store.get_secret(provider).await?.is_none() {
+        provider.to_string()
+    } else {
+        next_id(provider, &rows)
+    };
     st.store.set_secret(&id, key).await?;
     rows.retain(|r| r.id != id);
-    rows.push(Connection { id: id.clone(), provider: provider.into(), label: label.into() });
+    rows.push(Connection {
+        id: id.clone(),
+        provider: provider.into(),
+        label: label.into(),
+    });
     save_rows(&st.store, &rows).await?;
     providers_changed(st).await?;
-    Ok(ConnectionView { id, provider: provider.into(), label: label.into(), last4: key_status(Some(key)).last4 })
+    Ok(ConnectionView {
+        id,
+        provider: provider.into(),
+        label: label.into(),
+        last4: key_status(Some(key)).last4,
+    })
 }
 
 pub async fn rename_connection(st: &AppState, id: &str, label: &str) -> Res<()> {
@@ -856,7 +1016,11 @@ pub async fn rename_connection(st: &AppState, id: &str, label: &str) -> Res<()> 
     }
     let mut rows = load_rows(&st.store).await?;
     rows.retain(|r| r.id != id);
-    rows.push(Connection { id: id.into(), provider: kind_of(id).into(), label: label.into() });
+    rows.push(Connection {
+        id: id.into(),
+        provider: kind_of(id).into(),
+        label: label.into(),
+    });
     save_rows(&st.store, &rows).await?;
     st.reload_providers().await?;
     Ok(())
@@ -868,7 +1032,11 @@ pub async fn provider_key_status(st: &AppState, provider: &str) -> Res<KeyStatus
 }
 
 /// `role` is `"decision"` (System One) or `"chat"` (company research).
-pub async fn list_remote_models(st: &AppState, refresh: bool, role: &str) -> Res<Vec<ProviderModels>> {
+pub async fn list_remote_models(
+    st: &AppState,
+    refresh: bool,
+    role: &str,
+) -> Res<Vec<ProviderModels>> {
     Ok(match role {
         "chat" => st.providers().remote_chat_models(refresh).await,
         _ => st.providers().remote_models(refresh).await,
@@ -918,7 +1086,10 @@ pub struct ScanState {
 
 /// `None` keeps the stored password; a new one is required when none is stored.
 async fn resolve_password(st: &AppState, password: Option<&str>) -> Res<String> {
-    match password.map(account::normalize_password).filter(|p| !p.is_empty()) {
+    match password
+        .map(account::normalize_password)
+        .filter(|p| !p.is_empty())
+    {
         Some(p) => Ok(p),
         None => account::load(&st.store)
             .await?
@@ -964,7 +1135,6 @@ pub async fn save_mail_account(
     let folder = account::folder(&st.store).await?;
     Ok(mail_view(&account, &folder))
 }
-
 
 pub async fn delete_mail_account(st: &AppState) -> Res<()> {
     Ok(account::remove(&st.store).await?)
@@ -1029,15 +1199,33 @@ pub fn get_scan_status(st: &AppState) -> ScanState {
 }
 
 pub async fn list_scan_results(st: &AppState, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
-    Ok(st.store.list_run_results(run_id).await?.into_iter().map(scan_view).collect())
+    Ok(st
+        .store
+        .list_run_results(run_id)
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
 }
 
 pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>> {
-    Ok(st.store.list_pending_reviews().await?.into_iter().map(scan_view).collect())
+    Ok(st
+        .store
+        .list_pending_reviews()
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
 }
 
 pub async fn list_job_emails(st: &AppState, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
-    Ok(st.store.list_job_emails(job_id).await?.into_iter().map(scan_view).collect())
+    Ok(st
+        .store
+        .list_job_emails(job_id)
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
 }
 
 pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
@@ -1092,7 +1280,12 @@ pub mod ipc {
         super::create_job(&st, &title, &company, &raw_text, &url, status_id).await
     }
     #[tauri::command]
-    pub async fn update_job_tracking(st: S<'_>, id: i64, status_id: Option<i64>, url: String) -> Res<()> {
+    pub async fn update_job_tracking(
+        st: S<'_>,
+        id: i64,
+        status_id: Option<i64>,
+        url: String,
+    ) -> Res<()> {
         super::update_job_tracking(&st, id, status_id, &url).await
     }
     #[tauri::command]
@@ -1112,7 +1305,12 @@ pub mod ipc {
         super::create_job_status(&st, &name, color).await
     }
     #[tauri::command]
-    pub async fn update_job_status(st: S<'_>, id: i64, name: String, color: StatusColor) -> Res<JobStatus> {
+    pub async fn update_job_status(
+        st: S<'_>,
+        id: i64,
+        name: String,
+        color: StatusColor,
+    ) -> Res<JobStatus> {
         super::update_job_status(&st, id, &name, color).await
     }
     #[tauri::command]
@@ -1172,7 +1370,12 @@ pub mod ipc {
         super::list_connections(&st).await
     }
     #[tauri::command]
-    pub async fn add_connection(st: S<'_>, provider: String, label: String, key: String) -> Res<ConnectionView> {
+    pub async fn add_connection(
+        st: S<'_>,
+        provider: String,
+        label: String,
+        key: String,
+    ) -> Res<ConnectionView> {
         super::add_connection(&st, &provider, &label, &key).await
     }
     #[tauri::command]
@@ -1184,7 +1387,11 @@ pub mod ipc {
         super::provider_key_status(&st, &provider).await
     }
     #[tauri::command]
-    pub async fn list_remote_models(st: S<'_>, refresh: bool, role: Option<String>) -> Res<Vec<ProviderModels>> {
+    pub async fn list_remote_models(
+        st: S<'_>,
+        refresh: bool,
+        role: Option<String>,
+    ) -> Res<Vec<ProviderModels>> {
         super::list_remote_models(&st, refresh, role.as_deref().unwrap_or("decision")).await
     }
     #[tauri::command]
@@ -1224,7 +1431,12 @@ pub mod ipc {
         super::get_ranked(&st, run_id).await
     }
     #[tauri::command]
-    pub async fn fit_cv(st: S<'_>, run_id: i64, budget: u8, overrides: Vec<Override>) -> Res<FitOutput> {
+    pub async fn fit_cv(
+        st: S<'_>,
+        run_id: i64,
+        budget: u8,
+        overrides: Vec<Override>,
+    ) -> Res<FitOutput> {
         super::fit_cv(&st, run_id, budget, overrides).await
     }
     #[tauri::command]
@@ -1292,7 +1504,15 @@ pub mod ipc {
         password: Option<String>,
         folder: Option<String>,
     ) -> Res<MailAccountView> {
-        super::save_mail_account(&st, &host, port, &address, password.as_deref(), folder.as_deref()).await
+        super::save_mail_account(
+            &st,
+            &host,
+            port,
+            &address,
+            password.as_deref(),
+            folder.as_deref(),
+        )
+        .await
     }
     #[tauri::command]
     pub async fn delete_mail_account(st: S<'_>) -> Res<()> {

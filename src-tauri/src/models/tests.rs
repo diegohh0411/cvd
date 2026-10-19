@@ -58,11 +58,17 @@ fn registry_includes_d1_3b_and_ids_are_unique() {
 
 #[test]
 fn registry_kinds() {
-    let lfm = REGISTRY.iter().find(|s| s.id == "lfm2.5-2.6b").expect("LFM2.5 listed");
+    let lfm = REGISTRY
+        .iter()
+        .find(|s| s.id == "lfm2.5-2.6b")
+        .expect("LFM2.5 listed");
     assert_eq!(lfm.kind, ModelKind::Chat);
     assert_eq!(lfm.hf_repo, "LiquidAI/LFM2.5-2.6B-GGUF");
     assert_eq!(lfm.size_bytes, 1_674_455_040);
-    assert!(REGISTRY.iter().filter(|s| s.id != "lfm2.5-2.6b").all(|s| s.kind == ModelKind::Decision));
+    assert!(REGISTRY
+        .iter()
+        .filter(|s| s.id != "lfm2.5-2.6b")
+        .all(|s| s.kind == ModelKind::Decision));
     assert_eq!(recommended(64).kind, ModelKind::Decision);
     assert_eq!(recommended(2).kind, ModelKind::Decision);
 }

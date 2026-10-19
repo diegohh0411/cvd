@@ -26,7 +26,9 @@ async fn server() -> CvServer {
 
 #[test]
 fn rejects_bad_date() {
-    assert!(normalize_entry(entry("Jan 2022", None)).unwrap_err().contains("YYYY-MM"));
+    assert!(normalize_entry(entry("Jan 2022", None))
+        .unwrap_err()
+        .contains("YYYY-MM"));
 }
 
 #[test]
@@ -59,22 +61,43 @@ fn trims_and_drops_empty_skills() {
 #[tokio::test]
 async fn insert_then_duplicate_is_rejected_with_id() {
     let srv = server().await;
-    let r = srv.upsert_entry(entry("2022-01", None), false).await.unwrap();
-    let err = srv.upsert_entry(entry("2022-01", None), false).await.unwrap_err();
-    assert!(err.message.contains(&format!("id {}", r.id.unwrap())), "{}", err.message);
+    let r = srv
+        .upsert_entry(entry("2022-01", None), false)
+        .await
+        .unwrap();
+    let err = srv
+        .upsert_entry(entry("2022-01", None), false)
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains(&format!("id {}", r.id.unwrap())),
+        "{}",
+        err.message
+    );
 }
 
 #[tokio::test]
 async fn dry_run_writes_nothing() {
     let srv = server().await;
-    assert_eq!(srv.upsert_entry(entry("2022-01", None), true).await.unwrap().id, None);
+    assert_eq!(
+        srv.upsert_entry(entry("2022-01", None), true)
+            .await
+            .unwrap()
+            .id,
+        None
+    );
     assert!(srv.list_entries(true).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn update_by_id_replaces_bullets() {
     let srv = server().await;
-    let id = srv.upsert_entry(entry("2022-01", None), false).await.unwrap().id.unwrap();
+    let id = srv
+        .upsert_entry(entry("2022-01", None), false)
+        .await
+        .unwrap()
+        .id
+        .unwrap();
     let mut e = entry("2022-01", None);
     e.id = Some(id);
     e.bullets = vec!["New".into()];
@@ -100,11 +123,22 @@ fn db_path_prefers_env_override() {
         Some(std::path::PathBuf::from("/tmp/x.db"))
     );
     let default = super::db_path_from(None).unwrap();
-    assert!(default.ends_with("com.diego.cvd/cv.db"), "{}", default.display());
+    assert!(
+        default.ends_with("com.diego.cvd/cv.db"),
+        "{}",
+        default.display()
+    );
 }
 
 fn job_args() -> super::UpsertJobArgs {
-    super::UpsertJobArgs { id: None, title: None, company: None, description: None, url: None, status: None }
+    super::UpsertJobArgs {
+        id: None,
+        title: None,
+        company: None,
+        description: None,
+        url: None,
+        status: None,
+    }
 }
 
 #[tokio::test]
@@ -123,7 +157,11 @@ async fn upsert_job_creates_with_default_status_then_moves_it() {
     assert_eq!(job.status.as_deref(), Some("Bookmarked"));
     assert_eq!(job.url, "https://acme.dev/jobs/1");
     let moved = s
-        .upsert_job(super::UpsertJobArgs { id: Some(job.id), status: Some("applied".into()), ..job_args() })
+        .upsert_job(super::UpsertJobArgs {
+            id: Some(job.id),
+            status: Some("applied".into()),
+            ..job_args()
+        })
         .await
         .unwrap();
     assert_eq!(moved.status.as_deref(), Some("Applied"));
@@ -151,15 +189,26 @@ async fn upsert_job_status_creates_and_renames() {
     use crate::store::types::StatusColor;
     let s = server().await;
     let st = s
-        .upsert_job_status(super::UpsertJobStatusArgs { id: None, name: "Rejected".into(), color: StatusColor::Red })
+        .upsert_job_status(super::UpsertJobStatusArgs {
+            id: None,
+            name: "Rejected".into(),
+            color: StatusColor::Red,
+        })
         .await
         .unwrap();
     assert_eq!(st.position, 4);
     let renamed = s
-        .upsert_job_status(super::UpsertJobStatusArgs { id: Some(st.id), name: "Declined".into(), color: StatusColor::Gray })
+        .upsert_job_status(super::UpsertJobStatusArgs {
+            id: Some(st.id),
+            name: "Declined".into(),
+            color: StatusColor::Gray,
+        })
         .await
         .unwrap();
-    assert_eq!((renamed.name.as_str(), renamed.color), ("Declined", StatusColor::Gray));
+    assert_eq!(
+        (renamed.name.as_str(), renamed.color),
+        ("Declined", StatusColor::Gray)
+    );
 }
 
 #[tokio::test]
@@ -168,10 +217,17 @@ async fn update_skill_renames_and_sets_category() {
     s.upsert_entry(entry("2022-01", None), false).await.unwrap();
     let id = s.store.list_skills().await.unwrap()[0].id;
     let sk = s
-        .update_skill(super::UpdateSkillArgs { id, name: " Rust (lang) ".into(), category: "Languages".into() })
+        .update_skill(super::UpdateSkillArgs {
+            id,
+            name: " Rust (lang) ".into(),
+            category: "Languages".into(),
+        })
         .await
         .unwrap();
-    assert_eq!((sk.id, sk.name.as_str(), sk.category.as_str()), (id, "Rust (lang)", "Languages"));
+    assert_eq!(
+        (sk.id, sk.name.as_str(), sk.category.as_str()),
+        (id, "Rust (lang)", "Languages")
+    );
 }
 
 #[tokio::test]
@@ -187,7 +243,11 @@ async fn update_skill_onto_existing_name_merges() {
     let backend = skills.iter().find(|k| k.name == "Backend").unwrap().id;
     let rust = skills.iter().find(|k| k.name == "Rust").unwrap().id;
     let merged = s
-        .update_skill(super::UpdateSkillArgs { id: backend, name: "rust".into(), category: String::new() })
+        .update_skill(super::UpdateSkillArgs {
+            id: backend,
+            name: "rust".into(),
+            category: String::new(),
+        })
         .await
         .unwrap();
     assert_eq!(merged.id, rust);
@@ -207,7 +267,11 @@ async fn delete_skill_unlinks_and_rejects_unknown() {
     assert!(s.list_entries(true).await.unwrap()[0].skills.is_empty());
     assert!(s.delete_skill(id).await.is_err());
     assert!(s
-        .update_skill(super::UpdateSkillArgs { id, name: "X".into(), category: String::new() })
+        .update_skill(super::UpdateSkillArgs {
+            id,
+            name: "X".into(),
+            category: String::new()
+        })
         .await
         .is_err());
 }
@@ -225,7 +289,9 @@ async fn posting_server(body: &str) -> wiremock::MockServer {
 
 #[tokio::test]
 async fn upsert_job_reads_description_from_url() {
-    let page = posting_server("<html><body><h1>Rust engineer</h1><p>Build compilers.</p></body></html>").await;
+    let page =
+        posting_server("<html><body><h1>Rust engineer</h1><p>Build compilers.</p></body></html>")
+            .await;
     let s = server().await;
     let r = s
         .upsert_job_fetching(super::UpsertJobArgs {
@@ -237,7 +303,11 @@ async fn upsert_job_reads_description_from_url() {
         .unwrap();
     assert!(r.description_fetched_chars.unwrap() > 0);
     let stored = s.store.get_jd(r.job.id).await.unwrap().unwrap();
-    assert!(stored.raw_text.contains("Build compilers."), "{}", stored.raw_text);
+    assert!(
+        stored.raw_text.contains("Build compilers."),
+        "{}",
+        stored.raw_text
+    );
 }
 
 #[tokio::test]
@@ -259,10 +329,17 @@ async fn upsert_job_pasted_description_skips_fetch() {
 async fn upsert_job_without_description_or_url_fails() {
     let s = server().await;
     let err = s
-        .upsert_job(super::UpsertJobArgs { title: Some("Dev".into()), ..job_args() })
+        .upsert_job(super::UpsertJobArgs {
+            title: Some("Dev".into()),
+            ..job_args()
+        })
         .await
         .unwrap_err();
-    assert!(err.message.contains("description or url"), "{}", err.message);
+    assert!(
+        err.message.contains("description or url"),
+        "{}",
+        err.message
+    );
 }
 
 #[tokio::test]
@@ -276,6 +353,10 @@ async fn upsert_job_fetch_failure_is_an_error_and_saves_nothing() {
         })
         .await
         .unwrap_err();
-    assert!(err.message.contains("only http and https"), "{}", err.message);
+    assert!(
+        err.message.contains("only http and https"),
+        "{}",
+        err.message
+    );
     assert!(s.list_jobs().await.unwrap().is_empty());
 }

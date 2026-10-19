@@ -63,7 +63,13 @@ pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, Ap
     match scan(&deps, &mut summary).await {
         Ok(()) => {
             deps.store
-                .finish_scan_run(run_id, ScanStatus::Done, None, summary.checked as i64, summary.failed as i64)
+                .finish_scan_run(
+                    run_id,
+                    ScanStatus::Done,
+                    None,
+                    summary.checked as i64,
+                    summary.failed as i64,
+                )
                 .await?;
             (deps.emit)(FINISHED_EVENT, finished_payload(&summary, "done", None));
             Ok(summary)
@@ -79,7 +85,10 @@ pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, Ap
                     summary.failed as i64,
                 )
                 .await?;
-            (deps.emit)(FINISHED_EVENT, finished_payload(&summary, "failed", Some(&e)));
+            (deps.emit)(
+                FINISHED_EVENT,
+                finished_payload(&summary, "failed", Some(&e)),
+            );
             Err(e)
         }
     }
@@ -92,17 +101,21 @@ async fn scan(deps: &ScanDeps<'_>, summary: &mut ScanSummary) -> Result<(), AppE
     let total = headers.len();
     let processed = deps.store.processed_ids().await?;
 
-    let (new, seen): (Vec<_>, Vec<_>) = headers.iter().partition(|h| !processed.contains(&h.message_id));
+    let (new, seen): (Vec<_>, Vec<_>) = headers
+        .iter()
+        .partition(|h| !processed.contains(&h.message_id));
     summary.checked = seen.len();
-    (deps.emit)(PROGRESS_EVENT, json!({ "checked": summary.checked, "total": total }));
+    (deps.emit)(
+        PROGRESS_EVENT,
+        json!({ "checked": summary.checked, "total": total }),
+    );
 
     let run_id = summary.run_id;
     let mut pending = Vec::with_capacity(new.len());
     for header in new {
         pending.push(handle_header(deps, header, run_id).boxed());
     }
-    let mut results = stream::iter(pending)
-        .buffer_unordered(MAX_CONCURRENT_EMAILS);
+    let mut results = stream::iter(pending).buffer_unordered(MAX_CONCURRENT_EMAILS);
     while let Some(result) = results.next().await {
         match result? {
             Tally::Failed => summary.failed += 1,
@@ -118,7 +131,10 @@ async fn scan(deps: &ScanDeps<'_>, summary: &mut ScanSummary) -> Result<(), AppE
             }
         }
         summary.checked += 1;
-        (deps.emit)(PROGRESS_EVENT, json!({ "checked": summary.checked, "total": total }));
+        (deps.emit)(
+            PROGRESS_EVENT,
+            json!({ "checked": summary.checked, "total": total }),
+        );
     }
     Ok(())
 }
@@ -133,7 +149,11 @@ enum Tally {
 /// Records one new email. Per-email problems count as `failed` and leave the
 /// email unrecorded, so the next scan retries it. Returns `Err` only for
 /// failures that make the rest of the scan pointless.
-async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) -> Result<Tally, AppError> {
+async fn handle_header(
+    deps: &ScanDeps<'_>,
+    header: &MailHeader,
+    run_id: i64,
+) -> Result<Tally, AppError> {
     let Ok(body) = deps.mail.body_text(header.uid).await else {
         return Ok(Tally::Failed);
     };
@@ -146,7 +166,10 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) ->
 
     let classified = match classify(deps.engine, &email, &contexts, &statuses).await {
         Ok(c) => c,
-        Err(crate::engine::EngineError::BadResponse(_) | crate::engine::EngineError::ContextOverflow) => {
+        Err(
+            crate::engine::EngineError::BadResponse(_)
+            | crate::engine::EngineError::ContextOverflow,
+        ) => {
             return Ok(Tally::Failed);
         }
         Err(e) => return Err(e.into()),
@@ -178,12 +201,21 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) ->
             return Ok(Tally::Ignored);
         }
         Decision::NoChange { job_id } => (job_id, None, None, Outcome::NoChange),
-        Decision::Applied { job_id, status_id, confidence } => {
-            (job_id, Some(status_id), Some(confidence), Outcome::Applied)
-        }
-        Decision::PendingReview { job_id, status_id, confidence } => {
-            (job_id, Some(status_id), Some(confidence), Outcome::PendingReview)
-        }
+        Decision::Applied {
+            job_id,
+            status_id,
+            confidence,
+        } => (job_id, Some(status_id), Some(confidence), Outcome::Applied),
+        Decision::PendingReview {
+            job_id,
+            status_id,
+            confidence,
+        } => (
+            job_id,
+            Some(status_id),
+            Some(confidence),
+            Outcome::PendingReview,
+        ),
     };
 
     let Some(job) = contexts.iter().find(|c| c.id == job_id) else {
@@ -194,7 +226,11 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) ->
 
     let text = match summarize(deps.http, deps.chat, &email, job, previous_name, next_name).await {
         Ok(text) => text,
-        Err(e @ (AppError::ProviderAuth(_) | AppError::ProviderCredits(_) | AppError::ProviderUnavailable(_))) => {
+        Err(
+            e @ (AppError::ProviderAuth(_)
+            | AppError::ProviderCredits(_)
+            | AppError::ProviderUnavailable(_)),
+        ) => {
             return Err(e);
         }
         Err(_) => {
@@ -208,7 +244,11 @@ async fn handle_header(deps: &ScanDeps<'_>, header: &MailHeader, run_id: i64) ->
     row.confidence = confidence;
     row.summary = Some(text);
     row.outcome = outcome;
-    let apply_status = if outcome == Outcome::Applied { next_status } else { None };
+    let apply_status = if outcome == Outcome::Applied {
+        next_status
+    } else {
+        None
+    };
     deps.store.record_processed(&row, apply_status).await?;
 
     Ok(Tally::Recorded(outcome))
@@ -228,7 +268,10 @@ fn job_contexts(jobs: &[JobDescription], statuses: &[JobStatus]) -> Vec<JobCtx> 
 
 fn status_name(statuses: &[JobStatus], id: Option<i64>) -> Option<&str> {
     let id = id?;
-    statuses.iter().find(|s| s.id == id).map(|s| s.name.as_str())
+    statuses
+        .iter()
+        .find(|s| s.id == id)
+        .map(|s| s.name.as_str())
 }
 
 fn finished_payload(summary: &ScanSummary, status: &str, error: Option<&AppError>) -> Value {

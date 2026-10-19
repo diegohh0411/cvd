@@ -63,9 +63,18 @@ import { WorkspaceStore } from './workspace.store';
                 <app-score-bar [score]="e.score" [scores]="scoresFor('entry', e.id)" />
               </div>
               @if (e.bullets.length) {
-                <ul class="mt-2 ml-10 flex flex-col gap-1.5">
+                <ul cdkDropList (cdkDropListDropped)="dropBullet($event, e)" class="mt-2 ml-10 flex flex-col gap-1.5">
                   @for (b of e.bullets; track b.id) {
-                    <li class="flex items-start gap-2 text-sm" [class.text-muted-foreground]="!b.included">
+                    <li cdkDrag class="bg-card flex items-start gap-2 text-sm" [class.text-muted-foreground]="!b.included">
+                      <button
+                        type="button"
+                        cdkDragHandle
+                        class="text-muted-foreground hover:text-foreground focus-visible:text-foreground mt-0.5"
+                        aria-label="Reorder bullet (Alt+Up/Down)"
+                        (keydown)="bulletKey($event, e, $index)"
+                      >
+                        <ng-icon name="lucideGripVertical" class="size-3.5" />
+                      </button>
                       <input
                         type="checkbox"
                         class="accent-primary mt-0.5 size-3.5"
@@ -126,6 +135,16 @@ export class SelectionListComponent {
     const group = this.ws.view().find((g) => g.entries.includes(e));
     const idx = group?.entries.filter((x) => x.included).findIndex((x) => x.id === e.id) ?? -1;
     if (idx >= 0) this.move(e, idx + (ev.key === 'ArrowUp' ? -1 : 1));
+  }
+
+  dropBullet(ev: CdkDragDrop<unknown>, e: EntryView): void {
+    this.ws.reorderBullets(e.id, ev.previousIndex, ev.currentIndex);
+  }
+
+  bulletKey(ev: KeyboardEvent, e: EntryView, i: number): void {
+    if (!ev.altKey || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+    ev.preventDefault();
+    this.ws.reorderBullets(e.id, i, i + (ev.key === 'ArrowUp' ? -1 : 1));
   }
 
   private move(e: EntryView, toIndex: number): void {

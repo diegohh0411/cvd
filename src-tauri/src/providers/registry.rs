@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use super::openrouter::OPENROUTER;
 use super::{kind_of, load_rows};
 use super::{
-    ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel, SubQProvider, TypeSafeProvider, SUBQ, TYPESAFE,
-    TYPESAFE_BASE,
+    ChatEndpoint, ModelRef, OpenRouterProvider, Provider, ProviderError, RemoteModel, SubQProvider,
+    TypeSafeProvider, SUBQ, TYPESAFE, TYPESAFE_BASE,
 };
 use crate::engine::DecisionEngine;
 use crate::store::{Store, StoreError};
@@ -57,7 +57,11 @@ fn missing_key(provider: &str) -> ProviderError {
 
 impl ProviderRegistry {
     #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn load(store: &Store, openrouter_base: &str, subq_base: &str) -> Result<Self, StoreError> {
+    pub async fn load(
+        store: &Store,
+        openrouter_base: &str,
+        subq_base: &str,
+    ) -> Result<Self, StoreError> {
         Self::load_with(store, openrouter_base, subq_base, TYPESAFE_BASE).await
     }
 
@@ -71,37 +75,62 @@ impl ProviderRegistry {
         let mut providers = Vec::new();
         for kind in [OPENROUTER, SUBQ, TYPESAFE] {
             // The bare id first, then extra keys in creation order.
-            let ids = std::iter::once(kind.to_string()).chain(rows.iter().filter(|r| r.provider == kind && r.id != kind).map(|r| r.id.clone()));
+            let ids = std::iter::once(kind.to_string()).chain(
+                rows.iter()
+                    .filter(|r| r.provider == kind && r.id != kind)
+                    .map(|r| r.id.clone()),
+            );
             for id in ids {
-                let Some(key) = store.get_secret(&id).await? else { continue };
+                let Some(key) = store.get_secret(&id).await? else {
+                    continue;
+                };
                 let provider: Arc<dyn Provider> = match kind {
                     OPENROUTER => Arc::new(OpenRouterProvider::new(openrouter_base.into(), key)),
                     SUBQ => Arc::new(SubQProvider::new(subq_base.into(), key)),
                     _ => Arc::new(TypeSafeProvider::new(typesafe_base.into(), key)),
                 };
                 debug_assert_eq!(provider.id(), kind);
-                let label = rows.iter().find(|r| r.id == id).map_or_else(|| kind_name(kind).to_string(), |r| r.label.clone());
-                providers.push(Connected { id, label, provider });
+                let label = rows
+                    .iter()
+                    .find(|r| r.id == id)
+                    .map_or_else(|| kind_name(kind).to_string(), |r| r.label.clone());
+                providers.push(Connected {
+                    id,
+                    label,
+                    provider,
+                });
             }
         }
-        Ok(Self { providers, cache: Mutex::default() })
+        Ok(Self {
+            providers,
+            cache: Mutex::default(),
+        })
     }
 
     fn get(&self, connection: &str) -> Option<&Arc<dyn Provider>> {
-        self.providers.iter().find(|c| c.id == connection).map(|c| &c.provider)
+        self.providers
+            .iter()
+            .find(|c| c.id == connection)
+            .map(|c| &c.provider)
     }
 
     /// Why `r` can't be used right now, if it can't.
     pub fn check(&self, r: &ModelRef) -> Result<(), ProviderError> {
-        self.get(&r.provider).map(|_| ()).ok_or_else(|| missing_key(&r.provider))
+        self.get(&r.provider)
+            .map(|_| ())
+            .ok_or_else(|| missing_key(&r.provider))
     }
 
     pub fn engine(&self, r: &ModelRef) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        self.get(&r.provider).ok_or_else(|| missing_key(&r.provider))?.engine(&r.id)
+        self.get(&r.provider)
+            .ok_or_else(|| missing_key(&r.provider))?
+            .engine(&r.id)
     }
 
     pub fn chat_endpoint(&self, r: &ModelRef) -> Result<ChatEndpoint, ProviderError> {
-        self.get(&r.provider).ok_or_else(|| missing_key(&r.provider))?.chat_endpoint(&r.id)
+        self.get(&r.provider)
+            .ok_or_else(|| missing_key(&r.provider))?
+            .chat_endpoint(&r.id)
     }
 
     /// Every registered provider's decision models; one failing provider never hides the others.
@@ -118,7 +147,11 @@ impl ProviderRegistry {
         let mut out = Vec::new();
         for c in &self.providers {
             let (id, p) = (c.id.clone(), &c.provider);
-            let cache_key = if chat { format!("{id}#chat") } else { id.clone() };
+            let cache_key = if chat {
+                format!("{id}#chat")
+            } else {
+                id.clone()
+            };
             let cached = self
                 .cache
                 .lock()
@@ -133,10 +166,23 @@ impl ProviderRegistry {
             };
             out.push(match result {
                 Ok(models) => {
-                    self.cache.lock().unwrap_or_else(|e| e.into_inner()).insert(cache_key, (Instant::now(), models.clone()));
-                    ProviderModels { provider: id, label: c.label.clone(), models, error: None }
+                    self.cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(cache_key, (Instant::now(), models.clone()));
+                    ProviderModels {
+                        provider: id,
+                        label: c.label.clone(),
+                        models,
+                        error: None,
+                    }
                 }
-                Err(e) => ProviderModels { provider: id, label: c.label.clone(), models: vec![], error: Some(e.to_string()) },
+                Err(e) => ProviderModels {
+                    provider: id,
+                    label: c.label.clone(),
+                    models: vec![],
+                    error: Some(e.to_string()),
+                },
             });
         }
         out

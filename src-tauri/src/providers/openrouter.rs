@@ -18,8 +18,15 @@ pub struct OpenRouterProvider {
 
 impl OpenRouterProvider {
     pub fn new(base_url: String, api_key: String) -> Self {
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("reqwest client");
-        Self { base_url: base_url.trim_end_matches('/').to_string(), api_key, http }
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("reqwest client");
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            api_key,
+            http,
+        }
     }
 
     async fn get(&self, path: &str) -> Result<Value, ProviderError> {
@@ -37,7 +44,9 @@ impl OpenRouterProvider {
         if !status.is_success() {
             return Err(ProviderError::BadResponse(format!("HTTP {status}")));
         }
-        resp.json().await.map_err(|e| ProviderError::BadResponse(e.to_string()))
+        resp.json()
+            .await
+            .map_err(|e| ProviderError::BadResponse(e.to_string()))
     }
 
     async fn models(&self, path: &str) -> Result<Vec<RemoteModel>, ProviderError> {
@@ -59,8 +68,15 @@ fn to_model(m: &Value) -> Option<RemoteModel> {
     let id = m.get("id")?.as_str()?.to_string();
     Some(RemoteModel {
         provider: OPENROUTER.into(),
-        display_name: m.get("name").and_then(Value::as_str).unwrap_or(&id).to_string(),
-        context_length: m.get("context_length").and_then(Value::as_u64).map(|n| n as u32),
+        display_name: m
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&id)
+            .to_string(),
+        context_length: m
+            .get("context_length")
+            .and_then(Value::as_u64)
+            .map(|n| n as u32),
         price_per_mtok_in: m
             .pointer("/pricing/prompt")
             .and_then(Value::as_str)
@@ -85,7 +101,12 @@ impl Provider for OpenRouterProvider {
     }
 
     fn engine(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, ProviderError> {
-        Ok(Arc::new(HttpSystemOneEngine::new(OPENROUTER, self.base_url.clone(), self.api_key.clone(), model_id.into())))
+        Ok(Arc::new(HttpSystemOneEngine::new(
+            OPENROUTER,
+            self.base_url.clone(),
+            self.api_key.clone(),
+            model_id.into(),
+        )))
     }
 
     fn chat_endpoint(&self, model_id: &str) -> Result<ChatEndpoint, ProviderError> {
