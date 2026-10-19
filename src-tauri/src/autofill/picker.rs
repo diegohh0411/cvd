@@ -178,6 +178,7 @@ fn choice(field: &FieldSpec, already: &BTreeMap<String, &'static str>, question:
             "already_filled": already,
         }),
         options: options.keys().cloned().collect(),
+        criteria: BTreeMap::new(),
     }
 }
 

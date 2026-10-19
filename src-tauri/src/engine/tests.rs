@@ -49,6 +49,7 @@ fn wire_request_matches_spike() {
         Question::Choice {
             instructions: "Which area best describes this CV entry?".into(),
             options: ["backend", "frontend", "data_ml", "other"].map(String::from).to_vec(),
+            criteria: BTreeMap::new(),
         },
     );
     qs.insert(
