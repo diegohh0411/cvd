@@ -1,215 +1,10 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use chrono::NaiveDate;
 use serde_json::json;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::MockServer;
 
-use super::imap::{MailError, MailHeader, MailSource};
-use super::scan::{
-    begin_run, run_scan, ScanDeps, ScanSummary, FINISHED_EVENT, INBOX_CHANGED_EVENT,
-};
+use super::scan::{FINISHED_EVENT, INBOX_CHANGED_EVENT};
+use super::test_support::*;
 use crate::commands::AppError;
-use crate::engine::{Answer, FakeDecisionEngine};
-use crate::providers::ChatEndpoint;
-use crate::state::Emitter;
-use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, Store};
-
-struct FakeMail {
-    headers: Vec<MailHeader>,
-    bodies: HashMap<u32, String>,
-    check_error: Option<String>,
-    fetched: Mutex<Vec<u32>>,
-}
-
-impl FakeMail {
-    fn new(headers: Vec<MailHeader>) -> Self {
-        let bodies = headers
-            .iter()
-            .map(|h| (h.uid, format!("body of {}", h.uid)))
-            .collect();
-        Self {
-            headers,
-            bodies,
-            check_error: None,
-            fetched: Mutex::default(),
-        }
-    }
-
-    fn fetched(&self) -> Vec<u32> {
-        self.fetched.lock().unwrap().clone()
-    }
-}
-
-#[async_trait]
-impl MailSource for FakeMail {
-    async fn check(&self) -> Result<(), MailError> {
-        match &self.check_error {
-            Some(message) => Err(MailError::Connection(message.clone())),
-            None => Ok(()),
-        }
-    }
-
-    async fn recent_headers(&self, _since: NaiveDate) -> Result<Vec<MailHeader>, MailError> {
-        Ok(self.headers.clone())
-    }
-
-    async fn body_text(&self, uid: u32) -> Result<String, MailError> {
-        self.fetched.lock().unwrap().push(uid);
-        self.bodies
-            .get(&uid)
-            .cloned()
-            .ok_or_else(|| MailError::Protocol(format!("no body for {uid}")))
-    }
-
-    async fn body_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
-        let Some(uid) = self
-            .headers
-            .iter()
-            .find(|h| h.message_id == message_id)
-            .map(|h| h.uid)
-        else {
-            return Ok(None);
-        };
-        self.body_text(uid).await.map(Some)
-    }
-}
-
-fn header(uid: u32, message_id: &str) -> MailHeader {
-    MailHeader {
-        uid,
-        message_id: message_id.to_string(),
-        subject: format!("Subject {uid}"),
-        sender: "recruiter@acme.com".into(),
-        received_at: "2026-10-10T09:00:00+00:00".into(),
-    }
-}
-
-fn today() -> NaiveDate {
-    NaiveDate::from_ymd_opt(2026, 10, 12).unwrap()
-}
-
-fn probs(pairs: &[(&str, f64)]) -> std::collections::BTreeMap<String, f64> {
-    pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
-}
-
-/// Seeded statuses: Bookmarked, Applied, Interviewing, Offer. One job at Applied.
-async fn seeded() -> (Store, i64, i64, i64) {
-    let store = Store::open("sqlite::memory:").await.unwrap();
-    let applied = store.find_job_status("Applied").await.unwrap().unwrap().id;
-    let interviewing = store
-        .find_job_status("Interviewing")
-        .await
-        .unwrap()
-        .unwrap()
-        .id;
-    let job = store
-        .create_jd("Engineer", "Acme", "raw", "", Some(applied))
-        .await
-        .unwrap();
-    (store, job, applied, interviewing)
-}
-
-/// Every question answered from fixed values. `job` and `status` are option keys.
-fn scripted(
-    job_related: f64,
-    job: String,
-    status_changed: f64,
-    status: String,
-    confidence: f64,
-) -> FakeDecisionEngine {
-    FakeDecisionEngine::new(move |_, key, _| match key {
-        "job_related" => Answer::Noul { p: job_related },
-        "matched_job" => Answer::Choice {
-            choice: job.clone(),
-            probabilities: probs(&[(job.as_str(), 1.0)]),
-        },
-        "status_changed" => Answer::Noul { p: status_changed },
-        "new_status" => Answer::Choice {
-            choice: status.clone(),
-            probabilities: probs(&[(status.as_str(), confidence)]),
-        },
-        other => panic!("unexpected question {other}"),
-    })
-}
-
-fn ignoring() -> FakeDecisionEngine {
-    scripted(0.1, "no_match".into(), 0.1, "status_1".into(), 0.5)
-}
-
-/// Chat endpoint that answers every summary request with one sentence.
-async fn chat_endpoint(server: &MockServer) -> ChatEndpoint {
-    Mock::given(method("POST"))
-        .and(path("/v1/chat/completions"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "choices": [{ "message": { "role": "assistant", "content": "Your application moved forward." } }]
-        })))
-        .mount(server)
-        .await;
-    ChatEndpoint {
-        base_url: format!("{}/v1", server.uri()),
-        api_key: None,
-        model: "chat-model".into(),
-    }
-}
-
-/// A chat endpoint that refuses connections; any summary call fails loudly.
-fn unreachable_chat() -> ChatEndpoint {
-    ChatEndpoint {
-        base_url: "http://127.0.0.1:9/v1".into(),
-        api_key: None,
-        model: "chat-model".into(),
-    }
-}
-
-async fn run(
-    store: &Store,
-    mail: &FakeMail,
-    engine: &FakeDecisionEngine,
-    chat: &ChatEndpoint,
-) -> Result<ScanSummary, AppError> {
-    let emit: Emitter = Arc::new(|_: &str, _: serde_json::Value| {});
-    run_with(store, mail, engine, chat, ScanSource::Manual, &emit).await
-}
-
-async fn run_with(
-    store: &Store,
-    mail: &FakeMail,
-    engine: &FakeDecisionEngine,
-    chat: &ChatEndpoint,
-    source: ScanSource,
-    emit: &Emitter,
-) -> Result<ScanSummary, AppError> {
-    let http = reqwest::Client::new();
-    let run_id = begin_run(store, source).await?;
-    run_scan(
-        ScanDeps {
-            store,
-            mail,
-            engine,
-            chat,
-            http: &http,
-            emit,
-            today: today(),
-        },
-        run_id,
-        source,
-    )
-    .await
-}
-
-type Events = Arc<Mutex<Vec<(String, serde_json::Value)>>>;
-
-fn capturing() -> (Emitter, Events) {
-    let events: Events = Arc::default();
-    let sink = events.clone();
-    let emit: Emitter = Arc::new(move |name: &str, payload: serde_json::Value| {
-        sink.lock().unwrap().push((name.to_string(), payload));
-    });
-    (emit, events)
-}
+use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus};
 
 #[tokio::test]
 async fn ignored_email_stores_score_without_body() {
@@ -284,9 +79,16 @@ async fn ignored_email_does_not_emit_inbox_changed() {
     let mail = FakeMail::new(vec![header(1, "<a>")]);
     let (emit, events) = capturing();
 
-    run_with(&store, &mail, &ignoring(), &unreachable_chat(), ScanSource::Watch, &emit)
-        .await
-        .unwrap();
+    run_with(
+        &store,
+        &mail,
+        &ignoring(),
+        &unreachable_chat(),
+        ScanSource::Watch,
+        &emit,
+    )
+    .await
+    .unwrap();
 
     assert!(!events
         .lock()
@@ -301,9 +103,16 @@ async fn finished_payload_carries_source() {
     let mail = FakeMail::new(vec![]);
     let (emit, events) = capturing();
 
-    run_with(&store, &mail, &ignoring(), &unreachable_chat(), ScanSource::Watch, &emit)
-        .await
-        .unwrap();
+    run_with(
+        &store,
+        &mail,
+        &ignoring(),
+        &unreachable_chat(),
+        ScanSource::Watch,
+        &emit,
+    )
+    .await
+    .unwrap();
 
     let events = events.lock().unwrap();
     let (_, finished) = events

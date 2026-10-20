@@ -307,10 +307,7 @@ pub(crate) async fn process_email(
         None
     };
     deps.store.record_processed(&row, apply_status).await?;
-    (deps.emit)(
-        INBOX_CHANGED_EVENT,
-        json!({ "message_id": row.message_id }),
-    );
+    (deps.emit)(INBOX_CHANGED_EVENT, json!({ "message_id": row.message_id }));
 
     // Notify the main window after the transaction commits so its job signal
     // reflects the classifier's status update without a manual refresh.

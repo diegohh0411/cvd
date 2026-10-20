@@ -621,7 +621,10 @@ async fn processed_email_serializes_outcomes_in_snake_case() {
 async fn applied_row(s: &Store) -> (i64, i64, i64) {
     let statuses = s.list_job_statuses().await.unwrap();
     let (a, b) = (statuses[0].id, statuses[1].id);
-    let job = s.create_jd("Engineer", "Acme", "text", "", Some(a)).await.unwrap();
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(a))
+        .await
+        .unwrap();
     let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
     let mut row = processed("msg-undo", run, Outcome::Applied);
     row.matched_job_id = Some(job);
@@ -665,7 +668,10 @@ async fn new_rows_are_unread_and_counted() {
         .unwrap();
 
     assert_eq!(s.unread_count().await.unwrap(), 1);
-    assert_eq!(s.get_processed("msg-a").await.unwrap().unwrap().read_at, None);
+    assert_eq!(
+        s.get_processed("msg-a").await.unwrap().unwrap().read_at,
+        None
+    );
 }
 
 #[tokio::test]
@@ -790,9 +796,18 @@ async fn undo_blocked_after_manual_status_change() {
 
     let err = s.undo_applied("msg-undo").await.unwrap_err();
 
-    assert!(err.to_string().contains("The status was changed after this update."));
+    assert!(err
+        .to_string()
+        .contains("The status was changed after this update."));
     assert_eq!(s.get_jd(job).await.unwrap().unwrap().status_id, Some(c));
-    assert_eq!(s.get_processed("msg-undo").await.unwrap().unwrap().undone_at, None);
+    assert_eq!(
+        s.get_processed("msg-undo")
+            .await
+            .unwrap()
+            .unwrap()
+            .undone_at,
+        None
+    );
 }
 
 #[tokio::test]
@@ -824,8 +839,20 @@ async fn apply_and_dismiss_mark_read() {
     s.apply_suggestion("msg-apply").await.unwrap();
     s.dismiss_suggestion("msg-dismiss").await.unwrap();
 
-    assert!(s.get_processed("msg-apply").await.unwrap().unwrap().read_at.is_some());
-    assert!(s.get_processed("msg-dismiss").await.unwrap().unwrap().read_at.is_some());
+    assert!(s
+        .get_processed("msg-apply")
+        .await
+        .unwrap()
+        .unwrap()
+        .read_at
+        .is_some());
+    assert!(s
+        .get_processed("msg-dismiss")
+        .await
+        .unwrap()
+        .unwrap()
+        .read_at
+        .is_some());
 }
 
 #[tokio::test]
@@ -864,7 +891,10 @@ async fn recheck_candidates_selects_job_related_and_legacy() {
 async fn max_job_id_is_zero_without_jobs() {
     let s = store().await;
     assert_eq!(s.max_job_id().await.unwrap(), 0);
-    let job = s.create_jd("Engineer", "Acme", "text", "", None).await.unwrap();
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", None)
+        .await
+        .unwrap();
     assert_eq!(s.max_job_id().await.unwrap(), job);
 }
 
@@ -944,10 +974,19 @@ async fn job_views_seed_one_and_keep_the_last() {
     assert_eq!(saved.filters, board.filters);
     assert_eq!(saved.position, 1);
 
-    let renamed = JobViewInput { name: "Board".into(), ..board.clone() };
+    let renamed = JobViewInput {
+        name: "Board".into(),
+        ..board.clone()
+    };
     assert!(s.update_job_view(id, &renamed).await.unwrap());
     assert!(!s.update_job_view(9999, &renamed).await.unwrap());
-    assert!(s.create_job_view(&JobViewInput { name: " ".into(), ..board }).await.is_err());
+    assert!(s
+        .create_job_view(&JobViewInput {
+            name: " ".into(),
+            ..board
+        })
+        .await
+        .is_err());
 
     s.delete_job_view(seeded[0].id).await.unwrap();
     assert!(s.delete_job_view(id).await.is_err(), "the last view stays");

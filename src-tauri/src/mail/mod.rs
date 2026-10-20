@@ -2,10 +2,15 @@ pub mod account;
 pub mod classify;
 pub mod decide;
 pub mod imap;
+pub mod recheck;
 pub mod scan;
 pub mod summary;
 
 #[cfg(test)]
+mod recheck_tests;
+#[cfg(test)]
 mod scan_tests;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
