@@ -132,4 +132,23 @@ describe('ScanStore', () => {
 
     expect(t.callsTo('start_scan')).toHaveLength(1);
   });
+
+  it('a re-check finishing does not end the running cycle', async () => {
+    const { t, store } = await setup();
+    await store.start();
+
+    await t.emit('scan://finished', finished({ source: 'recheck' }));
+
+    expect(store.running()).toBe(true);
+  });
+
+  it('start while the backend is already scanning is quiet', async () => {
+    const { t, store } = await setup();
+    t.set('start_scan', () => {
+      throw { kind: 'Io', message: 'A scan is already running.' };
+    });
+
+    await expect(store.start()).resolves.toBeUndefined();
+    expect(store.running()).toBe(true);
+  });
 });

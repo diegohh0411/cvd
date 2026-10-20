@@ -2,8 +2,12 @@ import { inject, Injectable, signal } from '@angular/core';
 
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import * as api from '../ipc/commands';
+import { toAppError } from '../ipc/errors';
 import { onScanFinished, onScanProgress } from '../ipc/events';
 import type { AppErrorKind, ScanFinished, ScanProgress } from '../ipc/types';
+
+/** What `start_scan` answers while another scan holds the slot. */
+const SCAN_BUSY = 'A scan is already running.';
 
 /**
  * The Gmail scan, shared app-wide. Scans run in the background (the mail
@@ -38,8 +42,10 @@ export class ScanStore {
     try {
       await api.startScan();
     } catch (e) {
-      this.running.set(false);
       this.manualStarted = false;
+      // The watcher holds the slot; its scan is already showing as running.
+      if (toAppError(e).message === SCAN_BUSY) return;
+      this.running.set(false);
       throw e;
     }
   }
@@ -70,6 +76,8 @@ export class ScanStore {
   }
 
   private finish(f: ScanFinished): void {
+    // A re-check runs first inside the same cycle; the scan still follows.
+    if (f.source === 'recheck') return;
     this.running.set(false);
     this.progress.set(null);
     this.lastError.set(f.error);

@@ -193,6 +193,8 @@ impl MailSource for ImapSource {
         Ok(headers)
     }
 
+    /// Searches and fetches on one session, so a re-check of many legacy rows
+    /// costs one login per row rather than two.
     async fn body_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
         let mut session = self.open_session().await?;
         self.examine_folder(&mut session).await?;
@@ -202,38 +204,47 @@ impl MailSource for ImapSource {
             .map_err(|error| MailError::Protocol(error.to_string()))?
             .into_iter()
             .max();
-        session
-            .logout()
-            .await
-            .map_err(|error| MailError::Protocol(error.to_string()))?;
-        match uid {
-            Some(uid) => self.body_text(uid).await.map(Some),
-            None => Ok(None),
-        }
-    }
-
-    async fn body_text(&self, uid: u32) -> Result<String, MailError> {
-        let mut session = self.open_session().await?;
-        self.examine_folder(&mut session).await?;
-        let fetches = session
-            .uid_fetch(uid.to_string(), "BODY.PEEK[]")
-            .await
-            .map_err(|error| MailError::Protocol(error.to_string()))?;
-        let fetches: Vec<Fetch> = fetches
-            .try_collect()
-            .await
-            .map_err(|error| MailError::Protocol(error.to_string()))?;
-        let raw = fetches
-            .into_iter()
-            .find_map(|fetch| fetch.body().map(<[u8]>::to_vec))
-            .ok_or_else(|| MailError::Protocol(format!("message UID {uid} was not found")))?;
-        let text = extract_text(&raw);
+        let text = match uid {
+            Some(uid) => Some(fetch_body(&mut session, uid).await?),
+            None => None,
+        };
         session
             .logout()
             .await
             .map_err(|error| MailError::Protocol(error.to_string()))?;
         Ok(text)
     }
+
+    async fn body_text(&self, uid: u32) -> Result<String, MailError> {
+        let mut session = self.open_session().await?;
+        self.examine_folder(&mut session).await?;
+        let text = fetch_body(&mut session, uid).await?;
+        session
+            .logout()
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?;
+        Ok(text)
+    }
+}
+
+/// The text body of one message, fetched without marking it read.
+async fn fetch_body(
+    session: &mut Session<TlsStream<TcpStream>>,
+    uid: u32,
+) -> Result<String, MailError> {
+    let fetches = session
+        .uid_fetch(uid.to_string(), "BODY.PEEK[]")
+        .await
+        .map_err(|error| MailError::Protocol(error.to_string()))?;
+    let fetches: Vec<Fetch> = fetches
+        .try_collect()
+        .await
+        .map_err(|error| MailError::Protocol(error.to_string()))?;
+    let raw = fetches
+        .into_iter()
+        .find_map(|fetch| fetch.body().map(<[u8]>::to_vec))
+        .ok_or_else(|| MailError::Protocol(format!("message UID {uid} was not found")))?;
+    Ok(extract_text(&raw))
 }
 
 pub fn parse_header(raw: &[u8], uid: u32) -> MailHeader {

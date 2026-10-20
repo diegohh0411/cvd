@@ -347,3 +347,45 @@ async fn idle_that_never_returns_is_reissued_after_ten_minutes() {
     assert_eq!(start.elapsed(), REIDLE);
     assert_eq!(REIDLE, Duration::from_secs(600));
 }
+
+#[tokio::test(start_paused = true)]
+async fn repeated_cycle_failures_grow_backoff_despite_reconnects() {
+    let unavailable = || {
+        Err(CycleError::Failed(AppError::ProviderUnavailable(
+            "down".into(),
+        )))
+    };
+    let h = start(FakeDeps {
+        cycles_script: script(vec![unavailable(), unavailable(), unavailable()]),
+        ..FakeDeps::default()
+    });
+    // Fails at 0, 5 and 15; succeeds at 35.
+    after(14).await;
+    assert_eq!(h.cycles(), 2);
+    after(2).await;
+    assert_eq!(h.cycles(), 3);
+    after(18).await;
+    assert_eq!(h.cycles(), 3);
+    after(2).await;
+    assert_eq!(h.cycles(), 4);
+    assert_eq!(h.last().state, WatchState::Watching);
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_setup_pauses_until_a_job_is_added() {
+    let h = start(FakeDeps {
+        cycles_script: script(vec![Err(CycleError::Failed(AppError::Io(
+            "Add a job and a status first.".into(),
+        )))]),
+        ..FakeDeps::default()
+    });
+    after(3600).await;
+    assert_eq!(h.last().state, WatchState::Paused);
+    assert_eq!(h.connects(), 1);
+    assert_eq!(h.cycles(), 1);
+
+    h.tx.send(Control::Nudge).unwrap();
+    after(1).await;
+    assert_eq!(h.cycles(), 2);
+    assert_eq!(h.last().state, WatchState::Watching);
+}

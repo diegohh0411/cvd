@@ -899,6 +899,52 @@ async fn max_job_id_is_zero_without_jobs() {
 }
 
 #[tokio::test]
+async fn undo_after_manual_apply_restores_the_status_at_apply_time() {
+    let s = store().await;
+    let statuses = s.list_job_statuses().await.unwrap();
+    let (recorded, by_hand, suggested) = (statuses[0].id, statuses[1].id, statuses[2].id);
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(recorded))
+        .await
+        .unwrap();
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    let mut row = processed("msg-manual", run, Outcome::PendingReview);
+    row.matched_job_id = Some(job);
+    row.previous_status_id = Some(recorded);
+    row.suggested_status_id = Some(suggested);
+    s.record_processed(&row, None).await.unwrap();
+    s.update_jd_tracking(job, Some(by_hand), "").await.unwrap();
+
+    s.apply_suggestion("msg-manual").await.unwrap();
+    s.undo_applied("msg-manual").await.unwrap();
+
+    assert_eq!(
+        s.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(by_hand)
+    );
+}
+
+#[tokio::test]
+async fn recheck_that_stays_ignored_keeps_processed_at() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    s.record_processed(&processed("msg-aging", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET processed_at = '2026-01-01 00:00:00'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    s.record_processed(&processed("msg-aging", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+
+    let got = s.get_processed("msg-aging").await.unwrap().unwrap();
+    assert_eq!(got.processed_at, "2026-01-01 00:00:00");
+}
+
+#[tokio::test]
 async fn apply_memory_remembers_repoints_and_forgets() {
     let s = Store::open("sqlite::memory:").await.unwrap();
     assert!(s.apply_memory().await.unwrap().is_empty());

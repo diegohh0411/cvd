@@ -246,7 +246,10 @@ impl Store {
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(message_id) DO UPDATE SET
                 run_id = excluded.run_id,
-                processed_at = CURRENT_TIMESTAMP,
+                -- A row that stays ignored keeps its age, so it leaves the
+                -- re-check window instead of being re-classified forever.
+                processed_at = CASE WHEN excluded.outcome = 'ignored'
+                    THEN processed_email.processed_at ELSE CURRENT_TIMESTAMP END,
                 matched_job_id = excluded.matched_job_id,
                 previous_status_id = excluded.previous_status_id,
                 suggested_status_id = excluded.suggested_status_id,
@@ -341,6 +344,12 @@ impl Store {
         if !status_exists {
             return Err(StoreError::NotFound);
         }
+        let current: Option<i64> =
+            sqlx::query_scalar("SELECT status_id FROM job_description WHERE id = ?")
+                .bind(job_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten();
         let updated = sqlx::query("UPDATE job_description SET status_id = ? WHERE id = ?")
             .bind(status_id)
             .bind(job_id)
@@ -349,12 +358,16 @@ impl Store {
         if updated.rows_affected() == 0 {
             return Err(StoreError::NotFound);
         }
+        // Undo restores the status the job had when this was applied, which may
+        // be one the user set by hand after the email arrived.
         sqlx::query(
-            "UPDATE processed_email SET outcome = 'applied', read_at = CURRENT_TIMESTAMP WHERE message_id = ?",
+            "UPDATE processed_email SET outcome = 'applied', read_at = CURRENT_TIMESTAMP,
+                previous_status_id = ? WHERE message_id = ?",
         )
-            .bind(message_id)
-            .execute(&mut *tx)
-            .await?;
+        .bind(current)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
         let row = sqlx::query("SELECT * FROM processed_email WHERE message_id = ?")
             .bind(message_id)
             .fetch_one(&mut *tx)

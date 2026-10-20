@@ -124,7 +124,13 @@ pub async fn reidle_deadline<F: Future>(fut: F) -> Option<F::Output> {
 
 /// Errors that need the user, so retrying on a timer would only repeat them.
 fn is_fatal(e: &AppError) -> bool {
-    matches!(e.kind(), "MailAuth" | "ProviderAuth" | "ProviderCredits")
+    matches!(e.kind(), "MailAuth" | "ProviderAuth" | "ProviderCredits") || needs_setup(e.kind())
+}
+
+/// Setup the app is missing (no job or status yet, no model chosen). Adding a
+/// job, which nudges the watcher, may fix it.
+fn needs_setup(kind: &str) -> bool {
+    matches!(kind, "Io" | "ModelMissing" | "NotFound")
 }
 
 /// Where the loop goes next.
@@ -200,6 +206,7 @@ impl Watcher {
     }
 
     async fn paused(&mut self, error: String, kind: String) -> Flow {
+        let wakes_on_nudge = needs_setup(&kind);
         {
             let mut status = lock(&self.status);
             status.error = Some(error);
@@ -211,6 +218,7 @@ impl Watcher {
                 None => return Flow::Exit,
                 Some(Control::Restart | Control::Retry) => return self.restart(),
                 Some(Control::Stop) => return Flow::Stop,
+                Some(Control::Nudge) if wakes_on_nudge => return self.restart(),
                 Some(Control::Nudge) => {}
             }
         }
@@ -257,10 +265,9 @@ impl Watcher {
             }
         };
         match result {
-            Ok(Some(conn)) => {
-                self.backoff = BACKOFF_MIN;
-                self.watch(conn).await
-            }
+            // The backoff resets only after a cycle succeeds, so a server
+            // that accepts logins but fails every scan is not retried every 5 s.
+            Ok(Some(conn)) => self.watch(conn).await,
             Ok(None) => Flow::Stop,
             Err(e) => {
                 let e = AppError::from(e);
@@ -343,6 +350,7 @@ impl Watcher {
             }
             match result {
                 Ok(()) => {
+                    self.backoff = BACKOFF_MIN;
                     lock(&self.status).last_checked_at = Some(chrono::Utc::now().to_rfc3339());
                     if dirty {
                         dirty = false;

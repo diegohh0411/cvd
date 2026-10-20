@@ -238,6 +238,14 @@ describe('InboxPageComponent', () => {
     expect(isDisabled(button(el, 'Check now')!)).toBe(true);
   });
 
+  it('Check now disabled while the watcher is scanning', async () => {
+    const { el } = await render({
+      get_watcher_status: { state: 'scanning', error: null, error_kind: null, last_checked_at: null },
+    });
+
+    expect(isDisabled(button(el, 'Check now')!)).toBe(true);
+  });
+
   it('Check now starts a scan', async () => {
     const { t, el, detect } = await render();
 

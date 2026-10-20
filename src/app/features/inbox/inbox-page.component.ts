@@ -98,7 +98,9 @@ export class InboxPageComponent implements OnInit {
   protected readonly busy = signal(false);
   private readonly mailConnected = signal<boolean | null>(null);
 
-  protected readonly checkDisabled = computed(() => this.scan.running() || this.mailConnected() !== true);
+  protected readonly checkDisabled = computed(
+    () => this.scan.running() || this.inbox.watcher()?.state === 'scanning' || this.mailConnected() !== true,
+  );
 
   protected readonly status = computed(() => {
     const w = this.inbox.watcher();
