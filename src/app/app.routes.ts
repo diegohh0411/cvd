@@ -13,6 +13,7 @@ export const routes: Routes = [
     component: ShellComponent,
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'jobs' },
+      { path: 'inbox', loadComponent: () => import('./features/inbox/inbox-page.component').then((m) => m.InboxPageComponent) },
       { path: 'jobs', loadComponent: () => import('./features/jobs/jobs-page.component').then((m) => m.JobsPageComponent) },
       { path: 'jobs/new', loadComponent: () => import('./features/jobs/new-job.component').then((m) => m.NewJobComponent) },
       {

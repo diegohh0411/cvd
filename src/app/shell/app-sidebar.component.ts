@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import {
@@ -6,6 +6,7 @@ import {
   lucideBriefcase,
   lucideChevronRight,
   lucideFileText,
+  lucideInbox,
   lucideLibrary,
   lucideMoreHorizontal,
   lucideSettings2,
@@ -14,6 +15,7 @@ import {
 
 import { ZardCollapsibleImports } from '@/shared/components/collapsible/collapsible.imports';
 import { ZardSidebarImports } from '@/shared/components/sidebar/sidebar.imports';
+import { InboxStore } from '../core/stores/inbox.store';
 import { jobLabel, JobsStore } from '../core/stores/jobs.store';
 import { ProfileStore } from '../core/stores/profile.store';
 import { EngineFooterComponent } from './engine-footer.component';
@@ -67,6 +69,7 @@ export const NAV: readonly NavItem[] = [
       lucideBriefcase,
       lucideChevronRight,
       lucideFileText,
+  lucideInbox,
       lucideLibrary,
       lucideMoreHorizontal,
       lucideSettings2,
@@ -98,6 +101,26 @@ export const NAV: readonly NavItem[] = [
         <div z-sidebar-group>
           <div z-sidebar-group-label>Workspace</div>
           <ul z-sidebar-menu>
+            <li z-sidebar-menu-item>
+              <a
+                z-sidebar-menu-button
+                routerLink="/inbox"
+                routerLinkActive
+                #inboxLink="routerLinkActive"
+                [zActive]="inboxLink.isActive"
+                [zTooltip]="'Inbox'"
+              >
+                <ng-icon name="lucideInbox" />
+                <span>Inbox</span>
+                @if (watcherPaused()) {
+                  <span class="bg-destructive ml-auto size-2 rounded-full" role="img" aria-label="Mail watcher paused"></span>
+                } @else if (inbox.unread() > 0) {
+                  <span data-testid="unread-badge" class="bg-primary text-primary-foreground ml-auto rounded-full px-1.5 text-xs tabular-nums">
+                    {{ inbox.unread() }}
+                  </span>
+                }
+              </a>
+            </li>
             @for (item of nav; track item.title) {
               <li z-sidebar-menu-item z-collapsible class="group/collapsible" [zOpen]="true">
                 <button z-collapsible-trigger z-sidebar-menu-button [zTooltip]="item.title">
@@ -201,10 +224,16 @@ export const NAV: readonly NavItem[] = [
     </z-sidebar>
   `,
 })
-export class AppSidebarComponent {
+export class AppSidebarComponent implements OnInit {
   protected readonly jobs = inject(JobsStore);
+  protected readonly inbox = inject(InboxStore);
+  protected readonly watcherPaused = computed(() => this.inbox.watcher()?.state === 'paused');
   private readonly profile = inject(ProfileStore);
   protected readonly nav = NAV;
   protected readonly label = jobLabel;
   protected readonly profileName = computed(() => this.profile.profile().name || 'Your profile');
+
+  ngOnInit(): void {
+    void this.inbox.ensureReady().catch(() => undefined);
+  }
 }

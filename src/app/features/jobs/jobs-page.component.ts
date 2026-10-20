@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, OnInit, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { NgIcon, provideIcons } from '@ng-icons/core';
@@ -19,37 +19,21 @@ import { JobViewToolbarComponent } from './job-view-toolbar.component';
 import { applyView, JobViewsStore } from './job-views';
 import { JobsBoardComponent } from './jobs-board.component';
 import { JobsTableComponent } from './jobs-table.component';
-import { ScanResultsDialogComponent } from './scan-results-dialog.component';
 
 @Component({
   selector: 'app-jobs-page',
-  imports: [FormsModule, ZardInputComponent, PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, NgIcon, ScanResultsDialogComponent, JobViewToolbarComponent, JobsTableComponent, JobsBoardComponent],
+  imports: [FormsModule, ZardInputComponent, PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, NgIcon, JobViewToolbarComponent, JobsTableComponent, JobsBoardComponent],
   viewProviders: [provideIcons({ lucidePlus })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Jobs' }]">
       @if (scanStore.pendingCount() > 0) {
-        <button z-button zType="outline" zSize="sm" data-testid="review-badge" (click)="openReview()">
+        <a z-button zType="outline" zSize="sm" data-testid="review-badge" routerLink="/inbox" [queryParams]="{ filter: 'review' }">
           {{ scanStore.pendingCount() }} to review
-        </button>
-      }
-      <button
-        z-button
-        zType="outline"
-        zSize="sm"
-        data-testid="scan-button"
-        [zLoading]="scanStore.running()"
-        [zDisabled]="scanDisabled()"
-        (click)="scan()"
-      >
-        {{ scanLabel() }}
-      </button>
-      @if (mailConnected() === false) {
-        <a routerLink="/settings" class="text-muted-foreground text-xs underline">Connect Gmail in Settings › Integrations</a>
+        </a>
       }
       <a z-button zSize="sm" routerLink="/jobs/new"><ng-icon name="lucidePlus" /> New job</a>
     </app-page-header>
-    <app-scan-results-dialog [runId]="dialogRunId()" [(open)]="dialogOpen" />
     <div class="flex flex-1 flex-col gap-4 p-4">
       @if (jobs.jobs().length) {
         <input
@@ -109,26 +93,6 @@ export class JobsPageComponent implements OnInit {
   });
 
   protected readonly scanStore = inject(ScanStore);
-  protected readonly mailConnected = signal<boolean | null>(null);
-  protected readonly dialogOpen = signal(false);
-  protected readonly dialogRunId = signal<number | null>(null);
-  protected readonly scanDisabled = computed(() => this.scanStore.running() || this.mailConnected() !== true);
-  protected readonly scanLabel = computed(() => {
-    if (!this.scanStore.running()) return 'Read emails for updates';
-    const p = this.scanStore.progress();
-    return p ? `Reading emails ${p.checked} / ${p.total}` : 'Reading emails…';
-  });
-
-  constructor() {
-    // A finished scan opens its results once, then is acknowledged.
-    effect(() => {
-      const runId = this.scanStore.finishedRunId();
-      if (runId === null) return;
-      this.dialogRunId.set(runId);
-      this.dialogOpen.set(true);
-      untracked(() => this.scanStore.acknowledgeFinished());
-    });
-  }
 
   ngOnInit(): void {
     void this.jobs.load();
@@ -136,10 +100,6 @@ export class JobsPageComponent implements OnInit {
     void this.views.ensureLoaded();
     void this.scanStore.ensureReady();
     void this.scanStore.refreshPending();
-    void api.getMailAccount().then(
-      (a) => this.mailConnected.set(a !== null),
-      () => this.mailConnected.set(false),
-    );
   }
 
   protected async search(query: string): Promise<void> {
@@ -154,20 +114,6 @@ export class JobsPageComponent implements OnInit {
     } catch (e) {
       this.toast.error('Search failed', { description: messageFor(e) });
     }
-  }
-
-  protected async scan(): Promise<void> {
-    try {
-      await this.scanStore.start();
-    } catch (e) {
-      this.toast.error('Could not start the scan', { description: messageFor(e) });
-    }
-  }
-
-  /** Opens the review queue (no run) from the badge. */
-  protected openReview(): void {
-    this.dialogRunId.set(null);
-    this.dialogOpen.set(true);
   }
 
   protected async setStatus(j: JobDescription, statusId: number | null): Promise<void> {
