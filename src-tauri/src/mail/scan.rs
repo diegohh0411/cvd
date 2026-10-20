@@ -14,7 +14,7 @@ use crate::engine::DecisionEngine;
 use crate::providers::ChatEndpoint;
 use crate::state::{Emitter, JOB_UPDATED_EVENT};
 use crate::store::types::{JobDescription, JobStatus};
-use crate::store::{NewProcessed, Outcome, ScanStatus, Store};
+use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, Store};
 
 pub const SCAN_DAYS: i64 = 30;
 /// Most emails fetched, classified and summarised at the same time.
@@ -50,7 +50,7 @@ pub async fn begin_run(store: &Store) -> Result<i64, AppError> {
     if jobs.is_empty() || statuses.is_empty() {
         return Err(AppError::Io("Add a job and a status first.".into()));
     }
-    Ok(store.create_scan_run().await?)
+    Ok(store.create_scan_run(ScanSource::Manual).await?)
 }
 
 /// Runs the scan for a run created by `begin_run`, and always finishes that run.
@@ -193,6 +193,8 @@ async fn handle_header(
         confidence: None,
         summary: None,
         outcome: Outcome::Ignored,
+        job_related: None,
+        body: None,
     };
 
     let (job_id, next_status, confidence, outcome) = match decision {

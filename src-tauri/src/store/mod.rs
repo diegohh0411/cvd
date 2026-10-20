@@ -2,7 +2,10 @@ mod apply_memory;
 mod companies;
 mod email;
 pub mod types;
-pub use email::{NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanStatus};
+pub use email::{
+    InboxFilter, NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanSource, ScanStatus,
+    UNDO_BLOCKED,
+};
 
 #[cfg(test)]
 mod tests;

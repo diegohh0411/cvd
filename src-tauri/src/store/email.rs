@@ -55,6 +55,10 @@ pub struct NewProcessed {
     pub confidence: Option<f64>,
     pub summary: Option<String>,
     pub outcome: Outcome,
+    /// System One's `job_related` probability.
+    pub job_related: Option<f64>,
+    /// Truncated body, kept only for job-related mail.
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,7 +75,44 @@ pub struct ProcessedEmail {
     pub confidence: Option<f64>,
     pub summary: Option<String>,
     pub outcome: Outcome,
+    pub job_related: Option<f64>,
+    pub body: Option<String>,
+    /// `None` until the row is read in the inbox.
+    pub read_at: Option<String>,
+    /// Set when an auto-applied status was undone.
+    pub undone_at: Option<String>,
 }
+
+/// What started a scan run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanSource {
+    Watch,
+    Recheck,
+    Manual,
+}
+
+impl ScanSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanSource::Watch => "watch",
+            ScanSource::Recheck => "recheck",
+            ScanSource::Manual => "manual",
+        }
+    }
+}
+
+/// Which inbox rows to list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InboxFilter {
+    All,
+    Review,
+    Unread,
+}
+
+/// Shown when Undo would overwrite a status the user set by hand.
+pub const UNDO_BLOCKED: &str = "The status was changed after this update.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanStatus {
@@ -122,6 +163,10 @@ fn processed_from_row(r: &SqliteRow) -> Result<ProcessedEmail> {
         confidence: r.get("confidence"),
         summary: r.get("summary"),
         outcome: parse_outcome(r.get("outcome"))?,
+        job_related: r.get("job_related"),
+        body: r.get("body"),
+        read_at: r.get("read_at"),
+        undone_at: r.get("undone_at"),
     })
 }
 
@@ -138,9 +183,10 @@ fn scan_run_from_row(r: &SqliteRow) -> Result<ScanRun> {
 }
 
 impl Store {
-    pub async fn create_scan_run(&self) -> Result<i64> {
+    pub async fn create_scan_run(&self, source: ScanSource) -> Result<i64> {
         Ok(
-            sqlx::query("INSERT INTO scan_run (status) VALUES ('running')")
+            sqlx::query("INSERT INTO scan_run (status, source) VALUES ('running', ?)")
+                .bind(source.as_str())
                 .execute(&self.pool)
                 .await?
                 .last_insert_rowid(),
@@ -184,6 +230,8 @@ impl Store {
     }
 
     /// Stores a message and, when requested, updates its matched job atomically.
+    /// A message already stored (a re-check) is overwritten in place, and
+    /// becomes unread again unless it is still ignored.
     pub async fn record_processed(
         &self,
         p: &NewProcessed,
@@ -193,8 +241,22 @@ impl Store {
         sqlx::query(
             "INSERT INTO processed_email (
                 message_id, run_id, received_at, subject, sender, matched_job_id,
-                previous_status_id, suggested_status_id, confidence, summary, outcome
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                previous_status_id, suggested_status_id, confidence, summary, outcome,
+                job_related, body
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(message_id) DO UPDATE SET
+                run_id = excluded.run_id,
+                processed_at = CURRENT_TIMESTAMP,
+                matched_job_id = excluded.matched_job_id,
+                previous_status_id = excluded.previous_status_id,
+                suggested_status_id = excluded.suggested_status_id,
+                confidence = excluded.confidence,
+                summary = excluded.summary,
+                outcome = excluded.outcome,
+                job_related = excluded.job_related,
+                body = excluded.body,
+                read_at = CASE WHEN excluded.outcome = 'ignored'
+                    THEN processed_email.read_at ELSE NULL END",
         )
         .bind(&p.message_id)
         .bind(p.run_id)
@@ -207,6 +269,8 @@ impl Store {
         .bind(p.confidence)
         .bind(&p.summary)
         .bind(outcome_str(p.outcome))
+        .bind(p.job_related)
+        .bind(&p.body)
         .execute(&mut *tx)
         .await?;
         if let (Some(job_id), Some(status_id)) = (p.matched_job_id, apply_status) {
@@ -285,7 +349,9 @@ impl Store {
         if updated.rows_affected() == 0 {
             return Err(StoreError::NotFound);
         }
-        sqlx::query("UPDATE processed_email SET outcome = 'applied' WHERE message_id = ?")
+        sqlx::query(
+            "UPDATE processed_email SET outcome = 'applied', read_at = CURRENT_TIMESTAMP WHERE message_id = ?",
+        )
             .bind(message_id)
             .execute(&mut *tx)
             .await?;
@@ -299,10 +365,118 @@ impl Store {
     }
 
     pub async fn dismiss_suggestion(&self, message_id: &str) -> Result<()> {
-        sqlx::query("UPDATE processed_email SET outcome = 'dismissed' WHERE message_id = ?")
-            .bind(message_id)
+        sqlx::query(
+            "UPDATE processed_email SET outcome = 'dismissed', read_at = CURRENT_TIMESTAMP WHERE message_id = ?",
+        )
+        .bind(message_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Job-related results, reviews first, newest processed first.
+    pub async fn list_inbox(&self, filter: InboxFilter) -> Result<Vec<ProcessedEmail>> {
+        let condition = match filter {
+            InboxFilter::All => "outcome != 'ignored'",
+            InboxFilter::Review => "outcome = 'pending_review'",
+            InboxFilter::Unread => "outcome != 'ignored' AND read_at IS NULL",
+        };
+        let rows = sqlx::query(&format!(
+            "SELECT * FROM processed_email WHERE {condition}
+             ORDER BY outcome = 'pending_review' DESC, processed_at DESC, message_id"
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(processed_from_row).collect()
+    }
+
+    pub async fn unread_count(&self) -> Result<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT COUNT(*) FROM processed_email WHERE outcome != 'ignored' AND read_at IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn mark_read(&self, message_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE processed_email SET read_at = CURRENT_TIMESTAMP WHERE message_id = ? AND read_at IS NULL",
+        )
+        .bind(message_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_all_read(&self) -> Result<()> {
+        sqlx::query("UPDATE processed_email SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL")
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// Restores the status an auto-apply replaced, unless the job moved since.
+    pub async fn undo_applied(&self, message_id: &str) -> Result<ProcessedEmail> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT * FROM processed_email WHERE message_id = ?")
+            .bind(message_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        let processed = processed_from_row(&row)?;
+        let job_id = processed.matched_job_id.ok_or(StoreError::NotFound)?;
+        let current: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT status_id FROM job_description WHERE id = ?")
+                .bind(job_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let current = current.ok_or(StoreError::NotFound)?;
+        if processed.outcome != Outcome::Applied
+            || processed.undone_at.is_some()
+            || current != processed.suggested_status_id
+        {
+            return Err(StoreError::Invalid(UNDO_BLOCKED.into()));
+        }
+        sqlx::query("UPDATE job_description SET status_id = ? WHERE id = ?")
+            .bind(processed.previous_status_id)
+            .bind(job_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "UPDATE processed_email SET undone_at = CURRENT_TIMESTAMP,
+                read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE message_id = ?",
+        )
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query("SELECT * FROM processed_email WHERE message_id = ?")
+            .bind(message_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        let result = processed_from_row(&row)?;
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    /// Recent ignored emails that looked job-related, or predate the score.
+    pub async fn recheck_candidates(&self) -> Result<Vec<ProcessedEmail>> {
+        let rows = sqlx::query(
+            "SELECT * FROM processed_email
+             WHERE outcome = 'ignored'
+               AND processed_at >= datetime('now', '-30 days')
+               AND (job_related >= 0.5 OR job_related IS NULL)
+             ORDER BY processed_at, message_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(processed_from_row).collect()
+    }
+
+    pub async fn max_job_id(&self) -> Result<i64> {
+        Ok(
+            sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM job_description")
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 }

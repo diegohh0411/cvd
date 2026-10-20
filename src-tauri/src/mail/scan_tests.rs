@@ -13,7 +13,7 @@ use crate::commands::AppError;
 use crate::engine::{Answer, FakeDecisionEngine};
 use crate::providers::ChatEndpoint;
 use crate::state::Emitter;
-use crate::store::{NewProcessed, Outcome, ScanStatus, Store};
+use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, Store};
 
 struct FakeMail {
     headers: Vec<MailHeader>,
@@ -177,7 +177,7 @@ async fn run(
 #[tokio::test]
 async fn skips_processed_messages_without_fetching_bodies() {
     let (store, _, _, _) = seeded().await;
-    let run_id = store.create_scan_run().await.unwrap();
+    let run_id = store.create_scan_run(ScanSource::Manual).await.unwrap();
     store
         .record_processed(
             &NewProcessed {
@@ -192,6 +192,8 @@ async fn skips_processed_messages_without_fetching_bodies() {
                 confidence: None,
                 summary: None,
                 outcome: Outcome::Ignored,
+                job_related: None,
+                body: None,
             },
             None,
         )
