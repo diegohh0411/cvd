@@ -611,14 +611,11 @@ pub(crate) async fn mark_applied(st: &AppState, job_id: i64) -> String {
         return "Submitted. cvd couldn't update the job's status.".into();
     }
     (st.emitter())(
-        JOB_UPDATED_EVENT,
+        crate::state::JOB_UPDATED_EVENT,
         serde_json::json!({ "job_id": job_id, "status_id": applied.id }),
     );
     format!("Submitted. Marked as {} in cvd.", applied.name)
 }
-
-/// Tells the main window a job's tracking changed outside it.
-pub const JOB_UPDATED_EVENT: &str = "job://updated";
 
 fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
     let json = serde_json::to_string(text).map_err(|e| AppError::Io(e.to_string()))?;

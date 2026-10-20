@@ -12,7 +12,7 @@ use super::summary::summarize;
 use crate::commands::AppError;
 use crate::engine::DecisionEngine;
 use crate::providers::ChatEndpoint;
-use crate::state::Emitter;
+use crate::state::{Emitter, JOB_UPDATED_EVENT};
 use crate::store::types::{JobDescription, JobStatus};
 use crate::store::{NewProcessed, Outcome, ScanStatus, Store};
 
@@ -250,6 +250,15 @@ async fn handle_header(
         None
     };
     deps.store.record_processed(&row, apply_status).await?;
+
+    // Notify the main window after the transaction commits so its job signal
+    // reflects the classifier's status update without a manual refresh.
+    if let Some(status_id) = apply_status {
+        (deps.emit)(
+            JOB_UPDATED_EVENT,
+            json!({ "job_id": job_id, "status_id": status_id }),
+        );
+    }
 
     Ok(Tally::Recorded(outcome))
 }

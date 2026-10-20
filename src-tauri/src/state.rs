@@ -27,6 +27,9 @@ pub const RESEARCH_MODEL_KEY: &str = "research_model";
 /// Sends a named event with a JSON payload to the webview.
 pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
+/// A job's tracking fields changed outside the main window.
+pub const JOB_UPDATED_EVENT: &str = "job://updated";
+
 /// Where the decision engine comes from.
 pub enum EngineSource {
     /// Production: a lazily started `llama-server` for the active model.
