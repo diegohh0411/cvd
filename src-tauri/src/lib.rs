@@ -86,7 +86,6 @@ pub fn run() {
             ipc::get_job,
             ipc::start_match,
             ipc::cancel_match,
-            ipc::resume_match,
             ipc::list_runs,
             ipc::get_scores,
             ipc::list_cvs,

@@ -231,21 +231,6 @@ export class WorkspaceStore {
     }
   }
 
-  async resume(): Promise<void> {
-    const run = this.run();
-    if (!run) return;
-    this.runError.set(null);
-    this.startedAt.set(Date.now());
-    this.progress.set({ stage: 'reading_jd' });
-    this.setRun({ ...run, status: 'running' });
-    try {
-      await api.resumeMatch(run.id);
-    } catch (e) {
-      this.runError.set(toAppError(e));
-      this.setRun({ ...run, status: 'failed' });
-    }
-  }
-
   /** Reloads the finished run (for `company_researched_at`), the company and the results. */
   private async afterDone(runId: number): Promise<void> {
     const job = this.job();

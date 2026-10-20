@@ -68,15 +68,12 @@ describe('WorkspaceStore', () => {
     expect(ws.ranked()).toEqual(RANKED);
   });
 
-  it('marks failed runs with the error and offers resume', async () => {
-    const { ws, t } = setup({ list_runs: [run('running')], resume_match: null });
+  it('marks failed runs with the error and reports the error', async () => {
+    const { ws, t } = setup({ list_runs: [run('running')] });
     await ws.init(7, false);
     await t.emit('match://progress', { run_id: 3, event: { stage: 'failed', error: { kind: 'EngineUnavailable', message: 'dead' } } });
     expect(ws.phase()).toBe('failed');
     expect(ws.runError()?.kind).toBe('EngineUnavailable');
-    await ws.resume();
-    expect(ws.phase()).toBe('matching');
-    expect(t.callsTo('resume_match')).toEqual([{ runId: 3 }]);
   });
 
   it('debounces refits and ignores stale responses', async () => {

@@ -149,7 +149,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
             <div role="alert" class="mx-auto flex w-full max-w-lg flex-col gap-3 rounded-xl border p-6">
               @if (ws.phase() === 'cancelled') {
                 <h2 class="font-semibold">Matching cancelled</h2>
-                <p class="text-muted-foreground text-sm">Scores computed so far are kept. Resume to finish the rest.</p>
+                <p class="text-muted-foreground text-sm">Retry to score it again from the start.</p>
               } @else {
                 <h2 class="font-semibold">{{ failure().title }}</h2>
                 <p class="text-muted-foreground text-sm whitespace-pre-wrap">{{ failure().body }}</p>
@@ -160,12 +160,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
                 }
               }
               <div class="flex gap-2">
-                @if (ws.phase() === 'cancelled') {
-                  <button z-button (click)="resume()">Resume</button>
-                  <button z-button zType="outline" (click)="rematch(true)">Start over</button>
-                } @else {
-                  <button z-button (click)="rematch(true)">Retry</button>
-                }
+                <button z-button (click)="rematch(true)">Retry</button>
               </div>
             </div>
           }
@@ -283,10 +278,6 @@ export class WorkspacePageComponent {
     this.confirmRematch.set(false);
     this.tab.set('jd');
     await this.start();
-  }
-
-  async resume(): Promise<void> {
-    await this.ws.resume();
   }
 
   async cancel(): Promise<void> {
