@@ -6,6 +6,7 @@ pub mod imap;
 pub mod recheck;
 pub mod scan;
 pub mod summary;
+pub mod watch;
 
 #[cfg(test)]
 mod recheck_tests;
@@ -15,3 +16,5 @@ mod scan_tests;
 mod test_support;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod watch_tests;

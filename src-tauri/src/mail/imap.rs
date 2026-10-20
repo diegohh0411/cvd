@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use async_imap::types::{Fetch, Name, NameAttribute};
+use async_imap::extensions::idle::IdleResponse;
+use async_imap::types::{Fetch, Name, NameAttribute, UnsolicitedResponse};
 use async_imap::{Client, Session};
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -11,6 +12,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 use super::account::MailAccount;
+use super::watch::{reidle_deadline, IdleConn, IdleEvent, REIDLE};
 
 const UID_CHUNK_SIZE: usize = 200;
 
@@ -77,6 +79,15 @@ impl ImapSource {
             .await
             .map_err(|error| MailError::Protocol(error.to_string()))?;
         Ok(mailboxes)
+    }
+
+    /// A logged-in session on the scan folder, ready for IDLE.
+    pub async fn open_idle(&self) -> Result<ImapIdle, MailError> {
+        let mut session = self.open_session().await?;
+        self.examine_folder(&mut session).await?;
+        Ok(ImapIdle {
+            session: Some(session),
+        })
     }
 
     async fn open_session(&self) -> Result<Session<TlsStream<TcpStream>>, MailError> {
@@ -290,4 +301,73 @@ pub fn gmail_link(message_id: &str) -> String {
         })
         .collect::<String>();
     format!("https://mail.google.com/mail/u/0/#search/rfc822msgid%3A{encoded}")
+}
+
+/// Longest wait for the server to answer an IDLE start or `DONE`. A dead
+/// socket fails here instead of hanging the watcher.
+const IDLE_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The watcher's long-lived connection.
+pub struct ImapIdle {
+    session: Option<Session<TlsStream<TcpStream>>>,
+}
+
+fn idle_error(error: impl std::fmt::Display) -> MailError {
+    MailError::Connection(error.to_string())
+}
+
+/// Drains changes the server reported outside IDLE; true if mail arrived.
+fn drain_new_mail(session: &Session<TlsStream<TcpStream>>) -> bool {
+    let mut found = false;
+    while let Ok(response) = session.unsolicited_responses.try_recv() {
+        found |= matches!(
+            response,
+            UnsolicitedResponse::Exists(_) | UnsolicitedResponse::Recent(_)
+        );
+    }
+    found
+}
+
+#[async_trait]
+impl IdleConn for ImapIdle {
+    async fn wait(&mut self) -> Result<IdleEvent, MailError> {
+        let session = self
+            .session
+            .take()
+            .ok_or_else(|| idle_error("the IDLE connection is closed"))?;
+        if drain_new_mail(&session) {
+            self.session = Some(session);
+            return Ok(IdleEvent::NewData);
+        }
+        let mut handle = session.idle();
+        tokio::time::timeout(IDLE_REPLY_TIMEOUT, handle.init())
+            .await
+            .map_err(idle_error)?
+            .map_err(idle_error)?;
+        let response = {
+            let (wait, stop) = handle.wait_with_timeout(REIDLE);
+            tokio::pin!(wait);
+            match reidle_deadline(&mut wait).await {
+                Some(response) => response,
+                None => {
+                    drop(stop);
+                    tokio::time::timeout(IDLE_REPLY_TIMEOUT, wait)
+                        .await
+                        .map_err(idle_error)?
+                }
+            }
+        }
+        .map_err(idle_error)?;
+        let session = tokio::time::timeout(IDLE_REPLY_TIMEOUT, handle.done())
+            .await
+            .map_err(idle_error)?
+            .map_err(idle_error)?;
+        let reported = drain_new_mail(&session);
+        self.session = Some(session);
+        Ok(match response {
+            IdleResponse::NewData(_) => IdleEvent::NewData,
+            IdleResponse::Timeout | IdleResponse::ManualInterrupt if reported => IdleEvent::NewData,
+            IdleResponse::Timeout | IdleResponse::ManualInterrupt => IdleEvent::Timeout,
+        })
+    }
 }
