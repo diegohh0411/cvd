@@ -1,5 +1,11 @@
-pub mod types;
+mod apply_memory;
 mod companies;
+mod email;
+pub mod types;
+pub use email::{
+    InboxFilter, NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanSource, ScanStatus,
+    UNDO_BLOCKED,
+};
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +27,8 @@ pub enum StoreError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("not found")]
+    NotFound,
     #[error("invalid stored value: {0}")]
     Invalid(String),
 }
@@ -134,6 +142,37 @@ fn dup_status(e: sqlx::Error, name: &str) -> StoreError {
         }
         _ => StoreError::Db(e),
     }
+}
+
+fn job_view_from_row(r: &SqliteRow) -> Result<JobView> {
+    let layout: String = r.get("layout");
+    Ok(JobView {
+        id: r.get("id"),
+        name: r.get("name"),
+        layout: serde_json::from_value(serde_json::Value::String(layout.clone()))
+            .map_err(|_| StoreError::Invalid(format!("view layout {layout}")))?,
+        filters: serde_json::from_str(r.get("filters"))?,
+        sorts: serde_json::from_str(r.get("sorts"))?,
+        position: r.get("position"),
+    })
+}
+
+/// Validates a view's fields, returning (name, layout, filters, sorts) ready to bind.
+fn view_columns(v: &JobViewInput) -> Result<(&str, &'static str, String, String)> {
+    let name = v.name.trim();
+    if name.is_empty() {
+        return Err(StoreError::Invalid("view name must not be empty".into()));
+    }
+    if !v.filters.is_array() || !v.sorts.is_array() {
+        return Err(StoreError::Invalid(
+            "view filters and sorts must be lists".into(),
+        ));
+    }
+    let layout = match v.layout {
+        ViewLayout::Table => "table",
+        ViewLayout::Board => "board",
+    };
+    Ok((name, layout, v.filters.to_string(), v.sorts.to_string()))
 }
 
 fn skill_from_row(r: &SqliteRow) -> Skill {
@@ -442,14 +481,20 @@ impl Store {
             return Err(StoreError::Invalid("skill name must not be empty".into()));
         }
         let mut tx = self.pool.begin().await?;
-        if sqlx::query("SELECT 1 FROM skill WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?.is_none() {
-            return Ok(None);
-        }
-        let other: Option<i64> = sqlx::query_scalar("SELECT id FROM skill WHERE name = ? AND id != ?")
-            .bind(name)
+        if sqlx::query("SELECT 1 FROM skill WHERE id = ?")
             .bind(id)
             .fetch_optional(&mut *tx)
-            .await?;
+            .await?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        let other: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM skill WHERE name = ? AND id != ?")
+                .bind(name)
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let target = match other {
             Some(target) => {
                 sqlx::query(
@@ -460,7 +505,10 @@ impl Store {
                 .bind(id)
                 .execute(&mut *tx)
                 .await?;
-                sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM skill WHERE id = ?")
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
                 target
             }
             None => id,
@@ -481,7 +529,10 @@ impl Store {
 
     /// Deletes a skill and unlinks it from every entry. Returns false when it does not exist.
     pub async fn delete_skill(&self, id: i64) -> Result<bool> {
-        let done = sqlx::query("DELETE FROM skill WHERE id = ?").bind(id).execute(&self.pool).await?;
+        let done = sqlx::query("DELETE FROM skill WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(done.rows_affected() > 0)
     }
 
@@ -498,9 +549,11 @@ impl Store {
     ) -> Result<i64> {
         let status_id = match status_id {
             Some(id) => Some(id),
-            None => sqlx::query_scalar("SELECT id FROM job_status ORDER BY position, id LIMIT 1")
-                .fetch_optional(&self.pool)
-                .await?,
+            None => {
+                sqlx::query_scalar("SELECT id FROM job_status ORDER BY position, id LIMIT 1")
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
         };
         Ok(sqlx::query(
             "INSERT INTO job_description (title, company, raw_text, url, status_id) VALUES (?, ?, ?, ?, ?)",
@@ -517,10 +570,25 @@ impl Store {
 
     /// Sets a job's tracking fields; `status_id: None` clears the status.
     /// Returns false when the job does not exist.
-    pub async fn update_jd_tracking(&self, id: i64, status_id: Option<i64>, url: &str) -> Result<bool> {
+    pub async fn update_jd_tracking(
+        &self,
+        id: i64,
+        status_id: Option<i64>,
+        url: &str,
+    ) -> Result<bool> {
         let done = sqlx::query("UPDATE job_description SET status_id = ?, url = ? WHERE id = ?")
             .bind(status_id)
             .bind(url.trim())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Replaces a job's description text. Returns false when the job does not exist.
+    pub async fn update_jd_text(&self, id: i64, raw_text: &str) -> Result<bool> {
+        let done = sqlx::query("UPDATE job_description SET raw_text = ? WHERE id = ?")
+            .bind(raw_text)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -575,7 +643,10 @@ impl Store {
 
     /// Deletes a status; jobs using it lose their status.
     pub async fn delete_job_status(&self, id: i64) -> Result<()> {
-        sqlx::query("DELETE FROM job_status WHERE id = ?").bind(id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM job_status WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -589,6 +660,75 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    // ---- job views ----
+
+    pub async fn list_job_views(&self) -> Result<Vec<JobView>> {
+        let rows = sqlx::query("SELECT * FROM job_view ORDER BY position, id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(job_view_from_row).collect()
+    }
+
+    pub async fn get_job_view(&self, id: i64) -> Result<Option<JobView>> {
+        let row = sqlx::query("SELECT * FROM job_view WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(job_view_from_row).transpose()
+    }
+
+    /// Appends a view at the end of the tabs.
+    pub async fn create_job_view(&self, v: &JobViewInput) -> Result<i64> {
+        let (name, layout, filters, sorts) = view_columns(v)?;
+        Ok(sqlx::query(
+            "INSERT INTO job_view (name, layout, filters, sorts, position)
+             VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM job_view))",
+        )
+        .bind(name)
+        .bind(layout)
+        .bind(filters)
+        .bind(sorts)
+        .execute(&self.pool)
+        .await?
+        .last_insert_rowid())
+    }
+
+    /// Saves a view. Returns false when it does not exist.
+    pub async fn update_job_view(&self, id: i64, v: &JobViewInput) -> Result<bool> {
+        let (name, layout, filters, sorts) = view_columns(v)?;
+        let done = sqlx::query(
+            "UPDATE job_view SET name = ?, layout = ?, filters = ?, sorts = ? WHERE id = ?",
+        )
+        .bind(name)
+        .bind(layout)
+        .bind(filters)
+        .bind(sorts)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Deletes a view, refusing to remove the last one so the page always has a view.
+    pub async fn delete_job_view(&self, id: i64) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let others: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_view WHERE id != ?")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if others == 0 {
+            return Err(StoreError::Invalid(
+                "the last view cannot be deleted".into(),
+            ));
+        }
+        sqlx::query("DELETE FROM job_view WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -717,6 +857,14 @@ impl Store {
         Ok(())
     }
 
+    pub async fn delete_setting(&self, key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     // ---- secrets ----
 
     pub async fn get_secret(&self, provider: &str) -> Result<Option<String>> {
@@ -741,7 +889,10 @@ impl Store {
     }
 
     pub async fn delete_secret(&self, provider: &str) -> Result<()> {
-        sqlx::query("DELETE FROM secrets WHERE provider = ?").bind(provider).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM secrets WHERE provider = ?")
+            .bind(provider)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 

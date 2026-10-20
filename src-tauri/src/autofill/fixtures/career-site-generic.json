@@ -1,0 +1,126 @@
+{
+ "url": "synthetic: hand-built company careers page with web-component inputs (careers.acme.com)",
+ "fields": [
+  {
+   "key": "c1",
+   "kind": "text",
+   "label": "Full name",
+   "placeholder": "",
+   "autocomplete": "name",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "full_name"
+  },
+  {
+   "key": "c2",
+   "kind": "text",
+   "label": "Your email",
+   "placeholder": "",
+   "autocomplete": "email",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "email"
+  },
+  {
+   "key": "c3",
+   "kind": "text",
+   "label": "Mobile",
+   "placeholder": "",
+   "autocomplete": "tel",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "phone"
+  },
+  {
+   "key": "c4",
+   "kind": "text",
+   "label": "GitHub",
+   "placeholder": "https://github.com/…",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "github"
+  },
+  {
+   "key": "c5",
+   "kind": "text",
+   "label": "Current employer",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "current_company"
+  },
+  {
+   "key": "c6",
+   "kind": "select",
+   "label": "Do you require visa sponsorship to work here?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Please select",
+    "Yes",
+    "No"
+   ],
+   "expect": "needs_sponsorship"
+  },
+  {
+   "key": "c7",
+   "kind": "text",
+   "label": "Salary expectations",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "c8",
+   "kind": "text",
+   "label": "Card number",
+   "placeholder": "",
+   "autocomplete": "cc-number",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "c9",
+   "kind": "file",
+   "label": "Attach",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "CV (PDF)",
+   "required": false,
+   "options": [],
+   "expect": "resume"
+  }
+ ]
+}

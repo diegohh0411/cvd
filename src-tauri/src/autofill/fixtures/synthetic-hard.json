@@ -1,0 +1,435 @@
+{
+ "url": "synthetic: hand-written labels in the style of custom ATS questions",
+ "fields": [
+  {
+   "key": "s1",
+   "kind": "text",
+   "label": "Nombre",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "first_name",
+    "full_name"
+   ]
+  },
+  {
+   "key": "s2",
+   "kind": "text",
+   "label": "Apellidos",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "last_name"
+  },
+  {
+   "key": "s3",
+   "kind": "text",
+   "label": "Correo electrónico",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "email"
+  },
+  {
+   "key": "s4",
+   "kind": "text",
+   "label": "Teléfono móvil",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "phone"
+  },
+  {
+   "key": "s5",
+   "kind": "text",
+   "label": "Ciudad de residencia",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "city"
+  },
+  {
+   "key": "s6",
+   "kind": "text",
+   "label": "Your GitHub handle or profile",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "github"
+  },
+  {
+   "key": "s7",
+   "kind": "text",
+   "label": "Personal site",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "website"
+  },
+  {
+   "key": "s8",
+   "kind": "text",
+   "label": "Employer",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "current_company"
+  },
+  {
+   "key": "s9",
+   "kind": "text",
+   "label": "Job title",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "current_title",
+    null
+   ]
+  },
+  {
+   "key": "s10",
+   "kind": "number",
+   "label": "How many years of professional experience do you have?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "years_experience"
+  },
+  {
+   "key": "s11",
+   "kind": "select",
+   "label": "Country of residence",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Select...",
+    "Afghanistan",
+    "Argentina",
+    "Brazil",
+    "Canada",
+    "France",
+    "Germany",
+    "Mexico",
+    "Portugal",
+    "Spain",
+    "United Kingdom",
+    "United States"
+   ],
+   "expect": "country"
+  },
+  {
+   "key": "s12",
+   "kind": "combobox",
+   "label": "Phone country code",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "United States +1",
+    "Mexico +52",
+    "Spain +34",
+    "France +33"
+   ],
+   "expect": [
+    "country",
+    null
+   ]
+  },
+  {
+   "key": "s13",
+   "kind": "radio",
+   "label": "Do you need a visa to work here?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Yes",
+    "No"
+   ],
+   "expect": [
+    "needs_sponsorship",
+    null
+   ]
+  },
+  {
+   "key": "s14",
+   "kind": "radio",
+   "label": "Are you open to working from our office 4 days a week?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Yes",
+    "No"
+   ],
+   "expect": null
+  },
+  {
+   "key": "s15",
+   "kind": "radio",
+   "label": "Have you applied to us before?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Yes",
+    "No"
+   ],
+   "expect": null
+  },
+  {
+   "key": "s16",
+   "kind": "radio",
+   "label": "Would you move to Berlin for this role?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Yes",
+    "No"
+   ],
+   "expect": [
+    "willing_to_relocate",
+    null
+   ]
+  },
+  {
+   "key": "s17",
+   "kind": "text",
+   "label": "Favourite programming language",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "s18",
+   "kind": "text",
+   "label": "Name of your university",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "s19",
+   "kind": "text",
+   "label": "Twitter / X handle",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "s20",
+   "kind": "text",
+   "label": "Notice period (weeks)",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "notice_period",
+    null
+   ]
+  },
+  {
+   "key": "s21",
+   "kind": "text",
+   "label": "Preferred first name",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": "first_name"
+  },
+  {
+   "key": "s22",
+   "kind": "text",
+   "label": "Middle name",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "s23",
+   "kind": "text",
+   "label": "Emergency contact name",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": null
+  },
+  {
+   "key": "s24",
+   "kind": "tel",
+   "label": "Work phone",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "phone",
+    null
+   ]
+  },
+  {
+   "key": "s25",
+   "kind": "text",
+   "label": "Desired start date",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "earliest_start",
+    null
+   ]
+  },
+  {
+   "key": "s26",
+   "kind": "select",
+   "label": "Highest level of education",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [
+    "Select...",
+    "High school",
+    "Bachelor's",
+    "Master's",
+    "PhD"
+   ],
+   "expect": null
+  },
+  {
+   "key": "s27",
+   "kind": "text",
+   "label": "Where do you currently live?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "location_full",
+    "city"
+   ]
+  },
+  {
+   "key": "s28",
+   "kind": "text",
+   "label": "In which city and country are you based?",
+   "placeholder": "",
+   "autocomplete": "",
+   "name_attr": "",
+   "help": "",
+   "section": "",
+   "required": false,
+   "options": [],
+   "expect": [
+    "location_full",
+    "city"
+   ]
+  }
+ ]
+}

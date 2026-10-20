@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-autofill-bridge"
+description = "Enables the autofill_bridge command without any pre-configured scope."
+commands.allow = ["autofill_bridge"]
+
+[[permission]]
+identifier = "deny-autofill-bridge"
+description = "Denies the autofill_bridge command without any pre-configured scope."
+commands.deny = ["autofill_bridge"]

@@ -12,9 +12,9 @@ import type { AppError } from '../../core/ipc/types';
   selector: 'app-pdf-preview',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="bg-muted/40 relative h-full min-h-[480px] overflow-hidden rounded-xl border">
+    <div class="bg-muted/40 relative h-full max-h-full w-full min-h-[480px] overflow-hidden rounded-xl border">
       @if (src(); as s) {
-        <iframe [src]="s" title="CV preview" class="h-full min-h-[480px] w-full"></iframe>
+        <iframe [src]="s" title="CV preview" class="absolute inset-0 block h-full w-full"></iframe>
       } @else {
         <div class="text-muted-foreground flex h-full min-h-[480px] items-center justify-center text-sm">
           {{ busy() ? 'Rendering preview…' : 'No preview yet' }}

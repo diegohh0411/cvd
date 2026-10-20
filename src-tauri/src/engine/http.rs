@@ -8,29 +8,66 @@ use serde_json::Value;
 
 use super::types::{Answer, EngineError, Question};
 use super::wire::{parse_wire_response, wire_request};
-use super::DecisionEngine;
+use super::{DecisionEngine, MAX_QUESTIONS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
+/// TypeSafe answers 529 when overloaded; like 429 it is retried once.
+const STATUS_OVERLOADED: u16 = 529;
 
 pub struct HttpSystemOneEngine {
+    /// Display name for user-facing errors, e.g. "OpenRouter".
+    provider: &'static str,
     base_url: String,
     api_key: String,
     model: String,
+    /// The provider's per-request question cap, if it has one.
+    max_questions: Option<usize>,
     http: reqwest::Client,
 }
 
 impl HttpSystemOneEngine {
-    pub fn new(base_url: String, api_key: String, model: String) -> Self {
-        let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("reqwest client");
-        Self { base_url, api_key, model, http }
+    pub fn new(provider: &'static str, base_url: String, api_key: String, model: String) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .expect("reqwest client");
+        Self {
+            provider,
+            base_url,
+            api_key,
+            model,
+            max_questions: None,
+            http,
+        }
+    }
+
+    pub fn with_max_questions(mut self, cap: Option<usize>) -> Self {
+        self.max_questions = cap.map(|c| c.clamp(1, MAX_QUESTIONS));
+        self
+    }
+
+    pub fn without_proxy(mut self) -> Self {
+        self.http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .no_proxy()
+            .build()
+            .expect("HTTP client");
+        self
     }
 
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
-        self.http
-            .post(format!("{}/v1/systemone", self.base_url.trim_end_matches('/')))
-            .bearer_auth(&self.api_key)
-            .json(body)
+        let mut request = self
+            .http
+            .post(format!(
+                "{}/v1/systemone",
+                self.base_url.trim_end_matches('/')
+            ))
+            .json(body);
+        if !self.api_key.is_empty() {
+            request = request.bearer_auth(&self.api_key);
+        }
+        request
             .send()
             .await
             .map_err(|e| EngineError::Network(e.to_string()))
@@ -46,12 +83,24 @@ fn retry_after(resp: &reqwest::Response) -> Duration {
         .min(MAX_RETRY_AFTER)
 }
 
+/// OpenRouter errors live at `/error/message`; SubQ's at `/detail/message`; TypeSafe's body is
+/// undocumented, so a top-level `message` or `code` is accepted too.
 fn error_message(v: &Value) -> String {
-    v.pointer("/error/message").and_then(Value::as_str).unwrap_or("unknown error").to_string()
+    v.pointer("/error/message")
+        .or_else(|| v.pointer("/detail/message"))
+        .or_else(|| v.pointer("/message"))
+        .or_else(|| v.pointer("/code"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown error")
+        .to_string()
 }
 
 #[async_trait]
 impl DecisionEngine for HttpSystemOneEngine {
+    fn max_questions(&self) -> usize {
+        self.max_questions.unwrap_or(MAX_QUESTIONS)
+    }
+
     async fn decide(
         &self,
         state: &str,
@@ -61,23 +110,46 @@ impl DecisionEngine for HttpSystemOneEngine {
         body["model"] = Value::String(self.model.clone());
 
         let mut resp = self.send(&body).await?;
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS
+            || resp.status().as_u16() == STATUS_OVERLOADED
+        {
             tokio::time::sleep(retry_after(&resp)).await;
             resp = self.send(&body).await?;
         }
         let status = resp.status();
-        let bytes = resp.bytes().await.map_err(|e| EngineError::Network(e.to_string()))?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| EngineError::Network(e.to_string()))?;
         let json: Option<Value> = serde_json::from_slice(&bytes).ok();
-        let msg = || json.as_ref().map(error_message).unwrap_or_else(|| String::from_utf8_lossy(&bytes).into());
+        let msg = || {
+            json.as_ref()
+                .map(error_message)
+                .unwrap_or_else(|| String::from_utf8_lossy(&bytes).into())
+        };
         match status.as_u16() {
-            401 | 403 => Err(EngineError::Unauthorized),
-            402 => Err(EngineError::InsufficientCredits),
-            429 => Err(EngineError::RateLimited),
+            401 | 403 => Err(EngineError::Unauthorized(self.provider)),
+            402 => Err(EngineError::InsufficientCredits(self.provider)),
+            429 | STATUS_OVERLOADED => Err(EngineError::RateLimited),
             404 => Err(EngineError::ModelUnavailable(self.model.clone())),
-            400 if msg().contains("does not exist") => Err(EngineError::ModelUnavailable(self.model.clone())),
+            400 if msg().contains("does not exist") => {
+                Err(EngineError::ModelUnavailable(self.model.clone()))
+            }
+            400 if msg().contains("token limit")
+                || String::from_utf8_lossy(&bytes).contains("max_tokens_exceeded") =>
+            {
+                Err(EngineError::ContextOverflow)
+            }
+            _ if !status.is_success() => Err(EngineError::BadResponse(format!(
+                "HTTP {status}: {}",
+                msg()
+            ))),
             _ => match json {
                 Some(v) => parse_wire_response(v),
-                None => Err(EngineError::BadResponse(format!("HTTP {status}: {}", msg()))),
+                None => Err(EngineError::BadResponse(format!(
+                    "HTTP {status}: {}",
+                    msg()
+                ))),
             },
         }
     }

@@ -4,7 +4,7 @@ import { ShellComponent } from './shell/shell.component';
 
 /** Where an old `/models?tab=` link lands now. */
 export function modelsRedirect(tab: string | undefined): string {
-  return tab === 'engine' ? '/ai/roles' : '/ai/models';
+  return '/ai';
 }
 
 export const routes: Routes = [
@@ -13,6 +13,7 @@ export const routes: Routes = [
     component: ShellComponent,
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'jobs' },
+      { path: 'inbox', loadComponent: () => import('./features/inbox/inbox-page.component').then((m) => m.InboxPageComponent) },
       { path: 'jobs', loadComponent: () => import('./features/jobs/jobs-page.component').then((m) => m.JobsPageComponent) },
       { path: 'jobs/new', loadComponent: () => import('./features/jobs/new-job.component').then((m) => m.NewJobComponent) },
       {
@@ -29,10 +30,11 @@ export const routes: Routes = [
         loadComponent: () => import('./features/library/library-page.component').then((m) => m.LibraryPageComponent),
       },
       { path: 'profile', loadComponent: () => import('./features/profile/profile-page.component').then((m) => m.ProfilePageComponent) },
-      { path: 'ai', pathMatch: 'full', redirectTo: 'ai/roles' },
-      { path: 'ai/roles', loadComponent: () => import('./features/ai/roles-page.component').then((m) => m.RolesPageComponent) },
-      { path: 'ai/models', loadComponent: () => import('./features/ai/models-page.component').then((m) => m.AiModelsPageComponent) },
-      { path: 'ai/providers', loadComponent: () => import('./features/ai/providers-page.component').then((m) => m.ProvidersPageComponent) },
+      { path: 'ai', pathMatch: 'full', loadComponent: () => import('./features/ai/ai-models-page.component').then((m) => m.AiModelsPageComponent) },
+      { path: 'ai/downloads', redirectTo: 'ai' },
+      { path: 'ai/roles', redirectTo: 'ai' },
+      { path: 'ai/providers', redirectTo: 'ai' },
+      { path: 'ai/models', redirectTo: 'ai' },
       { path: 'models', redirectTo: ({ queryParams }) => modelsRedirect(queryParams['tab']) },
       {
         path: 'settings',

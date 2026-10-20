@@ -15,7 +15,11 @@ pub struct FakeDecisionEngine {
 
 impl FakeDecisionEngine {
     pub fn new(f: impl Fn(&str, &str, &Question) -> Answer + Send + Sync + 'static) -> Self {
-        Self { f: Box::new(f), calls: AtomicUsize::new(0), fail_on: AtomicUsize::new(0) }
+        Self {
+            f: Box::new(f),
+            calls: AtomicUsize::new(0),
+            fail_on: AtomicUsize::new(0),
+        }
     }
 
     pub fn calls(&self) -> usize {
@@ -38,7 +42,9 @@ impl DecisionEngine for FakeDecisionEngine {
         for (name, q) in questions {
             let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             if n == self.fail_on.load(Ordering::SeqCst) {
-                return Err(EngineError::Unavailable(format!("fake failure on call {n}")));
+                return Err(EngineError::Unavailable(format!(
+                    "fake failure on call {n}"
+                )));
             }
             out.insert(name.clone(), (self.f)(state, name, q));
         }

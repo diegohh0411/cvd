@@ -1,5 +1,5 @@
 import { RANKED, SELECTION } from './fixtures';
-import { buildView, counts, moveEntry, NO_OVERRIDES, reorder, sectionOf, toggleBullet, toggleEntry, toOverrides } from './selection.model';
+import { buildView, counts, moveEntry, NO_OVERRIDES, reorder, reorderBullets, sectionOf, toggleBullet, toggleEntry, toOverrides } from './selection.model';
 
 describe('selection model', () => {
   it('maps kinds to the fitter sections', () => {
@@ -58,5 +58,15 @@ describe('selection model', () => {
 
   it('counts selected and total items', () => {
     expect(counts(RANKED, SELECTION)).toEqual({ entries: 2, totalEntries: 3, bullets: 3, totalBullets: 6 });
+  });
+
+  it('lists bullets by score and reorders them without touching positions', () => {
+    const view = buildView(RANKED, SELECTION, NO_OVERRIDES);
+    const entry = view.flatMap((g) => g.entries).find((e) => e.bullets.length > 1)!;
+    const defaultOrder = entry.bullets.map((b) => b.id);
+    const next = reorderBullets(NO_OVERRIDES, view, entry.id, 0, 1)!;
+    const moved = buildView(RANKED, SELECTION, next).flatMap((g) => g.entries).find((e) => e.id === entry.id)!;
+    expect(moved.bullets.map((b) => b.id)).toEqual([defaultOrder[1], defaultOrder[0], ...defaultOrder.slice(2)]);
+    expect(toOverrides(next)).toContainEqual({ BulletOrder: next.bulletOrder });
   });
 });

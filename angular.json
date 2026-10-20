@@ -6,7 +6,7 @@
     "analytics": false
   },
   "projects": {
-    "cv-decisions": {
+    "cvd": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -65,10 +65,10 @@
           },
           "configurations": {
             "production": {
-              "buildTarget": "cv-decisions:build:production"
+              "buildTarget": "cvd:build:production"
             },
             "development": {
-              "buildTarget": "cv-decisions:build:development"
+              "buildTarget": "cvd:build:development"
             }
           },
           "defaultConfiguration": "development"

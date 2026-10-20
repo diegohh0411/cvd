@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "apply",
+  "description": "Auto-apply windows: any HTTPS page may call exactly one command; the handler asks the user before a new host gets data",
+  "windows": [
+    "apply-*"
+  ],
+  "remote": {
+    "urls": [
+      "https://*/*"
+    ]
+  },
+  "permissions": [
+    "allow-autofill-bridge"
+  ]
+}

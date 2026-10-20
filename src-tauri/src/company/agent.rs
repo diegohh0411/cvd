@@ -16,8 +16,11 @@ use crate::search::SearchProvider;
 use crate::store::types::{CompanyProfile, Source};
 
 /// Unit tests read pages from a local mock server; the app only reads public hosts.
-const FETCH_POLICY: tools::FetchPolicy =
-    if cfg!(test) { tools::FetchPolicy::LocalFirstHopOnly } else { tools::FetchPolicy::PublicOnly };
+const FETCH_POLICY: tools::FetchPolicy = if cfg!(test) {
+    tools::FetchPolicy::LocalFirstHopOnly
+} else {
+    tools::FetchPolicy::PublicOnly
+};
 
 /// Fetched pages kept verbatim in the history; older ones become a placeholder.
 const KEEP_PAGES: usize = 3;
@@ -34,7 +37,10 @@ pub struct Budget {
 
 impl Default for Budget {
     fn default() -> Self {
-        Self { max_rounds: 25, wall_clock: Duration::from_secs(240) }
+        Self {
+            max_rounds: 25,
+            wall_clock: Duration::from_secs(240),
+        }
     }
 }
 
@@ -125,7 +131,14 @@ impl SubmitArgs {
                 remote_policy: self.remote_policy,
                 products: self.products,
                 tech_stack: self.tech_stack,
-                sources: self.sources.into_iter().map(|s| Source { url: s.url, title: s.title }).collect(),
+                sources: self
+                    .sources
+                    .into_iter()
+                    .map(|s| Source {
+                        url: s.url,
+                        title: s.title,
+                    })
+                    .collect(),
             },
         }
     }
@@ -174,7 +187,9 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
         let old = self.pages.len().saturating_sub(KEEP_PAGES);
         for (i, url) in &self.pages[..old] {
             if let Some(Message::ToolResult { content, .. }) = self.history.get_mut(*i) {
-                *content = vec![Content::Text { text: format!("[page {url} read earlier — omitted]") }];
+                *content = vec![Content::Text {
+                    text: format!("[page {url} read earlier — omitted]"),
+                }];
             }
         }
     }
@@ -182,9 +197,16 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
     async fn run_tool(&mut self, c: &ToolCall) -> Outcome {
         let args: serde_json::Value = match serde_json::from_str(&c.arguments) {
             Ok(v) => v,
-            Err(e) => return Outcome::Text(format!("Error: invalid JSON arguments for {}: {e}", c.name)),
+            Err(e) => {
+                return Outcome::Text(format!("Error: invalid JSON arguments for {}: {e}", c.name))
+            }
         };
-        let field = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let field = |k: &str| {
+            args.get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
         match c.name.as_str() {
             WEB_SEARCH => {
                 let query = field("query");
@@ -213,7 +235,11 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
     }
 
     /// One model turn plus its tool calls. `Some` once a profile is submitted.
-    async fn turn(&mut self, deadline: Instant, cancel: &CancellationToken) -> Result<Option<ResearchOutput>, ResearchError> {
+    async fn turn(
+        &mut self,
+        deadline: Instant,
+        cancel: &CancellationToken,
+    ) -> Result<Option<ResearchOutput>, ResearchError> {
         self.trim_pages();
         let req = self.request();
         let resp = tokio::select! {
@@ -229,7 +255,9 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
             provider_data: resp.provider_data,
         });
         if calls.is_empty() {
-            self.history.push(Message::User(vec![UserContent::Text { text: prompt::NUDGE.into() }]));
+            self.history.push(Message::User(vec![UserContent::Text {
+                text: prompt::NUDGE.into(),
+            }]));
             return Ok(None);
         }
         for c in &calls {
@@ -240,7 +268,10 @@ impl<F: Fn(ResearchStep)> Loop<'_, F> {
                 Outcome::Submitted(out) => return Ok(Some(*out)),
                 Outcome::Text(t) => t,
             };
-            self.history.push(Message::ToolResult { call_id: c.id.clone(), content: vec![Content::Text { text }] });
+            self.history.push(Message::ToolResult {
+                call_id: c.id.clone(),
+                content: vec![Content::Text { text }],
+            });
             if let Some(url) = self.fetched.take() {
                 self.pages.push((self.history.len() - 1, url));
             }
@@ -263,15 +294,33 @@ pub async fn research_with(
     let mut l = Loop {
         ep,
         search,
-        http: reqwest::Client::builder().timeout(Duration::from_secs(120)).build().expect("reqwest client"),
-        history: vec![Message::User(vec![UserContent::Text { text: prompt::user_message(&input) }])],
+        http: {
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(120));
+            let local = reqwest::Url::parse(&ep.base_url).ok().is_some_and(|u| {
+                u.host_str().is_some_and(|h| {
+                    h == "localhost"
+                        || h.trim_matches(['[', ']'])
+                            .parse::<std::net::IpAddr>()
+                            .is_ok_and(|ip| ip.is_loopback())
+                })
+            });
+            (if local { client.no_proxy() } else { client })
+                .build()
+                .expect("reqwest client")
+        },
+        history: vec![Message::User(vec![UserContent::Text {
+            text: prompt::user_message(&input),
+        }])],
         pages: Vec::new(),
         fetched: None,
         on_step,
     };
     let deadline = Instant::now() + budget.wall_clock;
     for n in 1..=budget.max_rounds {
-        (l.on_step)(ResearchStep::Round { n, max: budget.max_rounds });
+        (l.on_step)(ResearchStep::Round {
+            n,
+            max: budget.max_rounds,
+        });
         match l.turn(deadline, &cancel).await {
             Ok(Some(out)) => return Ok(out),
             Ok(None) => {}
@@ -283,7 +332,9 @@ pub async fn research_with(
         }
     }
     // Out of rounds or time: one last turn asking for whatever it has.
-    l.history.push(Message::User(vec![UserContent::Text { text: prompt::EXHAUSTED.into() }]));
+    l.history.push(Message::User(vec![UserContent::Text {
+        text: prompt::EXHAUSTED.into(),
+    }]));
     match l.turn(Instant::now() + FINAL_TURN, &cancel).await {
         Ok(Some(out)) => Ok(out),
         Ok(None) | Err(ResearchError::Budget) => Err(ResearchError::Budget),

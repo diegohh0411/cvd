@@ -1,34 +1,33 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { onEngineStatus } from '../ipc/events';
 import type { EngineStatus } from '../ipc/types';
-import { ModelsStore } from './models.store';
 
-const REMOTE_PREFIX = 'openrouter:';
+/** Model references include their connection; bare ids belong to legacy history. */
+const REMOTE_PREFIX = /^[a-z][a-z0-9~-]*:/;
 
 const LABELS: Record<EngineStatus['state'], string> = {
   none: 'no model',
   missing: 'not installed',
   idle: 'ready',
-  ready: 'running',
+  ready: 'ready',
   error: 'error',
 };
 
 @Injectable({ providedIn: 'root' })
 export class EngineStore {
-  private readonly models = inject(ModelsStore);
   readonly status = signal<EngineStatus>({ model_id: null, state: 'none', error: null });
   private listening = false;
 
   readonly modelLabel = computed(() => {
     const id = this.status().model_id;
     if (!id) return 'No model';
-    if (id.startsWith(REMOTE_PREFIX)) return `${id.slice(REMOTE_PREFIX.length)} (online)`;
-    const spec = this.models.models().find((m) => m.spec.id === id)?.spec;
-    return spec ? spec.label.replace(/\s*\(.*\)$/, '') : id;
+    const remote = REMOTE_PREFIX.exec(id);
+    if (remote) return `${id.slice(remote[0].length)} (${id.startsWith('localhost:') ? 'local' : 'online'})`;
+    return id;
   });
-  readonly remote = computed(() => this.status().model_id?.startsWith(REMOTE_PREFIX) ?? false);
+  readonly remote = computed(() => REMOTE_PREFIX.test(this.status().model_id ?? '') && !this.status().model_id?.startsWith('localhost:'));
   readonly stateLabel = computed(() => LABELS[this.status().state]);
   readonly ok = computed(() => this.status().state === 'idle' || this.status().state === 'ready');
 

@@ -162,6 +162,7 @@ describe('workspace helpers', () => {
     expect(s.seniority).toEqual({ label: 'senior', p: 0.6 });
     expect(s.roleFamily?.label).toBe('backend');
     expect(s.skills[0]).toEqual({ name: 'Rust', p: 0.9 });
+    expect(s.tags).toEqual(['backend', 'distributed systems']);
   });
 
   it('names and normalizes export paths', () => {

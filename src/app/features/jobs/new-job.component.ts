@@ -5,7 +5,8 @@ import { Router } from '@angular/router';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardInputComponent } from '@/shared/components/input/input.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
-import { toAppError } from '../../core/ipc/errors';
+import * as api from '../../core/ipc/commands';
+import { messageFor, toAppError } from '../../core/ipc/errors';
 import { JobStatusesStore } from '../../core/stores/job-statuses.store';
 import { JobsStore } from '../../core/stores/jobs.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
@@ -24,7 +25,7 @@ export function wordCount(text: string): number {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-page-header [crumbs]="[{ label: 'Jobs', link: '/jobs' }, { label: 'New job' }]" />
-    <form class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4" (ngSubmit)="match()">
+    <form class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4" (ngSubmit)="submit()">
       @if (readiness.blocker(); as b) {
         <app-blocker-alert [blocker]="b" />
       }
@@ -57,12 +58,14 @@ export function wordCount(text: string): number {
           id="jd-text"
           name="text"
           class="border-input focus-visible:ring-ring/50 focus-visible:border-ring min-h-72 flex-1 resize-none rounded-md border bg-transparent p-3 text-sm outline-none focus-visible:ring-[3px]"
-          placeholder="Paste the full job description here…"
+          [placeholder]="fetchMode() ? 'Leave empty to read the description from the posting URL…' : 'Paste the full job description here…'"
           [(ngModel)]="text"
         ></textarea>
       </div>
       <div class="flex justify-end gap-2">
-        <button z-button type="submit" [zDisabled]="!canMatch()" [zLoading]="busy()">Match</button>
+        <button z-button type="submit" [zDisabled]="!canSubmit()" [zLoading]="busy()">
+          {{ fetchMode() ? 'Fetch description' : 'Match' }}
+        </button>
       </div>
     </form>
   `,
@@ -82,12 +85,33 @@ export class NewJobComponent implements OnInit {
   protected readonly busy = signal(false);
   protected readonly words = computed(() => wordCount(this.text()));
   protected readonly canMatch = computed(() => !this.busy() && !this.readiness.blocker() && this.words() > 0);
+  /** No description pasted but a URL given: the button reads the posting instead of matching. */
+  protected readonly fetchMode = computed(() => this.words() === 0 && this.url().trim() !== '');
+  protected readonly canSubmit = computed(() => (this.fetchMode() ? !this.busy() : this.canMatch()));
 
   ngOnInit(): void {
     // Preselect the first status (e.g. Bookmarked), as the backend would.
     void this.statuses.ensureLoaded().then(() => {
       if (this.statusId() === null) this.statusId.set(this.statuses.statuses()[0]?.id ?? null);
     });
+  }
+
+  protected async submit(): Promise<void> {
+    if (this.fetchMode()) await this.readPosting();
+    else await this.match();
+  }
+
+  /** Fills the description from the posting so the user can review it before matching. */
+  protected async readPosting(): Promise<void> {
+    if (!this.canSubmit()) return;
+    this.busy.set(true);
+    try {
+      this.text.set(await api.fetchJobDescription(normalizeUrl(this.url())));
+    } catch (e) {
+      this.toast.error('Could not read the posting', { description: messageFor(e) });
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   async match(): Promise<void> {
@@ -107,7 +131,7 @@ export class NewJobComponent implements OnInit {
     } catch (e) {
       const err = toAppError(e);
       if (err.kind === 'ModelMissing') {
-        await this.router.navigate(['/ai/models']);
+        await this.router.navigate(['/ai']);
       }
       this.toast.error('Could not start matching', { description: err.message });
     } finally {

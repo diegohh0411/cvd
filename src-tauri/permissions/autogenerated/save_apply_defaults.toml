@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-apply-defaults"
+description = "Enables the save_apply_defaults command without any pre-configured scope."
+commands.allow = ["save_apply_defaults"]
+
+[[permission]]
+identifier = "deny-save-apply-defaults"
+description = "Denies the save_apply_defaults command without any pre-configured scope."
+commands.deny = ["save_apply_defaults"]

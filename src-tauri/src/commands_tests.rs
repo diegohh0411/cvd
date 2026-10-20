@@ -34,7 +34,6 @@ async fn state() -> (AppState, Events) {
     let sink = events.clone();
     let st = AppState::new(
         store,
-        std::env::temp_dir().join("cvd-test-models"),
         EngineSource::Fixed(Arc::new(fake())),
         Arc::new(move |name: &str, v: serde_json::Value| {
             sink.lock().unwrap().push((name.to_string(), v))
@@ -55,7 +54,10 @@ fn entry(title: &str) -> EntryInput {
         description: String::new(),
         sort_hint: 0,
         archived: false,
-        bullets: vec!["Built a Rust service".into(), "Shipped SQL migrations".into()],
+        bullets: vec![
+            "Built a Rust service".into(),
+            "Shipped SQL migrations".into(),
+        ],
         skills: vec!["Rust".into()],
     }
 }
@@ -75,7 +77,9 @@ async fn wait_done(st: &AppState, run_id: i64) -> RunStatus {
 async fn start_match_without_model_errors() {
     let (st, _) = state().await;
     save_entry(&st, entry("Engineer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None)
+        .await
+        .unwrap();
     let err = start_match(&st, jd).await.unwrap_err();
     assert_eq!(err.kind(), "ModelMissing");
     let json = serde_json::to_value(&err).unwrap();
@@ -86,8 +90,13 @@ async fn start_match_without_model_errors() {
 #[tokio::test]
 async fn empty_library_rejected() {
     let (st, _) = state().await;
-    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
+    st.store
+        .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+        .await
+        .unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None)
+        .await
+        .unwrap();
     let err = start_match(&st, jd).await.unwrap_err();
     assert_eq!(
         err,
@@ -98,14 +107,25 @@ async fn empty_library_rejected() {
 #[tokio::test]
 async fn match_then_fit_then_export() {
     let (st, events) = state().await;
-    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+    st.store
+        .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+        .await
+        .unwrap();
     save_entry(&st, entry("Engineer")).await.unwrap();
     save_entry(&st, entry("Developer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None)
+        .await
+        .unwrap();
 
     let run_id = start_match(&st, jd).await.unwrap();
     assert_eq!(wait_done(&st, run_id).await, RunStatus::Done);
-    let evs: Vec<_> = events.lock().unwrap().iter().filter(|(n, _)| n == MATCH_EVENT).cloned().collect();
+    let evs: Vec<_> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(n, _)| n == MATCH_EVENT)
+        .cloned()
+        .collect();
     assert!(evs.iter().all(|(_, v)| v["run_id"] == run_id));
     assert_eq!(evs.last().unwrap().1["event"]["stage"], "done");
 
@@ -120,9 +140,14 @@ async fn match_then_fit_then_export() {
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("cv.pdf");
-    let cv_id = export_cv(&st, run_id, fitted.selection.clone(), path.to_string_lossy().into())
-        .await
-        .unwrap();
+    let cv_id = export_cv(
+        &st,
+        run_id,
+        fitted.selection.clone(),
+        path.to_string_lossy().into(),
+    )
+    .await
+    .unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert!(bytes.starts_with(b"%PDF"));
 
@@ -140,15 +165,12 @@ async fn cancel_unknown_run_is_not_found() {
 }
 
 #[tokio::test]
-async fn shutdown_without_engine_is_noop() {
-    let (st, _) = state().await;
-    st.shutdown();
-}
-
-#[tokio::test]
 async fn export_rejects_unsafe_paths() {
     let (st, _) = state().await;
-    let sel = Selection { entries: vec![], skills: vec![] };
+    let sel = Selection {
+        entries: vec![],
+        skills: vec![],
+    };
     for p in ["cv.pdf", "/tmp/cv.txt", "/tmp/cv", "../cv.pdf"] {
         let e = export_cv(&st, 1, sel.clone(), p.into()).await.unwrap_err();
         assert_eq!(e.kind(), "Io", "{p}");
@@ -169,9 +191,14 @@ async fn fit_rejects_budget_outside_one_two() {
 #[tokio::test]
 async fn runs_scores_and_cvs_are_listed_per_job() {
     let (st, events) = state().await;
-    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+    st.store
+        .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+        .await
+        .unwrap();
     save_entry(&st, entry("Engineer")).await.unwrap();
-    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None).await.unwrap();
+    let jd = create_job(&st, "Dev", "Co", "Rust developer", "", None)
+        .await
+        .unwrap();
     assert!(list_runs(&st, jd).await.unwrap().is_empty());
     let run = start_match(&st, jd).await.unwrap();
     assert_eq!(wait_done(&st, run).await, RunStatus::Done);
@@ -186,16 +213,26 @@ async fn runs_scores_and_cvs_are_listed_per_job() {
     assert_eq!(get_scores(&st, 999).await.unwrap_err().kind(), "NotFound");
 
     assert!(list_cvs(&st, jd).await.unwrap().is_empty());
-    assert!(events.lock().unwrap().iter().any(|(n, _)| n == ENGINE_EVENT));
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(n, _)| n == ENGINE_EVENT));
 }
 
 #[tokio::test]
 async fn engine_status_reflects_active_model_and_errors() {
     let (st, _) = state().await;
     assert_eq!(engine_status(&st).await.unwrap().state, "none");
-    st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+    st.store
+        .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+        .await
+        .unwrap();
     let s = engine_status(&st).await.unwrap();
-    assert_eq!((s.model_id.as_deref(), s.state), (Some("clef-flash"), "idle"));
+    assert_eq!(
+        (s.model_id.as_deref(), s.state),
+        (Some("clef-flash"), "idle")
+    );
     st.engine_for("clef-flash").unwrap();
     assert_eq!(engine_status(&st).await.unwrap().state, "ready");
     crate::state::set_engine_error(&st.engine_error_slot(), Some("boom".into()));
@@ -210,33 +247,46 @@ async fn ui_settings_are_namespaced() {
     let (st, _) = state().await;
     assert_eq!(get_ui_setting(&st, "ui.page_budget").await.unwrap(), None);
     set_ui_setting(&st, "ui.page_budget", "2").await.unwrap();
-    assert_eq!(get_ui_setting(&st, "ui.page_budget").await.unwrap().as_deref(), Some("2"));
-    assert_eq!(set_ui_setting(&st, ACTIVE_MODEL_KEY, "x").await.unwrap_err().kind(), "NotFound");
-    assert_eq!(get_ui_setting(&st, ACTIVE_MODEL_KEY).await.unwrap_err().kind(), "NotFound");
-}
-
-#[tokio::test]
-async fn cancel_download_unknown_is_not_found() {
-    let (st, _) = state().await;
-    assert_eq!(cancel_download(&st, "clef-flash").unwrap_err().kind(), "NotFound");
-    let token = st.register_download("clef-flash").unwrap();
-    assert!(st.register_download("clef-flash").is_none());
-    cancel_download(&st, "clef-flash").unwrap();
-    assert!(token.is_cancelled());
-    st.finish_download("clef-flash");
-    assert!(st.register_download("clef-flash").is_some());
+    assert_eq!(
+        get_ui_setting(&st, "ui.page_budget")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2")
+    );
+    assert_eq!(
+        set_ui_setting(&st, ACTIVE_MODEL_KEY, "x")
+            .await
+            .unwrap_err()
+            .kind(),
+        "NotFound"
+    );
+    assert_eq!(
+        get_ui_setting(&st, ACTIVE_MODEL_KEY)
+            .await
+            .unwrap_err()
+            .kind(),
+        "NotFound"
+    );
 }
 
 #[tokio::test]
 async fn missing_key_status() {
     let (st, _) = state().await;
     st.reload_providers().await.unwrap();
-    st.store.set_setting(ACTIVE_MODEL_KEY, "openrouter:typesafe/jev-1.13").await.unwrap();
+    st.store
+        .set_setting(ACTIVE_MODEL_KEY, "openrouter:typesafe/jev-1.13")
+        .await
+        .unwrap();
     let s = engine_status(&st).await.unwrap();
     assert_eq!(s.state, "error");
     assert!(s.error.unwrap().contains("OpenRouter key"));
     st.store.upsert_entry(&entry("Engineer")).await.unwrap();
-    let jd = st.store.create_jd("Rust role", "Acme", "We need Rust", "", None).await.unwrap();
+    let jd = st
+        .store
+        .create_jd("Rust role", "Acme", "We need Rust", "", None)
+        .await
+        .unwrap();
     let err = start_match(&st, jd).await.unwrap_err();
     assert!(err.to_string().contains("OpenRouter key"), "{err}");
     assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_err());
@@ -247,7 +297,6 @@ async fn bare_local_id_still_local() {
     let store = Store::open("sqlite::memory:").await.unwrap();
     let st = AppState::new(
         store,
-        std::env::temp_dir().join("cvd-test-models-empty"),
         EngineSource::Fixed(Arc::new(fake())),
         Arc::new(|_: &str, _| {}),
     );
@@ -255,7 +304,6 @@ async fn bare_local_id_still_local() {
     // Local refs keep the Fixed short-circuit; remote refs never do.
     assert!(st.engine_for("clef-flash").is_ok());
     assert!(st.engine_for("openrouter:x").is_err());
-    assert_eq!(st.installed_path("clef-flash").unwrap_err().kind(), "ModelMissing");
 }
 
 mod provider_keys {
@@ -278,7 +326,10 @@ mod provider_keys {
             .await;
         Mock::given(method("GET"))
             .and(path("/v1/key"))
-            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({"error": {"message": "User not found."}})))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({"error": {"message": "User not found."}})),
+            )
             .mount(&server)
             .await;
         server
@@ -288,20 +339,39 @@ mod provider_keys {
     async fn set_key_trims_and_validates() {
         let server = key_server("sk-or-abcd1234").await;
         let st = keyed_state(&server).await;
-        let status = set_provider_key(&st, "openrouter", "  sk-or-abcd1234 \n").await.unwrap();
-        assert_eq!(status, KeyStatus { has_key: true, last4: Some("1234".into()) });
-        assert_eq!(st.store.get_secret("openrouter").await.unwrap().as_deref(), Some("sk-or-abcd1234"));
-        assert_eq!(provider_key_status(&st, "openrouter").await.unwrap(), status);
+        let status = set_provider_key(&st, "openrouter", "  sk-or-abcd1234 \n")
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            KeyStatus {
+                has_key: true,
+                last4: Some("1234".into())
+            }
+        );
+        assert_eq!(
+            st.store.get_secret("openrouter").await.unwrap().as_deref(),
+            Some("sk-or-abcd1234")
+        );
+        assert_eq!(
+            provider_key_status(&st, "openrouter").await.unwrap(),
+            status
+        );
     }
 
     #[tokio::test]
     async fn set_key_rejects_invalid() {
         let server = key_server("good").await;
         let st = keyed_state(&server).await;
-        let err = set_provider_key(&st, "openrouter", "bad").await.unwrap_err();
+        let err = set_provider_key(&st, "openrouter", "bad")
+            .await
+            .unwrap_err();
         assert_eq!(err.kind(), "ProviderAuth");
         assert_eq!(st.store.get_secret("openrouter").await.unwrap(), None);
-        assert_eq!(set_provider_key(&st, "nope", "x").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(
+            set_provider_key(&st, "nope", "x").await.unwrap_err().kind(),
+            "NotFound"
+        );
     }
 
     #[tokio::test]
@@ -312,17 +382,229 @@ mod provider_keys {
         assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_ok());
         delete_provider_key(&st, "openrouter").await.unwrap();
         assert!(st.engine_for("openrouter:typesafe/jev-1.13").is_err());
-        assert_eq!(provider_key_status(&st, "openrouter").await.unwrap(), KeyStatus { has_key: false, last4: None });
+        assert_eq!(
+            provider_key_status(&st, "openrouter").await.unwrap(),
+            KeyStatus {
+                has_key: false,
+                last4: None
+            }
+        );
     }
 
     #[tokio::test]
     async fn set_active_remote_requires_key() {
         let server = key_server("good").await;
         let st = keyed_state(&server).await;
-        assert_eq!(set_active_model(&st, "openrouter:typesafe/jev-1.13").await.unwrap_err().kind(), "ModelMissing");
+        assert_eq!(
+            set_active_model(&st, "openrouter:typesafe/jev-1.13")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ModelMissing"
+        );
         set_provider_key(&st, "openrouter", "good").await.unwrap();
-        set_active_model(&st, "openrouter:typesafe/jev-1.13").await.unwrap();
-        assert_eq!(st.active_model().await.unwrap(), "openrouter:typesafe/jev-1.13");
+        set_active_model(&st, "openrouter:typesafe/jev-1.13")
+            .await
+            .unwrap();
+        assert_eq!(
+            st.active_model().await.unwrap(),
+            "openrouter:typesafe/jev-1.13"
+        );
+    }
+
+    async fn subq_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"object": "list", "data": []})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(
+                serde_json::json!({"detail": {"error_type": "auth", "message": "bad key"}}),
+            ))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn subq_key_validates_and_routes() {
+        let server = subq_server("sq-good1234").await;
+        let (st, _) = state().await;
+        let st = st.with_subq_base(server.uri());
+        let err = set_provider_key(&st, "subq", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert!(err.to_string().contains("SubQ"), "{err}");
+        assert_eq!(
+            set_provider_key(&st, "subq", " sq-good1234 ")
+                .await
+                .unwrap(),
+            KeyStatus {
+                has_key: true,
+                last4: Some("1234".into())
+            }
+        );
+        set_active_model(&st, "subq:subq-snap-preview")
+            .await
+            .unwrap();
+        assert_eq!(st.active_model().await.unwrap(), "subq:subq-snap-preview");
+        assert!(st.engine_for("subq:subq-snap-preview").is_ok());
+        delete_provider_key(&st, "subq").await.unwrap();
+        assert!(st.engine_for("subq:subq-snap-preview").is_err());
+    }
+
+    async fn typesafe_server(valid: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .and(header("authorization", format!("Bearer {valid}").as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"models": [{"name": "jev-latest", "description": "", "release_date": ""}]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn typesafe_key_validates_and_routes() {
+        let server = typesafe_server("ts-good1234").await;
+        let (st, _) = state().await;
+        let st = st.with_typesafe_base(server.uri());
+        let err = set_provider_key(&st, "typesafe", "bad").await.unwrap_err();
+        assert_eq!(err.kind(), "ProviderAuth");
+        assert!(err.to_string().contains("TypeSafe"), "{err}");
+        assert_eq!(
+            set_provider_key(&st, "typesafe", " ts-good1234 ")
+                .await
+                .unwrap()
+                .last4
+                .as_deref(),
+            Some("1234")
+        );
+        set_active_model(&st, "typesafe:jev-latest").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_ok());
+        // Jev cannot do company research.
+        assert!(set_research_model(&st, "typesafe:jev-latest").await.is_ok());
+        assert!(st.research_endpoint().await.is_err());
+        delete_provider_key(&st, "typesafe").await.unwrap();
+        assert!(st.engine_for("typesafe:jev-latest").is_err());
+    }
+
+    #[tokio::test]
+    async fn extra_connections_get_their_own_key_and_refs() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        let first = add_connection(&st, "openrouter", "Personal", "good")
+            .await
+            .unwrap();
+        assert_eq!(
+            first.id, "openrouter",
+            "the first key keeps the bare id so stored refs still resolve"
+        );
+        let second = add_connection(&st, "openrouter", " Work ", "good")
+            .await
+            .unwrap();
+        assert_eq!(
+            (second.id.as_str(), second.label.as_str()),
+            ("openrouter~2", "Work")
+        );
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(
+            list.iter()
+                .map(|c| (c.id.as_str(), c.label.as_str()))
+                .collect::<Vec<_>>(),
+            [("openrouter", "Personal"), ("openrouter~2", "Work")]
+        );
+
+        // A ref carrying the connection id resolves, and ids with `:` still split on the first one.
+        set_active_model(&st, "openrouter~2:inception/mercury-decide:free")
+            .await
+            .unwrap();
+        assert!(st
+            .engine_for("openrouter~2:inception/mercury-decide:free")
+            .is_ok());
+        assert!(st.engine_for("openrouter~3:x").is_err());
+
+        // Removing the extra key leaves the first one working.
+        delete_provider_key(&st, "openrouter~2").await.unwrap();
+        assert!(st.engine_for("openrouter~2:x").is_err());
+        assert!(st.engine_for("openrouter:x").is_ok());
+        assert_eq!(list_connections(&st).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn existing_bare_keys_list_without_a_connections_row() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        st.store
+            .set_secret("openrouter", "sk-or-old1234")
+            .await
+            .unwrap();
+        let list = list_connections(&st).await.unwrap();
+        assert_eq!(
+            list,
+            [ConnectionView {
+                id: "openrouter".into(),
+                provider: "openrouter".into(),
+                label: "openrouter".into(),
+                last4: Some("1234".into())
+            }]
+        );
+        rename_connection(&st, "openrouter", "Personal")
+            .await
+            .unwrap();
+        assert_eq!(list_connections(&st).await.unwrap()[0].label, "Personal");
+    }
+
+    #[tokio::test]
+    async fn connection_input_is_checked() {
+        let server = key_server("good").await;
+        let st = keyed_state(&server).await;
+        assert_eq!(
+            add_connection(&st, "exa", "x", "good")
+                .await
+                .unwrap_err()
+                .kind(),
+            "NotFound"
+        );
+        assert_eq!(
+            add_connection(&st, "openrouter", "  ", "good")
+                .await
+                .unwrap_err()
+                .kind(),
+            "NotFound"
+        );
+        assert_eq!(
+            add_connection(&st, "openrouter", "Work", "bad")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ProviderAuth"
+        );
+        assert_eq!(
+            set_provider_key(&st, "exa~2", "x")
+                .await
+                .unwrap_err()
+                .kind(),
+            "NotFound"
+        );
+        assert_eq!(
+            rename_connection(&st, "openrouter~9", "x")
+                .await
+                .unwrap_err()
+                .kind(),
+            "NotFound"
+        );
     }
 
     async fn exa_server(valid: &str) -> MockServer {
@@ -330,10 +612,15 @@ mod provider_keys {
         Mock::given(method("POST"))
             .and(path("/search"))
             .and(header("x-api-key", valid))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"results": []})))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"results": []})),
+            )
             .mount(&server)
             .await;
-        Mock::given(method("POST")).respond_with(ResponseTemplate::new(401)).mount(&server).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
         server
     }
 
@@ -342,8 +629,17 @@ mod provider_keys {
         let server = exa_server("exa-good").await;
         let (st, _) = state().await;
         let st = st.with_exa_base(server.uri());
-        assert_eq!(st.search().err().map(|e| e.to_string()).as_deref(), Some("Add your Exa key in AI → Providers."));
-        assert_eq!(set_provider_key(&st, "exa", "bad").await.unwrap_err().kind(), "ProviderAuth");
+        assert_eq!(
+            st.search().err().map(|e| e.to_string()).as_deref(),
+            Some("Add your Exa key in AI → Models.")
+        );
+        assert_eq!(
+            set_provider_key(&st, "exa", "bad")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ProviderAuth"
+        );
         assert_eq!(st.store.get_secret("exa").await.unwrap(), None);
         let status = set_provider_key(&st, "exa", " exa-good ").await.unwrap();
         assert_eq!(status.last4.as_deref(), Some("good"));
@@ -358,25 +654,66 @@ mod provider_keys {
         let st = keyed_state(&server).await;
         let err = st.research_endpoint().await.unwrap_err();
         assert_eq!(err.kind(), "ModelMissing");
-        assert_eq!(err.to_string(), "Choose a Company research model in AI → Roles.");
-        assert_eq!(set_research_model(&st, "clef-flash").await.unwrap_err().kind(), "NotFound");
-        assert_eq!(set_active_model(&st, "lfm2.5-2.6b").await.unwrap_err().kind(), "NotFound");
-        assert_eq!(set_research_model(&st, "openrouter:deepseek/x").await.unwrap_err().kind(), "ModelMissing");
+        assert_eq!(
+            err.to_string(),
+            "Choose a Company research model in AI → Models."
+        );
+        assert_eq!(
+            set_research_model(&st, "clef-flash")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ModelMissing"
+        );
+        assert_eq!(
+            set_active_model(&st, "lfm2.5-2.6b")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ModelMissing"
+        );
+        assert_eq!(
+            set_research_model(&st, "openrouter:deepseek/x")
+                .await
+                .unwrap_err()
+                .kind(),
+            "ModelMissing"
+        );
         set_provider_key(&st, "openrouter", "good").await.unwrap();
-        set_research_model(&st, "openrouter:deepseek/x").await.unwrap();
+        set_research_model(&st, "openrouter:deepseek/x")
+            .await
+            .unwrap();
         let ep = st.research_endpoint().await.unwrap();
         assert_eq!(ep.model, "deepseek/x");
         assert_eq!(ep.base_url, format!("{}/v1", server.uri()));
-        assert_eq!(st.research_model().await.unwrap().as_deref(), Some("openrouter:deepseek/x"));
+        assert_eq!(
+            st.research_model().await.unwrap().as_deref(),
+            Some("openrouter:deepseek/x")
+        );
     }
 
     #[test]
     fn engine_errors_map_to_provider_kinds() {
-        assert_eq!(AppError::from(EngineError::Unauthorized).kind(), "ProviderAuth");
-        assert_eq!(AppError::from(EngineError::InsufficientCredits).kind(), "ProviderCredits");
-        assert_eq!(AppError::from(EngineError::RateLimited).kind(), "ProviderUnavailable");
-        assert_eq!(AppError::from(EngineError::Network("x".into())).kind(), "ProviderUnavailable");
-        assert_eq!(AppError::from(EngineError::ModelUnavailable("m".into())).kind(), "ProviderUnavailable");
+        assert_eq!(
+            AppError::from(EngineError::Unauthorized("OpenRouter")).kind(),
+            "ProviderAuth"
+        );
+        assert_eq!(
+            AppError::from(EngineError::InsufficientCredits("OpenRouter")).kind(),
+            "ProviderCredits"
+        );
+        assert_eq!(
+            AppError::from(EngineError::RateLimited).kind(),
+            "ProviderUnavailable"
+        );
+        assert_eq!(
+            AppError::from(EngineError::Network("x".into())).kind(),
+            "ProviderUnavailable"
+        );
+        assert_eq!(
+            AppError::from(EngineError::ModelUnavailable("m".into())).kind(),
+            "ProviderUnavailable"
+        );
     }
 }
 
@@ -404,7 +741,11 @@ mod company_flow {
         }
     }
 
-    fn research(calls: Arc<AtomicUsize>, delay: Duration, result: Result<ResearchOutput, ResearchError>) -> ResearchFn {
+    fn research(
+        calls: Arc<AtomicUsize>,
+        delay: Duration,
+        result: Result<ResearchOutput, ResearchError>,
+    ) -> ResearchFn {
         Arc::new(move |_i, cancel: CancellationToken, on_step| {
             calls.fetch_add(1, Ordering::SeqCst);
             let result = result.clone();
@@ -422,7 +763,10 @@ mod company_flow {
         ResearchOutput {
             canonical_name: "Acme".into(),
             domain: Some("acme.com".into()),
-            profile: CompanyProfile { industry: "Fintech".into(), ..Default::default() },
+            profile: CompanyProfile {
+                industry: "Fintech".into(),
+                ..Default::default()
+            },
         }
     }
 
@@ -433,47 +777,81 @@ mod company_flow {
         let log = Arc::new(StateLog(fake(), Mutex::default()));
         let st = AppState::new(
             store,
-            std::env::temp_dir().join("cvd-test-models"),
             EngineSource::Fixed(log.clone()),
-            Arc::new(move |n: &str, v: serde_json::Value| sink.lock().unwrap().push((n.to_string(), v))),
+            Arc::new(move |n: &str, v: serde_json::Value| {
+                sink.lock().unwrap().push((n.to_string(), v))
+            }),
         )
         .with_research_fn(f);
-        st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+        st.store
+            .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+            .await
+            .unwrap();
         save_entry(&st, entry("Engineer")).await.unwrap();
         (st, log, events)
     }
 
     fn researching(events: &Events, run: i64) -> bool {
-        events.lock().unwrap().iter().any(|(n, v)| n == MATCH_EVENT && v["run_id"] == run && v["event"]["stage"] == "researching")
+        events.lock().unwrap().iter().any(|(n, v)| {
+            n == MATCH_EVENT && v["run_id"] == run && v["event"]["stage"] == "researching"
+        })
     }
 
     #[tokio::test]
     async fn empty_company_scores_without_research() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (st, log, events) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "", "Rust developer", "", None).await.unwrap();
+        let jd = create_job(&st, "Dev", "", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
+        assert_eq!(
+            st.store.get_run(run).await.unwrap().company_researched_at,
+            None
+        );
         assert!(!researching(&events, run));
-        assert!(log.1.lock().unwrap().iter().all(|s| s.starts_with("JOB DESCRIPTION:")));
+        assert!(log
+            .1
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|s| s.starts_with("JOB DESCRIPTION:")));
     }
 
     #[tokio::test]
     async fn researched_profile_reaches_state() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (st, log, events) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "Acme Inc.", "Rust developer", "https://www.linkedin.com/jobs/1", None).await.unwrap();
+        let jd = create_job(
+            &st,
+            "Dev",
+            "Acme Inc.",
+            "Rust developer",
+            "https://www.linkedin.com/jobs/1",
+            None,
+        )
+        .await
+        .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(researching(&events, run));
         let states = log.1.lock().unwrap().clone();
-        assert!(states.iter().all(|s| s.starts_with(&format!("{}Name: Acme (acme.com)\nIndustry: Fintech", crate::matcher::questions::PROFILE_HEADER))), "{states:?}");
+        assert!(
+            states.iter().all(|s| s.starts_with(&format!(
+                "{}Name: Acme (acme.com)\nIndustry: Fintech",
+                crate::matcher::questions::PROFILE_HEADER
+            ))),
+            "{states:?}"
+        );
         let company = get_job_company(&st, jd).await.unwrap().unwrap();
         assert_eq!(company.status, CompanyStatus::Ok);
-        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, company.researched_at);
+        assert_eq!(
+            st.store.get_run(run).await.unwrap().company_researched_at,
+            company.researched_at
+        );
         // A second match reuses the fresh profile.
         let run2 = start_match(&st, jd).await.unwrap();
         wait_done(&st, run2).await;
@@ -492,14 +870,29 @@ mod company_flow {
 
     #[tokio::test]
     async fn skip_background_scores_and_research_finishes() {
-        let (st, log, events) = setup(research(Arc::default(), Duration::from_millis(300), Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let (st, log, events) = setup(research(
+            Arc::default(),
+            Duration::from_millis(300),
+            Ok(acme()),
+        ))
+        .await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         wait_researching(&events, run).await;
         skip_research(&st, run, "background").await.unwrap();
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
-        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
-        assert!(log.1.lock().unwrap().iter().all(|s| s.starts_with("JOB DESCRIPTION:")));
+        assert_eq!(
+            st.store.get_run(run).await.unwrap().company_researched_at,
+            None
+        );
+        assert!(log
+            .1
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|s| s.starts_with("JOB DESCRIPTION:")));
         for _ in 0..100 {
             if get_job_company(&st, jd).await.unwrap().unwrap().status == CompanyStatus::Ok {
                 return;
@@ -511,8 +904,15 @@ mod company_flow {
 
     #[tokio::test]
     async fn skip_cancel_scores_and_research_cancelled() {
-        let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let (st, _, events) = setup(research(
+            Arc::default(),
+            Duration::from_secs(30),
+            Ok(acme()),
+        ))
+        .await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         wait_researching(&events, run).await;
         skip_research(&st, run, "cancel").await.unwrap();
@@ -520,64 +920,821 @@ mod company_flow {
         let c = get_job_company(&st, jd).await.unwrap().unwrap();
         assert_eq!(c.status, CompanyStatus::Pending);
         assert_eq!(c.fail_count, 0);
-        assert_eq!(skip_research(&st, run, "cancel").await.unwrap_err().kind(), "NotFound");
+        assert_eq!(
+            skip_research(&st, run, "cancel").await.unwrap_err().kind(),
+            "NotFound"
+        );
     }
 
     #[tokio::test]
     async fn research_failure_scores_without_context() {
-        let (st, _, _) = setup(research(Arc::default(), Duration::ZERO, Err(ResearchError::Budget))).await;
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let (st, _, _) = setup(research(
+            Arc::default(),
+            Duration::ZERO,
+            Err(ResearchError::Budget),
+        ))
+        .await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
-        assert_eq!(st.store.get_run(run).await.unwrap().company_researched_at, None);
-        assert_eq!(get_job_company(&st, jd).await.unwrap().unwrap().status, CompanyStatus::Failed);
+        assert_eq!(
+            st.store.get_run(run).await.unwrap().company_researched_at,
+            None
+        );
+        assert_eq!(
+            get_job_company(&st, jd).await.unwrap().unwrap().status,
+            CompanyStatus::Failed
+        );
     }
 
     #[tokio::test]
     async fn no_research_model_scores_without_context() {
         let (st, events) = state().await;
-        st.store.set_setting(ACTIVE_MODEL_KEY, "clef-flash").await.unwrap();
+        st.store
+            .set_setting(ACTIVE_MODEL_KEY, "clef-flash")
+            .await
+            .unwrap();
         save_entry(&st, entry("Engineer")).await.unwrap();
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
         let failed = events.lock().unwrap().iter().any(|(n, v)| {
             n == crate::company::coordinator::RESEARCH_EVENT
-                && v["event"]["error"] == "Choose a Company research model in AI → Roles."
+                && v["event"]["error"] == "Choose a Company research model in AI → Models."
         });
         assert!(failed);
-        assert_eq!(get_job_company(&st, jd).await.unwrap().unwrap().fail_count, 0);
+        assert_eq!(
+            get_job_company(&st, jd).await.unwrap().unwrap().fail_count,
+            0
+        );
     }
 
     #[tokio::test]
     async fn rescore_creates_new_run_with_current_profile() {
-        let (st, _, events) = setup(research(Arc::default(), Duration::from_secs(30), Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let (st, _, events) = setup(research(
+            Arc::default(),
+            Duration::from_secs(30),
+            Ok(acme()),
+        ))
+        .await;
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         let run = start_match(&st, jd).await.unwrap();
         wait_researching(&events, run).await;
         skip_research(&st, run, "cancel").await.unwrap();
         wait_done(&st, run).await;
         let c = get_job_company(&st, jd).await.unwrap().unwrap();
-        st.store.save_research(c.id, "Acme", Some("acme.com"), &acme().profile, "lfm").await.unwrap();
+        st.store
+            .save_research(c.id, "Acme", Some("acme.com"), &acme().profile, "lfm")
+            .await
+            .unwrap();
         let run2 = rescore(&st, run).await.unwrap();
         assert_ne!(run2, run);
         assert_eq!(wait_done(&st, run2).await, RunStatus::Done);
-        assert!(st.store.get_run(run2).await.unwrap().company_researched_at.is_some());
+        assert!(st
+            .store
+            .get_run(run2)
+            .await
+            .unwrap()
+            .company_researched_at
+            .is_some());
     }
 
     #[tokio::test]
     async fn edit_then_refresh_overwrites() {
         let calls = Arc::new(AtomicUsize::new(0));
         let (st, _, _) = setup(research(calls.clone(), Duration::ZERO, Ok(acme()))).await;
-        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None).await.unwrap();
+        let jd = create_job(&st, "Dev", "Acme", "Rust developer", "", None)
+            .await
+            .unwrap();
         wait_done(&st, start_match(&st, jd).await.unwrap()).await;
         let c = get_job_company(&st, jd).await.unwrap().unwrap();
-        let edited = edit_company(&st, c.id, CompanyProfile { industry: "Mine".into(), ..Default::default() }).await.unwrap();
+        let edited = edit_company(
+            &st,
+            c.id,
+            CompanyProfile {
+                industry: "Mine".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         assert!(edited.edited_at.is_some());
-        assert_eq!(get_company(&st, c.id).await.unwrap().profile.industry, "Mine");
+        assert_eq!(
+            get_company(&st, c.id).await.unwrap().profile.industry,
+            "Mine"
+        );
         let refreshed = refresh_company(&st, c.id).await.unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(refreshed.profile.industry, "Fintech");
         assert_eq!(refreshed.edited_at, None);
+    }
+
+    #[tokio::test]
+    async fn save_mail_account_rejects_bad_port() {
+        let (st, _) = state().await;
+
+        let err = save_mail_account(
+            &st,
+            "imap.gmail.com",
+            0,
+            "me@gmail.com",
+            Some("abcd efgh ijkl mnop"),
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind(), "Io");
+    }
+
+    #[tokio::test]
+    async fn save_mail_account_keeps_password_when_none() {
+        let (st, _) = state().await;
+        save_mail_account(
+            &st,
+            "imap.gmail.com",
+            993,
+            "me@gmail.com",
+            Some("abcd efgh ijkl mnop"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        save_mail_account(&st, "imap.gmail.com", 993, "other@gmail.com", None, None)
+            .await
+            .unwrap();
+
+        let stored = crate::mail::account::load(&st.store)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.address, "other@gmail.com");
+        assert_eq!(stored.password, "abcdefghijklmnop");
+    }
+
+    #[tokio::test]
+    async fn get_mail_account_never_returns_the_password() {
+        let (st, _) = state().await;
+        save_mail_account(
+            &st,
+            "imap.gmail.com",
+            993,
+            "me@gmail.com",
+            Some("abcd efgh ijkl mnop"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let view = get_mail_account(&st).await.unwrap().unwrap();
+
+        assert!(view.has_password);
+        let json = serde_json::to_value(&view).unwrap();
+        assert!(json.get("password").is_none());
+        assert!(!json.to_string().contains("abcdefghijklmnop"));
+    }
+
+    #[tokio::test]
+    async fn start_scan_refuses_second_concurrent_start() {
+        let (st, _) = state().await;
+        let _held = st.begin_scan().unwrap();
+
+        let err = start_scan(&st).await.unwrap_err();
+
+        assert_eq!(err.kind(), "Io");
+        assert_eq!(err.to_string(), "A scan is already running.");
+    }
+
+    #[tokio::test]
+    async fn apply_suggestion_unknown_message_is_not_found() {
+        let (st, _) = state().await;
+
+        let err = apply_suggestion(&st, "<missing@example.com>")
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), "NotFound");
+    }
+}
+
+#[tokio::test]
+async fn save_mail_account_stores_chosen_folder_and_keeps_it_when_none() {
+    let (st, _) = state().await;
+    let view = save_mail_account(
+        &st,
+        "imap.gmail.com",
+        993,
+        "me@gmail.com",
+        Some("abcd efgh ijkl mnop"),
+        Some("INBOX"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view.folder, "INBOX");
+
+    let kept = save_mail_account(&st, "imap.gmail.com", 993, "me@gmail.com", None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(kept.folder, "INBOX");
+    assert_eq!(
+        get_mail_account(&st).await.unwrap().unwrap().folder,
+        "INBOX"
+    );
+}
+
+#[tokio::test]
+async fn apply_defaults_round_trip_and_feed_facts() {
+    let (st, _) = state().await;
+    assert_eq!(
+        get_apply_defaults(&st).await.unwrap(),
+        ApplyDefaults::default()
+    );
+
+    save_profile(
+        &st,
+        Profile {
+            name: "Diego Hernández".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    save_apply_defaults(
+        &st,
+        ApplyDefaults {
+            city: "  Monterrey ".into(),
+            needs_sponsorship: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let d = get_apply_defaults(&st).await.unwrap();
+    assert_eq!(d.city, "Monterrey");
+    assert_eq!(d.needs_sponsorship, Some(false));
+
+    let facts = apply_facts(&st).await.unwrap();
+    let keys: Vec<_> = facts.iter().map(|f| f.key).collect();
+    assert!(keys.contains(&"last_name"));
+    assert!(keys.contains(&"city"));
+    assert!(keys.contains(&"needs_sponsorship"));
+    // `apply.` keys are not reachable through the generic UI setting commands.
+    assert!(get_ui_setting(&st, APPLY_DEFAULTS_KEY).await.is_err());
+}
+
+#[tokio::test]
+async fn submitted_application_moves_job_to_applied() {
+    use crate::autofill::window::mark_applied;
+    let (st, events) = state().await;
+    let job = create_job(
+        &st,
+        "Engineer",
+        "Acme",
+        "text",
+        "https://boards.greenhouse.io/acme/jobs/1",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let applied = st
+        .store
+        .list_job_statuses()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.name == "Applied")
+        .expect("seeded status");
+    let msg = mark_applied(&st, job).await;
+    assert_eq!(msg, "Submitted. Marked as Applied in cvd.");
+    assert_eq!(get_job(&st, job).await.unwrap().status_id, Some(applied.id));
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(n, v)| n == "job://updated" && v["job_id"] == job));
+
+    assert!(mark_applied(&st, 9999).await.contains("no longer"));
+
+    // Without an "Applied" status cvd only says how to set one up.
+    delete_job_status(&st, applied.id).await.unwrap();
+    assert!(mark_applied(&st, job).await.contains("Add an"));
+    assert!(mark_applied(&st, 0).await.contains("Dev window"));
+}
+
+#[tokio::test]
+async fn edits_teach_and_unteach_labels() {
+    use crate::autofill::field::{FieldKind, FieldSpec};
+    use crate::autofill::window::learn;
+    let (st, _) = state().await;
+    save_profile(
+        &st,
+        Profile {
+            name: "Diego Hernández".into(),
+            email: "d@example.com".into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let facts = apply_facts(&st).await.unwrap();
+    let field = |label: &str, kind| FieldSpec {
+        key: "k".into(),
+        kind: Some(kind),
+        label: label.into(),
+        ..Default::default()
+    };
+    let none = std::collections::BTreeMap::new();
+
+    learn(
+        &st,
+        &field("Nombre de pila", FieldKind::Text),
+        "Diego",
+        &facts,
+        false,
+        &none,
+    )
+    .await;
+    learn(
+        &st,
+        &field("Correo", FieldKind::Text),
+        "d@example.com",
+        &facts,
+        false,
+        &none,
+    )
+    .await;
+    // Protected fields and non-matching values teach nothing.
+    learn(
+        &st,
+        &field("Gender", FieldKind::Text),
+        "Diego",
+        &facts,
+        false,
+        &none,
+    )
+    .await;
+    learn(
+        &st,
+        &field("Color", FieldKind::Text),
+        "Blue",
+        &facts,
+        false,
+        &none,
+    )
+    .await;
+    let mem = st.store.apply_memory().await.unwrap();
+    assert_eq!(
+        mem.get("nombre de pila").map(String::as_str),
+        Some("first_name")
+    );
+    assert_eq!(mem.get("correo").map(String::as_str), Some("email"));
+    assert_eq!(mem.len(), 2);
+
+    // The user replaces a remembered fill with something else: forget it.
+    learn(
+        &st,
+        &field("Correo", FieldKind::Text),
+        "other@example.com",
+        &facts,
+        true,
+        &mem,
+    )
+    .await;
+    assert!(!st
+        .store
+        .apply_memory()
+        .await
+        .unwrap()
+        .contains_key("correo"));
+}
+
+mod local_server {
+    use super::*;
+    use crate::providers::{normalize_url, LOCAL_SERVER};
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data":[{"id":"decision"},{"id":"chat"}]})),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+    async fn http_state() -> AppState {
+        AppState::new(
+            Store::open("sqlite::memory:").await.unwrap(),
+            EngineSource::Http,
+            Arc::new(|_, _| {}),
+        )
+    }
+
+    #[test]
+    fn urls_are_normalized_and_limited_to_loopback() {
+        assert_eq!(
+            normalize_url(" http://127.0.0.1:8080/ ").unwrap(),
+            "http://127.0.0.1:8080/v1"
+        );
+        assert_eq!(
+            normalize_url("http://localhost:8080/api/v1/").unwrap(),
+            "http://localhost:8080/api/v1"
+        );
+        assert_eq!(
+            normalize_url("http://[::1]:8080").unwrap(),
+            "http://[::1]:8080/v1"
+        );
+        for url in [
+            "https://example.com/v1",
+            "file:///tmp/model",
+            "http://key@localhost/v1",
+            "http://localhost/v1?key=x",
+            "http://localhost/v1#key",
+        ] {
+            assert!(normalize_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn discovery_optional_auth_selection_and_removal() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let connections = list_connections(&st).await.unwrap();
+        assert_eq!(connections[0].id, LOCAL_SERVER);
+        assert_eq!(connections[0].last4, None);
+        assert_eq!(
+            list_remote_models(&st, false, "decision").await.unwrap()[0]
+                .models
+                .len(),
+            2
+        );
+        set_active_model(&st, "localhost:decision").await.unwrap();
+        set_research_model(&st, "localhost:chat").await.unwrap();
+        let ep = st.research_endpoint().await.unwrap();
+        assert_eq!(ep.model, "chat");
+        assert_eq!(ep.base_url, format!("{}/v1", server.uri()));
+        assert_eq!(ep.api_key, None);
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| !r.headers.contains_key("authorization")));
+
+        save_local_connection(&st, &server.uri(), Some(" secret ".into()))
+            .await
+            .unwrap();
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            st.research_endpoint().await.unwrap().api_key.as_deref(),
+            Some("secret")
+        );
+        save_local_connection(&st, &server.uri(), Some("".into()))
+            .await
+            .unwrap();
+        assert_eq!(st.research_endpoint().await.unwrap().api_key, None);
+        delete_provider_key(&st, LOCAL_SERVER).await.unwrap();
+        assert!(list_connections(&st).await.unwrap().is_empty());
+        assert_eq!(engine_status(&st).await.unwrap().state, "error");
+    }
+
+    #[tokio::test]
+    async fn failed_discovery_does_not_replace_saved_connection() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let bad = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&bad)
+            .await;
+        assert!(
+            save_local_connection(&st, &bad.uri(), Some("bad-key".into()))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Local server key")
+        );
+        assert_eq!(
+            get_local_connection(&st).await.unwrap().base_url,
+            format!("{}/v1", server.uri())
+        );
+        assert_eq!(st.store.get_secret(LOCAL_SERVER).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn tests_report_unreachable_and_unsupported_capabilities() {
+        let st = http_state().await;
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", socket.local_addr().unwrap());
+        drop(socket);
+        assert!(save_local_connection(&st, &base, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Nothing listening on 127.0.0.1:"));
+        let server = server().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let err = test_local_connection(&st, "decision", "decision")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("/v1/systemone") && err.contains("logprobs/grammar"),
+            "{err}"
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/systemone"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"answers":{"test":{"type":"noul","noul":0.9}}})),
+            )
+            .mount(&server)
+            .await;
+        test_local_connection(&st, "decision", "decision")
+            .await
+            .unwrap();
+        Mock::given(method("POST")).and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","function":{"name":"connection_test","arguments":"{}"}}]}}]})))
+            .mount(&server).await;
+        test_local_connection(&st, "chat", "chat").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn match_run_uses_user_server_and_selected_model() {
+        let server = server().await;
+        Mock::given(method("POST")).and(path("/v1/systemone")).and(header("authorization", "Bearer secret"))
+            .respond_with(|r: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                assert_eq!(body["model"], "decision");
+                let answers: serde_json::Map<String, serde_json::Value> = body["questions"].as_object().unwrap().iter().map(|(id,q)| {
+                    let a = match q["type"].as_str().unwrap() {
+                        "noul" => json!({"type":"noul","noul":0.8}),
+                        "choice" => { let option = q["criteria"].as_object().unwrap().keys().next().unwrap(); json!({"type":"choice","choice":option,"probabilities":{option:1.0}}) },
+                        "score" => json!({"type":"score","score":3.0,"probabilities":{"3":1.0}}),
+                        _ => panic!("unknown question"),
+                    }; (id.clone(),a)
+                }).collect();
+                ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+            }).mount(&server).await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), Some("secret".into()))
+            .await
+            .unwrap();
+        set_active_model(&st, "localhost:decision").await.unwrap();
+        st.store.upsert_entry(&entry("Engineer")).await.unwrap();
+        let jd = st
+            .store
+            .create_jd("Rust role", "", "We need Rust", "", None)
+            .await
+            .unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert!(!get_scores(&st, run).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn research_runs_through_local_connection() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        set_research_model(&st, "localhost:chat").await.unwrap();
+        Mock::given(method("POST")).and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"submit","type":"function","function":{"name":"submit_profile","arguments":"{\"canonical_name\":\"Acme\",\"industry\":\"Software\"}"}}]}}]})))
+            .mount(&server).await;
+        let search_server = MockServer::start().await;
+        st.store.set_secret("exa", "test").await.unwrap();
+        let st = st.with_exa_base(search_server.uri());
+        st.reload_providers().await.unwrap();
+        let result = st.research_env().research_fn()(
+            ResearchInput {
+                name: "Acme".into(),
+                domain: None,
+                jd_snippet: "Rust".into(),
+            },
+            CancellationToken::new(),
+            Box::new(|_| {}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.0.profile.industry, "Software");
+        assert_eq!(result.1, "localhost:chat");
+        let requests = server.received_requests().await.unwrap();
+        let request = requests
+            .iter()
+            .find(|r| r.url.path() == "/v1/chat/completions")
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["model"], "chat");
+    }
+}
+
+#[tokio::test]
+async fn prepare_without_account_is_no_account() {
+    let (st, _) = state().await;
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(
+        result,
+        Err(crate::mail::cycle::CycleError::NoAccount)
+    ));
+    assert!(!st.scan_running(), "the slot is released on failure");
+}
+
+#[tokio::test]
+async fn prepare_while_slot_held_is_busy() {
+    let (st, _) = state().await;
+    let _held = st.begin_scan().unwrap();
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(result, Err(crate::mail::cycle::CycleError::Busy)));
+}
+
+#[tokio::test]
+async fn scan_freed_notifies_on_guard_drop() {
+    let (st, _) = state().await;
+    let guard = st.begin_scan().unwrap();
+    let freed = st.scan_freed();
+    let waiter = tokio::spawn(async move { freed.notified().await });
+    tokio::task::yield_now().await;
+
+    drop(guard);
+
+    tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .expect("waiter woke")
+        .unwrap();
+}
+
+mod inbox {
+    use super::*;
+    use crate::mail::watch::Control;
+    use crate::store::{NewProcessed, Outcome, ScanSource};
+
+    fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Control>) -> Vec<Control> {
+        let mut got = Vec::new();
+        while let Ok(c) = rx.try_recv() {
+            got.push(c);
+        }
+        got
+    }
+
+    #[tokio::test]
+    async fn save_mail_account_restarts_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        save_mail_account(
+            &st,
+            "imap.gmail.com",
+            993,
+            "me@gmail.com",
+            Some("abcdefghijklmnop"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Restart]);
+    }
+
+    #[tokio::test]
+    async fn delete_mail_account_stops_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        delete_mail_account(&st).await.unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Stop]);
+    }
+
+    #[tokio::test]
+    async fn create_job_nudges_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        create_job(&st, "Engineer", "Acme", "raw", "", None)
+            .await
+            .unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Nudge]);
+    }
+
+    #[tokio::test]
+    async fn ai_settings_change_retries_only_a_paused_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        st.reload_providers().await.unwrap();
+        assert!(drain(&mut rx).is_empty());
+
+        st.watcher.status_handle().lock().unwrap().state = crate::mail::watch::WatchState::Paused;
+        st.reload_providers().await.unwrap();
+        assert_eq!(drain(&mut rx), vec![Control::Retry]);
+    }
+
+    /// A job at the first status with a row auto-applied to the second.
+    async fn applied(st: &AppState) -> (i64, i64) {
+        let statuses = st.store.list_job_statuses().await.unwrap();
+        let job = st
+            .store
+            .create_jd("Engineer", "Acme", "raw", "", Some(statuses[0].id))
+            .await
+            .unwrap();
+        let run = st.store.create_scan_run(ScanSource::Watch).await.unwrap();
+        st.store
+            .record_processed(
+                &NewProcessed {
+                    message_id: "<m@example.com>".into(),
+                    run_id: run,
+                    received_at: "Tue, 20 Oct 2026 10:00:00 +0000".into(),
+                    subject: "Interview".into(),
+                    sender: "hr@acme.com".into(),
+                    matched_job_id: Some(job),
+                    previous_status_id: Some(statuses[0].id),
+                    suggested_status_id: Some(statuses[1].id),
+                    confidence: Some(0.9),
+                    summary: Some("Interview invite.".into()),
+                    outcome: Outcome::Applied,
+                    job_related: Some(0.95),
+                    body: Some("Let's talk".into()),
+                },
+                Some(statuses[1].id),
+            )
+            .await
+            .unwrap();
+        (job, statuses[0].id)
+    }
+
+    #[tokio::test]
+    async fn undo_applied_emits_job_updated_and_inbox_changed() {
+        let (st, events) = state().await;
+        let (job, previous) = applied(&st).await;
+
+        undo_applied(&st, "<m@example.com>").await.unwrap();
+
+        let names: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        assert!(names.contains(&"job://updated".to_string()));
+        assert!(names.contains(&"inbox://changed".to_string()));
+        assert_eq!(
+            st.store.get_jd(job).await.unwrap().unwrap().status_id,
+            Some(previous)
+        );
+    }
+
+    #[tokio::test]
+    async fn list_inbox_returns_views_with_gmail_url() {
+        let (st, _) = state().await;
+        applied(&st).await;
+
+        let rows = list_inbox(&st, InboxFilter::All).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].gmail_url.contains("rfc822msgid"));
+        assert_eq!(unread_count(&st).await.unwrap(), 1);
+        mark_all_read(&st).await.unwrap();
+        assert_eq!(unread_count(&st).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn watcher_status_starts_stopped() {
+        let (st, _) = state().await;
+
+        let status = get_watcher_status(&st);
+
+        assert_eq!(status.state, crate::mail::watch::WatchState::Stopped);
     }
 }

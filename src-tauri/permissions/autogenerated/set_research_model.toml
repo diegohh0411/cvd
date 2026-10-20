@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-research-model"
+description = "Enables the set_research_model command without any pre-configured scope."
+commands.allow = ["set_research_model"]
+
+[[permission]]
+identifier = "deny-set-research-model"
+description = "Denies the set_research_model command without any pre-configured scope."
+commands.deny = ["set_research_model"]

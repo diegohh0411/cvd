@@ -1,7 +1,10 @@
-//! Inference providers: where a decision model runs. Local models keep going
-//! through `AppState`'s sidecar path; remote providers implement `Provider`.
+//! HTTP inference connections, including servers run locally by the user.
+mod connections;
+mod local;
 mod openrouter;
 mod registry;
+mod subq;
+mod typesafe;
 
 use std::sync::Arc;
 
@@ -9,14 +12,19 @@ use async_trait::async_trait;
 
 use crate::engine::DecisionEngine;
 
+pub use connections::{kind_of, load_rows, next_id, save_rows, Connection};
 pub use openrouter::{OpenRouterProvider, OPENROUTER, OPENROUTER_BASE};
 pub use registry::{ProviderModels, ProviderRegistry};
+pub use subq::{SubQProvider, SUBQ, SUBQ_BASE};
+pub use typesafe::{TypeSafeProvider, TYPESAFE, TYPESAFE_BASE};
+
+pub use local::{normalize_url, LocalProvider, DEFAULT_LOCAL_URL, LOCAL_SERVER, LOCAL_URL_KEY};
 
 pub const LOCAL: &str = "local";
 
-/// A model reference as stored in settings and runs: bare id for local models,
-/// `<provider>:<id>` for remote ones. Splits on the first `:` only, since
-/// remote ids may contain `:` (e.g. `inception/mercury-decide:free`).
+/// Model references use `<connection>:<id>` (including `localhost:<id>`).
+/// Bare ids are decoded only for legacy history. Split on the first `:` since
+/// model ids may themselves contain `:`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRef {
     pub provider: String,
@@ -26,8 +34,14 @@ pub struct ModelRef {
 impl ModelRef {
     pub fn parse(s: &str) -> ModelRef {
         match s.split_once(':') {
-            Some((provider, id)) => ModelRef { provider: provider.into(), id: id.into() },
-            None => ModelRef { provider: LOCAL.into(), id: s.into() },
+            Some((provider, id)) => ModelRef {
+                provider: provider.into(),
+                id: id.into(),
+            },
+            None => ModelRef {
+                provider: LOCAL.into(),
+                id: s.into(),
+            },
         }
     }
 

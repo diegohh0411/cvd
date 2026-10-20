@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cv-decisions",
-  "version": "0.1.0",
-  "identifier": "com.diego.cv-decisions",
+  "productName": "cvd",
+  "version": "0.5.0",
+  "identifier": "com.diego.cvd",
   "build": {
     "beforeDevCommand": "bun run start",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
-    "frontendDist": "../dist/cv-decisions/browser"
+    "frontendDist": "../dist/cvd/browser"
   },
   "app": {
     "windows": [
       {
-        "title": "CV Decisions",
+        "title": "CVD",
         "width": 1280,
         "height": 820,
         "minWidth": 900,
@@ -21,7 +21,9 @@
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'self' blob:",
-      "dangerousDisableAssetCspModification": ["style-src"]
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "bundle": {
@@ -34,22 +36,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/llama-server"
-    ],
-    "macOS": {
-      "files": {
-        "MacOS/libggml-base.0.dylib": "binaries/libggml-base.0.dylib",
-        "MacOS/libggml-blas.0.dylib": "binaries/libggml-blas.0.dylib",
-        "MacOS/libggml-cpu.0.dylib": "binaries/libggml-cpu.0.dylib",
-        "MacOS/libggml-metal.0.dylib": "binaries/libggml-metal.0.dylib",
-        "MacOS/libggml-rpc.0.dylib": "binaries/libggml-rpc.0.dylib",
-        "MacOS/libggml.0.dylib": "binaries/libggml.0.dylib",
-        "MacOS/libllama-common.0.dylib": "binaries/libllama-common.0.dylib",
-        "MacOS/libllama-server-impl.dylib": "binaries/libllama-server-impl.dylib",
-        "MacOS/libllama.0.dylib": "binaries/libllama.0.dylib",
-        "MacOS/libmtmd.0.dylib": "binaries/libmtmd.0.dylib"
-      }
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBQjBFNDNGRjZENTZDNjcKUldSbmJOWDJQK1N3Nmxob01MNm14VDEwRjFReTc0ZStoVVpBZjUzOExTTkc5dDhveUZaREk3RDkK",
+      "endpoints": [
+        "https://github.com/diegohh0411/cvd/releases/latest/download/latest.json"
+      ]
     }
   }
 }

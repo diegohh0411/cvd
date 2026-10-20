@@ -4,9 +4,7 @@ use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::{
-    decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question, MAX_QUESTIONS,
-};
+use crate::engine::{decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question};
 use crate::store::types::*;
 use crate::store::{Store, StoreError};
 
@@ -31,10 +29,15 @@ impl Default for MatchConfig {
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
     /// Waiting for company research (see `company://research` for its steps).
-    Researching { company_id: i64 },
+    Researching {
+        company_id: i64,
+    },
     ReadingJd,
     /// `done`/`total` count questions across the run's batched requests.
-    Scoring { done: usize, total: usize },
+    Scoring {
+        done: usize,
+        total: usize,
+    },
     Done,
 }
 
@@ -88,7 +91,17 @@ pub async fn run_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, jd_id, cfg, company, &cancel, &on_progress).await,
+        execute(
+            store,
+            engine,
+            run_id,
+            jd_id,
+            cfg,
+            company,
+            &cancel,
+            &on_progress,
+        )
+        .await,
     )
     .await
 }
@@ -108,7 +121,17 @@ pub async fn resume_match(
     finish(
         store,
         run_id,
-        execute(store, engine, run_id, run.jd_id, cfg, company, &cancel, &on_progress).await,
+        execute(
+            store,
+            engine,
+            run_id,
+            run.jd_id,
+            cfg,
+            company,
+            &cancel,
+            &on_progress,
+        )
+        .await,
     )
     .await
 }
@@ -207,15 +230,17 @@ fn question_tokens(p: &Pending) -> usize {
     80 + estimate_tokens(wire_request("", &one)["questions"].to_string().len())
 }
 
-/// Splits questions into requests under both the question cap and the token budget.
-fn batches(questions: Vec<Pending>, state: &str, budget: usize) -> Vec<Vec<Pending>> {
+/// Splits questions into requests under both the question cap and the token
+/// budget. With a cap of `n`, `q` questions take `ceil(q / n)` requests unless
+/// the token budget splits them further.
+fn batches(questions: Vec<Pending>, state: &str, budget: usize, cap: usize) -> Vec<Vec<Pending>> {
     let base = 50 + estimate_tokens(state.len());
     let mut out: Vec<Vec<Pending>> = Vec::new();
     let mut cur: Vec<Pending> = Vec::new();
     let mut used = base;
     for p in questions {
         let t = question_tokens(&p);
-        if !cur.is_empty() && (cur.len() == MAX_QUESTIONS || used + t > budget) {
+        if !cur.is_empty() && (cur.len() == cap || used + t > budget) {
             out.push(std::mem::take(&mut cur));
             used = base;
         }
@@ -346,7 +371,8 @@ async fn execute(
     on_progress(Progress::Scoring { done, total });
 
     let state = questions::jd_state(&jd.raw_text, company);
-    for batch in batches(todo, &state, cfg.token_budget) {
+    let cap = engine.max_questions();
+    for batch in batches(todo, &state, cfg.token_budget, cap) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();
         ask(store, engine, run_id, &state, batch).await?;
@@ -408,7 +434,12 @@ pub fn rank(store_scores: &[ScoreRow], entries: &[Entry], skills: &[Skill]) -> R
     let mut tags: Vec<(String, f64)> = store_scores
         .iter()
         .filter(|r| r.target_type == TargetType::Meta && r.score >= TAG_THRESHOLD)
-        .filter_map(|r| Some((r.question.strip_prefix(questions::TAG_PREFIX)?.to_string(), r.score)))
+        .filter_map(|r| {
+            Some((
+                r.question.strip_prefix(questions::TAG_PREFIX)?.to_string(),
+                r.score,
+            ))
+        })
         .collect();
     tags.sort_by(|a, b| desc(&a.1, &b.1));
 

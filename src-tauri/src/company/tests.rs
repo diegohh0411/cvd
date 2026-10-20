@@ -13,9 +13,18 @@ fn normalize_strips_case_accents_punctuation_and_suffixes() {
 
 #[test]
 fn domain_from_url_skips_job_boards() {
-    assert_eq!(domain_from_url("https://www.stripe.com/jobs/123"), Some("stripe.com".into()));
-    assert_eq!(domain_from_url("https://www.linkedin.com/jobs/view/1"), None);
-    assert_eq!(domain_from_url("https://boards.greenhouse.io/acme/jobs/1"), None);
+    assert_eq!(
+        domain_from_url("https://www.stripe.com/jobs/123"),
+        Some("stripe.com".into())
+    );
+    assert_eq!(
+        domain_from_url("https://www.linkedin.com/jobs/view/1"),
+        None
+    );
+    assert_eq!(
+        domain_from_url("https://boards.greenhouse.io/acme/jobs/1"),
+        None
+    );
     assert_eq!(domain_from_url("not a url"), None);
     assert_eq!(domain_from_url(""), None);
 }
@@ -48,13 +57,22 @@ mod policy_tests {
 
     #[test]
     fn fresh_within_ttl() {
-        assert_eq!(need(&company(CompanyStatus::Ok, Some(29)), now()), Need::Fresh);
+        assert_eq!(
+            need(&company(CompanyStatus::Ok, Some(29)), now()),
+            Need::Fresh
+        );
     }
 
     #[test]
     fn stale_after_30_days() {
-        assert_eq!(need(&company(CompanyStatus::Ok, Some(31)), now()), Need::Research);
-        assert_eq!(need(&company(CompanyStatus::Pending, None), now()), Need::Research);
+        assert_eq!(
+            need(&company(CompanyStatus::Ok, Some(31)), now()),
+            Need::Research
+        );
+        assert_eq!(
+            need(&company(CompanyStatus::Pending, None), now()),
+            Need::Research
+        );
     }
 
     #[test]
@@ -102,8 +120,14 @@ mod render_tests {
 
     #[test]
     fn render_omits_empty_fields() {
-        let p = CompanyProfile { industry: "Fintech".into(), ..Default::default() };
-        assert_eq!(render("Acme", Some("acme.com"), &p), "Name: Acme (acme.com)\nIndustry: Fintech");
+        let p = CompanyProfile {
+            industry: "Fintech".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            render("Acme", Some("acme.com"), &p),
+            "Name: Acme (acme.com)\nIndustry: Fintech"
+        );
     }
 
     #[test]
@@ -129,7 +153,10 @@ mod render_tests {
     fn render_never_includes_sources() {
         let p = CompanyProfile {
             industry: "Fintech".into(),
-            sources: vec![Source { url: "https://secret.example".into(), title: "S".into() }],
+            sources: vec![Source {
+                url: "https://secret.example".into(),
+                title: "S".into(),
+            }],
             ..Default::default()
         };
         assert!(!render("Acme", None, &p).contains("secret.example"));
@@ -137,7 +164,10 @@ mod render_tests {
 
     #[test]
     fn render_lists_tech_stack() {
-        let p = CompanyProfile { tech_stack: vec!["Rust".into(), "Go".into()], ..Default::default() };
+        let p = CompanyProfile {
+            tech_stack: vec!["Rust".into(), "Go".into()],
+            ..Default::default()
+        };
         assert_eq!(render("Acme", None, &p), "Name: Acme\nTech stack: Rust, Go");
     }
 }

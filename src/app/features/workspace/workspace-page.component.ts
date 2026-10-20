@@ -18,18 +18,21 @@ import { JobPropertiesComponent } from '../jobs/job-properties.component';
 import { MatchReadiness } from '../jobs/match-readiness';
 import { WorkspaceCardsComponent } from './cards.component';
 import { defaultFileName, ExportService } from './export.service';
+import { EmailsTabComponent } from './emails-tab.component';
 import { ExportsTabComponent } from './exports-tab.component';
+import { JdEditorComponent } from './jd-editor.component';
 import { CompanyPanelComponent, contextBadge } from '../companies/company-panel.component';
 import { MatchingStepperComponent } from './matching-stepper.component';
 import { PdfPreviewComponent } from './pdf-preview.component';
 import { SelectionListComponent } from './selection-list.component';
 import { WorkspaceStore } from './workspace.store';
 
-export type Tab = 'jd' | 'selection' | 'exports';
+export type Tab = 'jd' | 'selection' | 'exports' | 'emails';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'jd', label: 'JD' },
   { id: 'selection', label: 'Selection' },
   { id: 'exports', label: 'Exports' },
+  { id: 'emails', label: 'Emails' },
 ];
 
 /** What to tell the user about a failed run, and whether Retry makes sense. */
@@ -60,8 +63,10 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
     SelectionListComponent,
     PdfPreviewComponent,
     ExportsTabComponent,
+    EmailsTabComponent,
     BlockerAlertComponent,
     JobPropertiesComponent,
+    JdEditorComponent,
     CompanyPanelComponent,
     ZardBadgeComponent,
   ],
@@ -163,7 +168,7 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
         }
 
         @if (ws.phase() !== 'loading') {
-          <div class="grid min-h-0 flex-1 gap-4" [class.xl:grid-cols-2]="ws.phase() === 'review'">
+          <div class="grid min-h-0 flex-1 gap-4" [class.xl:grid-cols-2]="showPreview()">
             <div class="flex min-w-0 flex-col gap-3">
               <div role="tablist" aria-label="Workspace" class="bg-muted text-muted-foreground inline-flex w-fit rounded-lg p-1">
                 @for (t of tabs; track t.id) {
@@ -183,14 +188,9 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
               <div role="tabpanel" class="min-h-0 flex-1 overflow-y-auto">
                 @switch (tab()) {
                   @case ('jd') {
-                    @if (ws.ranked()?.tags?.length) {
-                      <div class="mb-4 flex flex-wrap gap-1.5" aria-label="Role focus">
-                        @for (tag of ws.ranked()!.tags; track tag) {
-                          <z-badge zType="secondary">{{ tag }}</z-badge>
-                        }
-                      </div>
+                    @if (ws.job(); as job) {
+                      <app-jd-editor [job]="job" (changed)="ws.job.set($event)" />
                     }
-                    <article class="text-sm leading-relaxed whitespace-pre-wrap">{{ ws.job()?.raw_text }}</article>
                   }
                   @case ('selection') {
                     <app-selection-list />
@@ -198,11 +198,14 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
                   @case ('exports') {
                     <app-exports-tab [jobId]="jobIdNum()" [version]="exports()" (restore)="restore($event)" />
                   }
+                  @case ('emails') {
+                    <app-emails-tab [jobId]="jobIdNum()" />
+                  }
                 }
               </div>
             </div>
-            @if (ws.phase() === 'review') {
-              <div class="min-w-0 xl:sticky xl:top-16 xl:h-[calc(100vh-5rem)]">
+            @if (showPreview()) {
+              <div class="min-h-0 min-w-0 overflow-hidden xl:sticky xl:top-16 xl:h-[calc(100vh-5rem)]">
                 <app-pdf-preview [pdf]="ws.pdf()" [error]="ws.fitError()" [busy]="ws.fitting()" />
               </div>
             }
@@ -230,6 +233,7 @@ export class WorkspacePageComponent {
 
   protected readonly tabs = TABS;
   protected readonly tab = signal<Tab>('jd');
+  protected readonly showPreview = computed(() => this.ws.phase() === 'review' && this.tab() === 'selection');
   protected readonly exporting = signal(false);
   protected readonly exports = signal(0);
   protected readonly confirmRematch = signal(false);
@@ -327,7 +331,7 @@ export class WorkspacePageComponent {
 
   private onStartError(e: unknown): void {
     const err = toAppError(e);
-    if (err.kind === 'ModelMissing') void this.router.navigate(['/ai/models']);
+    if (err.kind === 'ModelMissing') void this.router.navigate(['/ai']);
     this.toast.error('Could not start matching', { description: err.message });
   }
 }

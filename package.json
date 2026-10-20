@@ -1,15 +1,17 @@
 {
-  "name": "cv-decisions",
-  "version": "0.1.0",
+  "name": "cvd",
+  "version": "0.5.0",
   "scripts": {
     "ng": "ng",
     "start": "bun --bun ng serve",
     "build": "bun --bun ng build",
     "watch": "bun --bun ng build --watch --configuration development",
     "tauri": "tauri",
-    "test": "bun --bun ng test --watch=false"
+    "test": "bun --bun ng test --watch=false",
+    "bump": "bun scripts/bump-version.ts"
   },
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@angular/cdk": "^22",
     "@angular/common": "^22.0.1",
@@ -23,6 +25,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "ngx-sonner": "^3.1.0",

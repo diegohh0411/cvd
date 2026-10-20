@@ -4,7 +4,7 @@
 
 **Goal:** A stdio MCP server binary (`cvd-mcp`) that lets local agents (Claude Code, OpenCode) read and insert profile entries (experience, projects, …) into the app's SQLite DB, so they can migrate Notion content into the app.
 
-**Architecture:** A second binary in `src-tauri` that reuses `cv_decisions_lib::store::Store` directly (no Tauri runtime). Tool handlers live in a library module `mcp` so they're unit-testable against an in-memory store; the binary only resolves the DB path and serves over stdio. Validation sits in front of `Store::upsert_entry`.
+**Architecture:** A second binary in `src-tauri` that reuses `cvd_lib::store::Store` directly (no Tauri runtime). Tool handlers live in a library module `mcp` so they're unit-testable against an in-memory store; the binary only resolves the DB path and serves over stdio. Validation sits in front of `Store::upsert_entry`.
 
 **Tech Stack:** Rust 2021, `rmcp` (official MCP Rust SDK, features `server`, `transport-io`, `macros`), `schemars`, `sqlx` sqlite (existing), `tokio`.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- The DB path must match the app's: `<app_data_dir>/cv.db`, where the identifier is `com.diego.cv-decisions` (macOS: `~/Library/Application Support/com.diego.cv-decisions/cv.db`). `CVD_DB_PATH` env var overrides it.
+- The DB path must match the app's: `<app_data_dir>/cv.db`, where the identifier is `com.diego.cvd` (macOS: `~/Library/Application Support/com.diego.cvd/cv.db`). `CVD_DB_PATH` env var overrides it.
 - No `delete_entry` tool. Updates require an explicit `id`.
 - Dates are `YYYY-MM` strings (same as the existing `start_date` data, e.g. `"2022-01"`). `end_date` is `None` for current roles.
 - stdout is reserved for the MCP protocol. All logging goes to stderr.
@@ -155,7 +155,7 @@ Use `#[tool_router]` / `#[tool]` from rmcp, with one `Parameters<T>` struct per 
 
 **Interfaces:**
 - Consumes: `CvServer::new`, `Store::open`.
-- Produces: `fn db_path() -> PathBuf`. It returns `CVD_DB_PATH` when set; otherwise `dirs`-style app data: `$HOME/Library/Application Support/com.diego.cv-decisions/cv.db` on macOS, `%APPDATA%\com.diego.cv-decisions\cv.db` on Windows, `$XDG_DATA_HOME|~/.local/share/com.diego.cv-decisions/cv.db` on Linux. Add the `dirs` crate and use `dirs::data_dir()`, which matches Tauri's `app_data_dir`.
+- Produces: `fn db_path() -> PathBuf`. It returns `CVD_DB_PATH` when set; otherwise `dirs`-style app data: `$HOME/Library/Application Support/com.diego.cvd/cv.db` on macOS, `%APPDATA%\com.diego.cvd\cv.db` on Windows, `$XDG_DATA_HOME|~/.local/share/com.diego.cvd/cv.db` on Linux. Add the `dirs` crate and use `dirs::data_dir()`, which matches Tauri's `app_data_dir`.
 
 - [ ] **Step 1: Implement `main`**
 

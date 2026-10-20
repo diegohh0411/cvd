@@ -5,32 +5,43 @@ use base64::Engine as _;
 use serde::Serialize;
 use serde_json::json;
 
-use crate::company::{self, agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS}, coordinator::ResearchCoordinator};
-use crate::search::{ExaSearch, SearchProvider, EXA};
-use crate::state::ResearchEnv;
-use crate::store::types::{Company, CompanyProfile};
-use crate::store::StoreError;
-use tokio_util::sync::CancellationToken;
-use crate::providers::{ModelRef, OpenRouterProvider, ProviderModels, OPENROUTER};
+use crate::autofill::{build_facts, ApplyDefaults, Fact, APPLY_DEFAULTS_KEY};
+use crate::company::{
+    self,
+    agent::{ResearchError, ResearchInput, JD_SNIPPET_CHARS},
+    coordinator::ResearchCoordinator,
+};
 use crate::engine::EngineError;
+use crate::mail::account::{self, MailAccount};
+use crate::mail::cycle::{self, CycleError};
+use crate::mail::imap::{ImapSource, MailSource};
+use crate::mail::scan;
+use crate::mail::watch::{Control, WatcherStatus};
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
-use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
+use crate::providers::{
+    kind_of, load_rows, next_id, normalize_url, save_rows, Connection, LocalProvider, ModelRef,
+    OpenRouterProvider, Provider, ProviderModels, SubQProvider, TypeSafeProvider, LOCAL_SERVER,
+    LOCAL_URL_KEY, OPENROUTER, SUBQ, TYPESAFE,
+};
 use crate::render::fit::{self, Override, Selection};
 use crate::render::{self, Compiled, RenderError, StyleStep};
-use crate::state::AppState;
+use crate::search::{ExaSearch, SearchProvider, EXA};
+use crate::state::ResearchEnv;
+use crate::state::{AppState, JOB_UPDATED_EVENT};
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
-use crate::store::Store;
+use crate::store::types::{Company, CompanyProfile};
+use crate::store::StoreError;
+use crate::store::{InboxFilter, ProcessedEmail, ScanSource, Store};
+use crate::web::{self, FetchPolicy};
+use tokio_util::sync::CancellationToken;
 
 pub const MATCH_EVENT: &str = "match://progress";
-pub const DOWNLOAD_EVENT: &str = "model://download";
 pub const ENGINE_EVENT: &str = "engine://status";
 /// Settings keys the webview may read and write (UI preferences only).
 const UI_SETTING_PREFIX: &str = "ui.";
 const TEMPLATE: &str = "Classic ATS";
-const DOWNLOAD_ATTEMPTS: usize = 4;
-pub const DOWNLOAD_PAUSED: &str = "Download paused.";
 const EMPTY_LIBRARY: &str = "Add at least one entry to your library first.";
 
 /// Serialized as `{ kind, message }`.
@@ -55,6 +66,10 @@ pub enum AppError {
     ProviderCredits(String),
     #[error("{0}")]
     ProviderUnavailable(String),
+    #[error("{0}")]
+    MailAuth(String),
+    #[error("{0}")]
+    MailUnavailable(String),
 }
 
 impl AppError {
@@ -70,6 +85,20 @@ impl AppError {
             Self::ProviderAuth(_) => "ProviderAuth",
             Self::ProviderCredits(_) => "ProviderCredits",
             Self::ProviderUnavailable(_) => "ProviderUnavailable",
+            Self::MailAuth(_) => "MailAuth",
+            Self::MailUnavailable(_) => "MailUnavailable",
+        }
+    }
+}
+
+impl From<crate::mail::imap::MailError> for AppError {
+    fn from(e: crate::mail::imap::MailError) -> Self {
+        use crate::mail::imap::MailError;
+        match e {
+            MailError::Auth(_) => Self::MailAuth(e.to_string()),
+            MailError::Connection(_) | MailError::Protocol(_) => {
+                Self::MailUnavailable(e.to_string())
+            }
         }
     }
 }
@@ -77,7 +106,9 @@ impl AppError {
 impl From<StoreError> for AppError {
     fn from(e: StoreError) -> Self {
         match &e {
-            StoreError::Db(sqlx::Error::RowNotFound) => Self::NotFound("Not found.".into()),
+            StoreError::Db(sqlx::Error::RowNotFound) | StoreError::NotFound => {
+                Self::NotFound("Not found.".into())
+            }
             StoreError::Invalid(m) if m.starts_with("no ") => Self::NotFound(m.clone()),
             StoreError::Invalid(m) => Self::Io(m.clone()),
             _ => Self::Io(e.to_string()),
@@ -89,11 +120,11 @@ impl From<EngineError> for AppError {
     fn from(e: EngineError) -> Self {
         match e {
             EngineError::ContextOverflow => Self::ContextOverflow(e.to_string()),
-            EngineError::Unauthorized => Self::ProviderAuth(e.to_string()),
-            EngineError::InsufficientCredits => Self::ProviderCredits(e.to_string()),
-            EngineError::RateLimited | EngineError::Network(_) | EngineError::ModelUnavailable(_) => {
-                Self::ProviderUnavailable(e.to_string())
-            }
+            EngineError::Unauthorized(_) => Self::ProviderAuth(e.to_string()),
+            EngineError::InsufficientCredits(_) => Self::ProviderCredits(e.to_string()),
+            EngineError::RateLimited
+            | EngineError::Network(_)
+            | EngineError::ModelUnavailable(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
     }
@@ -103,9 +134,8 @@ impl From<crate::providers::ProviderError> for AppError {
     fn from(e: crate::providers::ProviderError) -> Self {
         match e {
             crate::providers::ProviderError::Missing(m) => Self::ModelMissing(m),
-            crate::providers::ProviderError::Unauthorized | crate::providers::ProviderError::KeyRejected(_) => {
-                Self::ProviderAuth(e.to_string())
-            }
+            crate::providers::ProviderError::Unauthorized
+            | crate::providers::ProviderError::KeyRejected(_) => Self::ProviderAuth(e.to_string()),
             crate::providers::ProviderError::Network(_) => Self::ProviderUnavailable(e.to_string()),
             _ => Self::EngineUnavailable(e.to_string()),
         }
@@ -136,12 +166,6 @@ impl From<MatchError> for AppError {
 impl From<RenderError> for AppError {
     fn from(e: RenderError) -> Self {
         Self::Render(e.to_string())
-    }
-}
-
-impl From<ModelError> for AppError {
-    fn from(e: ModelError) -> Self {
-        Self::Io(e.to_string())
     }
 }
 
@@ -193,14 +217,46 @@ pub async fn create_job(
     url: &str,
     status_id: Option<i64>,
 ) -> Res<i64> {
-    Ok(st.store.create_jd(title, company, raw_text, url, status_id).await?)
+    let id = st
+        .store
+        .create_jd(title, company, raw_text, url, status_id)
+        .await?;
+    // Earlier mail may be about this job; the watcher re-checks it.
+    st.watcher.send(Control::Nudge);
+    Ok(id)
 }
 
-pub async fn update_job_tracking(st: &AppState, id: i64, status_id: Option<i64>, url: &str) -> Res<()> {
+pub async fn update_job_tracking(
+    st: &AppState,
+    id: i64,
+    status_id: Option<i64>,
+    url: &str,
+) -> Res<()> {
     if !st.store.update_jd_tracking(id, status_id, url).await? {
-        return Err(AppError::NotFound(format!("Job description {id} not found.")));
+        return Err(AppError::NotFound(format!(
+            "Job description {id} not found."
+        )));
     }
     Ok(())
+}
+
+pub async fn update_job_description(st: &AppState, id: i64, raw_text: &str) -> Res<()> {
+    if !st.store.update_jd_text(id, raw_text).await? {
+        return Err(AppError::NotFound(format!(
+            "Job description {id} not found."
+        )));
+    }
+    Ok(())
+}
+
+/// Longest posting read from a URL. Pasted text has no limit.
+const JOB_PAGE_CHARS: usize = 30_000;
+
+/// Reads a posting's text from its URL, for when the user didn't paste the description.
+pub async fn fetch_job_description(url: &str) -> Res<String> {
+    web::fetch_text(url, FetchPolicy::PublicOnly, JOB_PAGE_CHARS)
+        .await
+        .map_err(|e| AppError::Io(e.to_string()))
 }
 
 // ---- job statuses ----
@@ -214,7 +270,12 @@ pub async fn create_job_status(st: &AppState, name: &str, color: StatusColor) ->
     status_by_id(st, id).await
 }
 
-pub async fn update_job_status(st: &AppState, id: i64, name: &str, color: StatusColor) -> Res<JobStatus> {
+pub async fn update_job_status(
+    st: &AppState,
+    id: i64,
+    name: &str,
+    color: StatusColor,
+) -> Res<JobStatus> {
     if !st.store.update_job_status(id, name, color).await? {
         return Err(AppError::NotFound(format!("Status {id} not found.")));
     }
@@ -229,6 +290,35 @@ pub async fn reorder_job_statuses(st: &AppState, ids: Vec<i64>) -> Res<()> {
     Ok(st.store.reorder_job_statuses(&ids).await?)
 }
 
+// ---- job views ----
+
+pub async fn list_job_views(st: &AppState) -> Res<Vec<JobView>> {
+    Ok(st.store.list_job_views().await?)
+}
+
+pub async fn create_job_view(st: &AppState, view: &JobViewInput) -> Res<JobView> {
+    let id = st.store.create_job_view(view).await?;
+    view_by_id(st, id).await
+}
+
+pub async fn update_job_view(st: &AppState, id: i64, view: &JobViewInput) -> Res<JobView> {
+    if !st.store.update_job_view(id, view).await? {
+        return Err(AppError::NotFound(format!("View {id} not found.")));
+    }
+    view_by_id(st, id).await
+}
+
+pub async fn delete_job_view(st: &AppState, id: i64) -> Res<()> {
+    Ok(st.store.delete_job_view(id).await?)
+}
+
+async fn view_by_id(st: &AppState, id: i64) -> Res<JobView> {
+    st.store
+        .get_job_view(id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("View {id} not found.")))
+}
+
 async fn status_by_id(st: &AppState, id: i64) -> Res<JobStatus> {
     st.store
         .list_job_statuses()
@@ -240,6 +330,12 @@ async fn status_by_id(st: &AppState, id: i64) -> Res<JobStatus> {
 
 pub async fn list_jobs(st: &AppState) -> Res<Vec<JobDescription>> {
     Ok(st.store.list_jds().await?)
+}
+
+/// Job ids matching `query` (fuzzy), best first; empty for a blank query.
+pub async fn search_jobs(st: &AppState, query: &str) -> Res<Vec<i64>> {
+    let jobs = st.store.list_jds().await?;
+    Ok(crate::job_search::search_jobs(&jobs, query))
 }
 
 pub async fn get_job(st: &AppState, id: i64) -> Res<JobDescription> {
@@ -275,7 +371,9 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
     if st.cancel_run(run_id) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Match run {run_id} is not running.")))
+        Err(AppError::NotFound(format!(
+            "Match run {run_id} is not running."
+        )))
     }
 }
 
@@ -293,13 +391,34 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
     let skip = st.register_skip(run_id);
     tokio::spawn(async move {
         let progress_emit = emit.clone();
-        let on_progress = move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p }));
-        let context = company_context(&store, &coordinator, &env, run_id, &token, skip, &on_progress).await;
-        skips.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id);
+        let on_progress =
+            move |p| progress_emit(MATCH_EVENT, json!({ "run_id": run_id, "event": p }));
+        let context = company_context(
+            &store,
+            &coordinator,
+            &env,
+            run_id,
+            &token,
+            skip,
+            &on_progress,
+        )
+        .await;
+        skips
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&run_id);
         let outcome = match context {
             Ok(ctx) => {
-                matcher::resume_match(&store, &*engine, run_id, MatchConfig::default(), ctx.as_deref(), token, on_progress)
-                    .await
+                matcher::resume_match(
+                    &store,
+                    &*engine,
+                    run_id,
+                    MatchConfig::default(),
+                    ctx.as_deref(),
+                    token,
+                    on_progress,
+                )
+                .await
             }
             Err(e) => Err(e.into()),
         };
@@ -312,9 +431,10 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
         }
         match outcome {
             Ok(_) => {}
-            Err(MatchError::Cancelled { .. }) => {
-                emit(MATCH_EVENT, json!({ "run_id": run_id, "event": { "stage": "cancelled" } }))
-            }
+            Err(MatchError::Cancelled { .. }) => emit(
+                MATCH_EVENT,
+                json!({ "run_id": run_id, "event": { "stage": "cancelled" } }),
+            ),
             Err(e) => emit(
                 MATCH_EVENT,
                 json!({ "run_id": run_id, "event": { "stage": "failed", "error": AppError::from(e) } }),
@@ -339,8 +459,13 @@ async fn company_context(
     on_progress: &(impl Fn(matcher::Progress) + Send + Sync),
 ) -> Result<Option<String>, StoreError> {
     let jd_id = store.get_run(run_id).await?.jd_id;
-    let Some(jd) = store.get_jd(jd_id).await? else { return Ok(None) };
-    let (normalized, domain) = (company::normalize_name(&jd.company), company::domain_from_url(&jd.url));
+    let Some(jd) = store.get_jd(jd_id).await? else {
+        return Ok(None);
+    };
+    let (normalized, domain) = (
+        company::normalize_name(&jd.company),
+        company::domain_from_url(&jd.url),
+    );
     if normalized.is_empty() && domain.is_none() {
         store.set_run_company(run_id, None).await?;
         return Ok(None);
@@ -354,8 +479,14 @@ async fn company_context(
         None => match store.find_company(domain.as_deref(), &normalized).await? {
             Some(c) => c,
             None => {
-                let name = if jd.company.trim().is_empty() { domain.clone().unwrap_or_default() } else { jd.company.trim().to_string() };
-                store.create_company(&name, &normalized, domain.as_deref()).await?
+                let name = if jd.company.trim().is_empty() {
+                    domain.clone().unwrap_or_default()
+                } else {
+                    jd.company.trim().to_string()
+                };
+                store
+                    .create_company(&name, &normalized, domain.as_deref())
+                    .await?
             }
         },
     };
@@ -382,7 +513,12 @@ async fn company_context(
     };
     // Any researched profile beats none, even a stale one whose refresh failed.
     let usable = current.filter(|c| c.researched_at.is_some());
-    store.set_run_company(run_id, usable.as_ref().and_then(|c| c.researched_at.as_deref())).await?;
+    store
+        .set_run_company(
+            run_id,
+            usable.as_ref().and_then(|c| c.researched_at.as_deref()),
+        )
+        .await?;
     Ok(usable.map(|c| company::render(&c.name, c.domain.as_deref(), &c.profile)))
 }
 
@@ -398,7 +534,9 @@ pub async fn skip_research(st: &AppState, run_id: i64, mode: &str) -> Res<()> {
     if st.skip(run_id) {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Match run {run_id} is not waiting for company research.")))
+        Err(AppError::NotFound(format!(
+            "Match run {run_id} is not waiting for company research."
+        )))
     }
 }
 
@@ -409,7 +547,10 @@ pub async fn rescore(st: &AppState, run_id: i64) -> Res<i64> {
 }
 
 pub async fn get_company(st: &AppState, id: i64) -> Res<Company> {
-    st.store.get_company(id).await.map_err(|_| AppError::NotFound(format!("Company {id} not found.")))
+    st.store
+        .get_company(id)
+        .await
+        .map_err(|_| AppError::NotFound(format!("Company {id} not found.")))
 }
 
 pub async fn get_job_company(st: &AppState, jd_id: i64) -> Res<Option<Company>> {
@@ -428,8 +569,15 @@ pub async fn edit_company(st: &AppState, id: i64, profile: CompanyProfile) -> Re
 /// Researches the company now, ignoring the TTL and any backoff.
 pub async fn refresh_company(st: &AppState, id: i64) -> Res<Company> {
     let c = get_company(st, id).await?;
-    let input = ResearchInput { name: c.name.clone(), domain: c.domain.clone(), jd_snippet: String::new() };
-    Ok(st.coordinator.start(&st.store, c, input, st.research_env().research_fn()).await?)
+    let input = ResearchInput {
+        name: c.name.clone(),
+        domain: c.domain.clone(),
+        jd_snippet: String::new(),
+    };
+    Ok(st
+        .coordinator
+        .start(&st.store, c, input, st.research_env().research_fn())
+        .await?)
 }
 
 pub async fn list_runs(st: &AppState, jd_id: i64) -> Res<Vec<MatchRun>> {
@@ -462,16 +610,24 @@ pub struct FitOutput {
     pub pdf_base64: String,
 }
 
-pub async fn fit_cv(st: &AppState, run_id: i64, budget: u8, overrides: Vec<Override>) -> Res<FitOutput> {
+pub async fn fit_cv(
+    st: &AppState,
+    run_id: i64,
+    budget: u8,
+    overrides: Vec<Override>,
+) -> Res<FitOutput> {
     if !(1..=2).contains(&budget) {
-        return Err(AppError::Render(format!("page budget must be 1 or 2, got {budget}")));
+        return Err(AppError::Render(format!(
+            "page budget must be 1 or 2, got {budget}"
+        )));
     }
     let ranked = get_ranked(st, run_id).await?;
     let profile = get_profile(st).await?;
     let floor = MatchConfig::default().score_floor;
-    let r = tokio::task::spawn_blocking(move || fit::fit(&ranked, &profile, budget, floor, &overrides))
-        .await
-        .map_err(join_err)??;
+    let r =
+        tokio::task::spawn_blocking(move || fit::fit(&ranked, &profile, budget, floor, &overrides))
+            .await
+            .map_err(join_err)??;
     Ok(FitOutput {
         selection: r.selection,
         pages: r.compiled.pages,
@@ -517,7 +673,8 @@ pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: S
     })
     .await
     .map_err(join_err)??;
-    let selection_json = serde_json::to_string(&selection).map_err(|e| AppError::Io(e.to_string()))?;
+    let selection_json =
+        serde_json::to_string(&selection).map_err(|e| AppError::Io(e.to_string()))?;
     Ok(st
         .store
         .save_cv(&CvInput {
@@ -555,112 +712,114 @@ pub async fn set_ui_setting(st: &AppState, key: &str, value: &str) -> Res<()> {
     Ok(st.store.set_setting(key, value).await?)
 }
 
+// ---- auto-apply ----
+
+pub async fn get_apply_defaults(st: &AppState) -> Res<ApplyDefaults> {
+    Ok(ApplyDefaults::from_setting(
+        st.store.get_setting(APPLY_DEFAULTS_KEY).await?.as_deref(),
+    ))
+}
+
+pub async fn save_apply_defaults(st: &AppState, defaults: ApplyDefaults) -> Res<()> {
+    let json =
+        serde_json::to_string(&defaults.trimmed()).map_err(|e| AppError::Io(e.to_string()))?;
+    Ok(st.store.set_setting(APPLY_DEFAULTS_KEY, &json).await?)
+}
+
+/// What auto-apply would offer as candidates, for the Profile page preview.
+pub async fn apply_facts(st: &AppState) -> Res<Vec<Fact>> {
+    use chrono::Datelike as _;
+    let profile = get_profile(st).await?;
+    let entries = st.store.list_entries(false).await?;
+    let defaults = get_apply_defaults(st).await?;
+    let now = chrono::Local::now();
+    Ok(build_facts(
+        &profile,
+        &entries,
+        &defaults,
+        (now.year(), now.month()),
+    ))
+}
+
 // ---- models ----
 
 pub async fn engine_status(st: &AppState) -> Res<crate::state::EngineStatus> {
     st.engine_status().await
 }
 
-pub fn cancel_download(st: &AppState, id: &str) -> Res<()> {
-    if st.cancel_download(id) {
-        Ok(())
-    } else {
-        Err(AppError::NotFound(format!("Model {id} is not downloading.")))
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct ModelInfo {
-    pub spec: &'static ModelSpec,
-    pub installed: bool,
-}
-
-pub fn list_models(st: &AppState) -> Vec<ModelInfo> {
-    let installed = models::installed(&st.models_dir);
-    REGISTRY
-        .iter()
-        .map(|spec| ModelInfo { spec, installed: installed.contains(&spec) })
-        .collect()
-}
-
-/// Downloads a model unless it is already installed, retrying network errors
-/// (hf-hub resumes partial files, so a retry continues where it stopped).
-pub async fn download_model(st: &AppState, id: &str) -> Res<()> {
-    let spec = REGISTRY
-        .iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| AppError::NotFound(format!("Unknown model {id}.")))?;
-    if models::installed(&st.models_dir).contains(&spec) {
-        return Ok(());
-    }
-    let token = st
-        .register_download(spec.id)
-        .ok_or_else(|| AppError::Io(format!("Model {id} is already downloading.")))?;
-    let out = tokio::select! {
-        r = download_attempts(st, spec) => r,
-        _ = token.cancelled() => Err(AppError::Io(DOWNLOAD_PAUSED.into())),
-    };
-    st.finish_download(spec.id);
-    out
-}
-
-async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
-    let mut last = None;
-    for _ in 0..DOWNLOAD_ATTEMPTS {
-        let emit = st.emitter();
-        let on_progress = move |done: u64, total: u64| {
-            emit(DOWNLOAD_EVENT, json!({ "id": spec.id, "done": done, "total": total }))
-        };
-        match models::download(spec, &st.models_dir, on_progress).await {
-            Ok(_) => return Ok(()),
-            Err(e @ ModelError::Network(_)) => last = Some(e),
-            Err(e) => return Err(e.into()),
-        }
-    }
-    Err(last.expect("at least one attempt").into())
-}
-
-/// A local model's kind; `NotFound` when the id is unknown.
-fn local_kind(id: &str) -> Res<ModelKind> {
-    REGISTRY
-        .iter()
-        .find(|s| s.id == id)
-        .map(|s| s.kind)
-        .ok_or_else(|| AppError::NotFound(format!("Unknown model {id}.")))
-}
-
-fn require_kind(id: &str, want: ModelKind) -> Res<()> {
-    if local_kind(id)? != want {
-        let role = if want == ModelKind::Chat { "Company research" } else { "System One" };
-        return Err(AppError::NotFound(format!("Model {id} can't be used for {role}.")));
-    }
-    Ok(())
-}
-
 pub async fn set_research_model(st: &AppState, id: &str) -> Res<()> {
     let r = ModelRef::parse(id);
-    if r.is_local() {
-        require_kind(id, ModelKind::Chat)?;
-        st.installed_path(id)?;
-    } else {
-        st.providers().check(&r)?;
-    }
-    st.store.set_setting(crate::state::RESEARCH_MODEL_KEY, id).await?;
-    st.reset_research();
+    st.providers().check(&r)?;
+    st.store
+        .set_setting(crate::state::RESEARCH_MODEL_KEY, id)
+        .await?;
+    st.retry_watcher_if_paused();
     Ok(())
 }
 
 pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     let r = ModelRef::parse(id);
-    if r.is_local() {
-        require_kind(id, ModelKind::Decision)?;
-        st.installed_path(id)?;
-    } else {
-        st.providers().check(&r)?;
-    }
-    st.store.set_setting(crate::state::ACTIVE_MODEL_KEY, id).await?;
+    st.providers().check(&r)?;
+    st.store
+        .set_setting(crate::state::ACTIVE_MODEL_KEY, id)
+        .await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    st.retry_watcher_if_paused();
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct LocalConnectionView {
+    pub base_url: String,
+    pub has_key: bool,
+}
+
+pub async fn get_local_connection(st: &AppState) -> Res<LocalConnectionView> {
+    Ok(LocalConnectionView {
+        base_url: st
+            .store
+            .get_setting(LOCAL_URL_KEY)
+            .await?
+            .unwrap_or_else(|| crate::providers::DEFAULT_LOCAL_URL.into()),
+        has_key: st.store.get_secret(LOCAL_SERVER).await?.is_some(),
+    })
+}
+
+/// None preserves the saved key; an empty string clears it.
+pub async fn save_local_connection(st: &AppState, base_url: &str, key: Option<String>) -> Res<()> {
+    let base = normalize_url(base_url)?;
+    let secret = match &key {
+        Some(k) => Some(k.trim().to_string()).filter(|k| !k.is_empty()),
+        None => st.store.get_secret(LOCAL_SERVER).await?,
+    };
+    LocalProvider::new(base.clone(), secret.clone())
+        .list_models()
+        .await?;
+    st.store.set_setting(LOCAL_URL_KEY, &base).await?;
+    if let Some(key) = secret {
+        st.store.set_secret(LOCAL_SERVER, &key).await?;
+    } else {
+        st.store.delete_secret(LOCAL_SERVER).await?;
+    }
+    providers_changed(st).await
+}
+
+pub async fn test_local_connection(st: &AppState, model: &str, role: &str) -> Res<()> {
+    let base =
+        st.store.get_setting(LOCAL_URL_KEY).await?.ok_or_else(|| {
+            AppError::ModelMissing("Save your Local server connection first.".into())
+        })?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        LocalProvider::new(base, st.store.get_secret(LOCAL_SERVER).await?).test(model, role),
+    )
+    .await
+    .map_err(|_| {
+        AppError::EngineUnavailable(
+            "Local server connection test timed out after 30 seconds.".into(),
+        )
+    })??;
     Ok(())
 }
 
@@ -673,43 +832,199 @@ pub struct KeyStatus {
     pub last4: Option<String>,
 }
 
-fn known_provider(provider: &str) -> Res<()> {
-    if provider == OPENROUTER || provider == EXA {
+/// Accepts a provider id or a connection id (`openrouter~2`); Exa has a single key.
+fn known_provider(id: &str) -> Res<()> {
+    let kind = kind_of(id);
+    let extra = kind != id;
+    if (kind == LOCAL_SERVER && !extra)
+        || kind == OPENROUTER
+        || kind == SUBQ
+        || kind == TYPESAFE
+        || (kind == EXA && !extra)
+    {
         Ok(())
     } else {
-        Err(AppError::NotFound(format!("Unknown provider {provider}.")))
+        Err(AppError::NotFound(format!("Unknown provider {id}.")))
     }
 }
 
 fn key_status(key: Option<&str>) -> KeyStatus {
     KeyStatus {
         has_key: key.is_some(),
-        last4: key.map(|k| k.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect()),
+        last4: key.map(|k| {
+            k.chars()
+                .rev()
+                .take(4)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+        }),
     }
 }
 
-/// Validates, stores and activates a provider key. Leading/trailing whitespace is dropped.
-pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
-    known_provider(provider)?;
-    let key = key.trim();
-    if provider == EXA {
-        ExaSearch::new(st.exa_base.clone(), key.into()).search("test", 1).await?;
+/// Checks `key` against the provider's own API.
+async fn validate_key(st: &AppState, kind: &str, key: &str) -> Res<()> {
+    if kind == EXA {
+        ExaSearch::new(st.exa_base.clone(), key.into())
+            .search("test", 1)
+            .await?;
+    } else if kind == SUBQ {
+        SubQProvider::new(st.subq_base.clone(), key.into())
+            .validate_key()
+            .await?;
+    } else if kind == TYPESAFE {
+        TypeSafeProvider::new(st.typesafe_base.clone(), key.into())
+            .validate_key()
+            .await?;
     } else {
-        OpenRouterProvider::new(st.openrouter_base.clone(), key.into()).validate_key().await?;
+        OpenRouterProvider::new(st.openrouter_base.clone(), key.into())
+            .validate_key()
+            .await?;
     }
-    st.store.set_secret(provider, key).await?;
+    Ok(())
+}
+
+async fn providers_changed(st: &AppState) -> Res<()> {
     st.reload_providers().await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    st.retry_watcher_if_paused();
+    Ok(())
+}
+
+/// Validates, stores and activates a key under `provider`, a provider or connection id.
+/// Leading/trailing whitespace is dropped.
+pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
+    known_provider(provider)?;
+    if provider == LOCAL_SERVER {
+        return Err(AppError::NotFound(
+            "Use Local server setup to save its URL and optional key.".into(),
+        ));
+    }
+    let key = key.trim();
+    validate_key(st, kind_of(provider), key).await?;
+    st.store.set_secret(provider, key).await?;
+    providers_changed(st).await?;
     Ok(key_status(Some(key)))
 }
 
 pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
     known_provider(provider)?;
     st.store.delete_secret(provider).await?;
+    if provider == LOCAL_SERVER {
+        st.store.delete_setting(LOCAL_URL_KEY).await?;
+    }
+    let rows = load_rows(&st.store).await?;
+    // A removed extra key takes its label with it; a default key's row (just a rename) goes too.
+    let kept: Vec<Connection> = rows.into_iter().filter(|r| r.id != provider).collect();
+    save_rows(&st.store, &kept).await?;
+    providers_changed(st).await
+}
+
+/// A saved key as the UI lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConnectionView {
+    pub id: String,
+    pub provider: String,
+    pub label: String,
+    pub last4: Option<String>,
+}
+
+/// Every saved model-provider key (Exa excluded), defaults first.
+pub async fn list_connections(st: &AppState) -> Res<Vec<ConnectionView>> {
+    let rows = load_rows(&st.store).await?;
+    let mut out = Vec::new();
+    if st.store.get_setting(LOCAL_URL_KEY).await?.is_some() {
+        out.push(ConnectionView {
+            id: LOCAL_SERVER.into(),
+            provider: LOCAL_SERVER.into(),
+            label: "Local server".into(),
+            last4: key_status(st.store.get_secret(LOCAL_SERVER).await?.as_deref()).last4,
+        });
+    }
+    for kind in [OPENROUTER, SUBQ, TYPESAFE] {
+        let extras = rows
+            .iter()
+            .filter(|r| r.provider == kind && r.id != kind)
+            .map(|r| r.id.clone());
+        for id in std::iter::once(kind.to_string()).chain(extras) {
+            let Some(key) = st.store.get_secret(&id).await? else {
+                continue;
+            };
+            let label = rows
+                .iter()
+                .find(|r| r.id == id)
+                .map_or_else(|| kind.to_string(), |r| r.label.clone());
+            out.push(ConnectionView {
+                last4: key_status(Some(&key)).last4,
+                id,
+                provider: kind.into(),
+                label,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Saves another key for `provider` under a fresh connection id and a label such as "Work".
+pub async fn add_connection(
+    st: &AppState,
+    provider: &str,
+    label: &str,
+    key: &str,
+) -> Res<ConnectionView> {
+    if provider != OPENROUTER && provider != SUBQ && provider != TYPESAFE {
+        return Err(AppError::NotFound(format!("Unknown provider {provider}.")));
+    }
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    let key = key.trim();
+    validate_key(st, provider, key).await?;
+    let mut rows = load_rows(&st.store).await?;
+    // The first key of a provider keeps the bare id, so refs stored before connections still resolve.
+    let id = if st.store.get_secret(provider).await?.is_none() {
+        provider.to_string()
+    } else {
+        next_id(provider, &rows)
+    };
+    st.store.set_secret(&id, key).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection {
+        id: id.clone(),
+        provider: provider.into(),
+        label: label.into(),
+    });
+    save_rows(&st.store, &rows).await?;
+    providers_changed(st).await?;
+    Ok(ConnectionView {
+        id,
+        provider: provider.into(),
+        label: label.into(),
+        last4: key_status(Some(key)).last4,
+    })
+}
+
+pub async fn rename_connection(st: &AppState, id: &str, label: &str) -> Res<()> {
+    known_provider(id)?;
+    let label = label.trim();
+    if label.is_empty() {
+        return Err(AppError::NotFound("Give this key a name.".into()));
+    }
+    if st.store.get_secret(id).await?.is_none() {
+        return Err(AppError::NotFound(format!("No saved key for {id}.")));
+    }
+    let mut rows = load_rows(&st.store).await?;
+    rows.retain(|r| r.id != id);
+    rows.push(Connection {
+        id: id.into(),
+        provider: kind_of(id).into(),
+        label: label.into(),
+    });
+    save_rows(&st.store, &rows).await?;
     st.reload_providers().await?;
-    st.reset_engine();
-    (st.emitter())(ENGINE_EVENT, json!({}));
     Ok(())
 }
 
@@ -719,11 +1034,257 @@ pub async fn provider_key_status(st: &AppState, provider: &str) -> Res<KeyStatus
 }
 
 /// `role` is `"decision"` (System One) or `"chat"` (company research).
-pub async fn list_remote_models(st: &AppState, refresh: bool, role: &str) -> Res<Vec<ProviderModels>> {
+pub async fn list_remote_models(
+    st: &AppState,
+    refresh: bool,
+    role: &str,
+) -> Res<Vec<ProviderModels>> {
     Ok(match role {
         "chat" => st.providers().remote_chat_models(refresh).await,
         _ => st.providers().remote_models(refresh).await,
     })
+}
+
+// ---- Gmail account and scan ----
+
+/// The password never leaves Rust; the view only says whether one is stored.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MailAccountView {
+    pub host: String,
+    pub port: u16,
+    pub address: String,
+    pub has_password: bool,
+    /// The mailbox the scan reads.
+    pub folder: String,
+}
+
+fn mail_view(a: &MailAccount, folder: &str) -> MailAccountView {
+    MailAccountView {
+        host: a.host.clone(),
+        port: a.port,
+        address: a.address.clone(),
+        has_password: !a.password.is_empty(),
+        folder: folder.to_string(),
+    }
+}
+
+/// A scan result plus the Gmail link, so the frontend never builds URLs.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessedEmailView {
+    #[serde(flatten)]
+    pub email: ProcessedEmail,
+    pub gmail_url: String,
+}
+
+fn scan_view(email: ProcessedEmail) -> ProcessedEmailView {
+    let gmail_url = crate::mail::imap::gmail_link(&email.message_id);
+    ProcessedEmailView { email, gmail_url }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ScanState {
+    pub running: bool,
+}
+
+/// `None` keeps the stored password; a new one is required when none is stored.
+async fn resolve_password(st: &AppState, password: Option<&str>) -> Res<String> {
+    match password
+        .map(account::normalize_password)
+        .filter(|p| !p.is_empty())
+    {
+        Some(p) => Ok(p),
+        None => account::load(&st.store)
+            .await?
+            .map(|a| a.password)
+            .ok_or_else(|| AppError::Io("Enter your Gmail app password.".into())),
+    }
+}
+
+fn mail_account(host: &str, port: u16, address: &str, password: String) -> Res<MailAccount> {
+    let (host, address) = (host.trim(), address.trim());
+    account::validate(host, port, address).map_err(AppError::Io)?;
+    Ok(MailAccount {
+        host: host.to_string(),
+        port,
+        address: address.to_string(),
+        password,
+    })
+}
+
+pub async fn get_mail_account(st: &AppState) -> Res<Option<MailAccountView>> {
+    let Some(account) = account::load(&st.store).await? else {
+        return Ok(None);
+    };
+    let folder = account::folder(&st.store).await?;
+    Ok(Some(mail_view(&account, &folder)))
+}
+
+/// `None` keeps the stored mailbox (or the default); an empty one is ignored.
+pub async fn save_mail_account(
+    st: &AppState,
+    host: &str,
+    port: u16,
+    address: &str,
+    password: Option<&str>,
+    folder: Option<&str>,
+) -> Res<MailAccountView> {
+    let password = resolve_password(st, password).await?;
+    let account = mail_account(host, port, address, password)?;
+    account::save(&st.store, &account).await?;
+    if let Some(folder) = folder.map(str::trim).filter(|f| !f.is_empty()) {
+        account::set_folder(&st.store, folder).await?;
+    }
+    let folder = account::folder(&st.store).await?;
+    st.watcher.send(Control::Restart);
+    Ok(mail_view(&account, &folder))
+}
+
+pub async fn delete_mail_account(st: &AppState) -> Res<()> {
+    account::remove(&st.store).await?;
+    st.watcher.send(Control::Stop);
+    Ok(())
+}
+
+/// Logs in with the typed values and returns the mailboxes the account can
+/// open. It does not open any folder, so it works before a mailbox is chosen.
+pub async fn test_mail_account(
+    st: &AppState,
+    host: &str,
+    port: u16,
+    address: &str,
+    password: Option<&str>,
+) -> Res<Vec<String>> {
+    let password = resolve_password(st, password).await?;
+    let account = mail_account(host, port, address, password)?;
+    Ok(ImapSource::new(account, account::DEFAULT_FOLDER.into())
+        .list_mailboxes()
+        .await?)
+}
+
+/// Claims the scan slot, creates the run, and scans in the background.
+/// Progress and the final result arrive as `scan://` events.
+pub async fn start_scan(st: &AppState) -> Res<i64> {
+    let prepared = cycle::prepare(st).await.map_err(|e| match e {
+        CycleError::Busy => AppError::Io("A scan is already running.".into()),
+        CycleError::NoAccount => {
+            AppError::Io("Connect Gmail in Settings › Integrations first.".into())
+        }
+        CycleError::Failed(e) => e,
+    })?;
+    let run_id = scan::begin_run(&prepared.store, ScanSource::Manual).await?;
+    tauri::async_runtime::spawn(async move {
+        // The outcome reaches the UI through `scan://finished`.
+        let _ = cycle::run_cycle(prepared, ScanSource::Manual, run_id).await;
+    });
+    Ok(run_id)
+}
+
+pub fn get_scan_status(st: &AppState) -> ScanState {
+    ScanState {
+        running: st.scan_running(),
+    }
+}
+
+pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st
+        .store
+        .list_pending_reviews()
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
+}
+
+pub async fn list_job_emails(st: &AppState, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st
+        .store
+        .list_job_emails(job_id)
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
+}
+
+pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
+    let email = st.store.apply_suggestion(message_id).await?;
+    emit_job_change(st, &email);
+    Ok(scan_view(email))
+}
+
+pub async fn dismiss_suggestion(st: &AppState, message_id: &str) -> Res<()> {
+    st.store.dismiss_suggestion(message_id).await?;
+    emit_inbox_changed(st, message_id);
+    Ok(())
+}
+
+fn emit_inbox_changed(st: &AppState, message_id: &str) {
+    (st.emitter())(
+        scan::INBOX_CHANGED_EVENT,
+        json!({ "message_id": message_id }),
+    );
+}
+
+/// The row's job status changed: refresh the jobs list and the inbox.
+fn emit_job_change(st: &AppState, email: &ProcessedEmail) {
+    if let Some(job_id) = email.matched_job_id {
+        let status_id = status_after(email);
+        (st.emitter())(
+            JOB_UPDATED_EVENT,
+            json!({ "job_id": job_id, "status_id": status_id }),
+        );
+    }
+    emit_inbox_changed(st, &email.message_id);
+}
+
+/// The job's status once `email` was applied or undone.
+fn status_after(email: &ProcessedEmail) -> Option<i64> {
+    if email.undone_at.is_some() {
+        email.previous_status_id
+    } else {
+        email.suggested_status_id
+    }
+}
+
+// ---- inbox and watcher ----
+
+pub fn get_watcher_status(st: &AppState) -> WatcherStatus {
+    st.watcher.status()
+}
+
+pub fn retry_watcher(st: &AppState) {
+    st.watcher.send(Control::Retry);
+}
+
+pub async fn list_inbox(st: &AppState, filter: InboxFilter) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st
+        .store
+        .list_inbox(filter)
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
+}
+
+pub async fn unread_count(st: &AppState) -> Res<i64> {
+    Ok(st.store.unread_count().await?)
+}
+
+pub async fn mark_read(st: &AppState, message_id: &str) -> Res<()> {
+    st.store.mark_read(message_id).await?;
+    emit_inbox_changed(st, message_id);
+    Ok(())
+}
+
+pub async fn mark_all_read(st: &AppState) -> Res<()> {
+    st.store.mark_all_read().await?;
+    (st.emitter())(scan::INBOX_CHANGED_EVENT, json!({}));
+    Ok(())
+}
+
+pub async fn undo_applied(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
+    let email = st.store.undo_applied(message_id).await?;
+    emit_job_change(st, &email);
+    Ok(scan_view(email))
 }
 
 pub mod ipc {
@@ -734,6 +1295,22 @@ pub mod ipc {
 
     type S<'a> = State<'a, AppState>;
 
+    #[tauri::command]
+    pub async fn get_local_connection(st: S<'_>) -> Res<LocalConnectionView> {
+        super::get_local_connection(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_local_connection(
+        st: S<'_>,
+        base_url: String,
+        key: Option<String>,
+    ) -> Res<()> {
+        super::save_local_connection(&st, &base_url, key).await
+    }
+    #[tauri::command]
+    pub async fn test_local_connection(st: S<'_>, model: String, role: String) -> Res<()> {
+        super::test_local_connection(&st, &model, &role).await
+    }
     #[tauri::command]
     pub async fn get_profile(st: S<'_>) -> Res<Profile> {
         super::get_profile(&st).await
@@ -770,8 +1347,37 @@ pub mod ipc {
         super::create_job(&st, &title, &company, &raw_text, &url, status_id).await
     }
     #[tauri::command]
-    pub async fn update_job_tracking(st: S<'_>, id: i64, status_id: Option<i64>, url: String) -> Res<()> {
+    pub async fn update_job_tracking(
+        st: S<'_>,
+        id: i64,
+        status_id: Option<i64>,
+        url: String,
+    ) -> Res<()> {
         super::update_job_tracking(&st, id, status_id, &url).await
+    }
+    #[tauri::command]
+    pub async fn update_job_description(st: S<'_>, id: i64, raw_text: String) -> Res<()> {
+        super::update_job_description(&st, id, &raw_text).await
+    }
+    #[tauri::command]
+    pub async fn fetch_job_description(url: String) -> Res<String> {
+        super::fetch_job_description(&url).await
+    }
+    #[tauri::command]
+    pub async fn list_job_views(st: S<'_>) -> Res<Vec<JobView>> {
+        super::list_job_views(&st).await
+    }
+    #[tauri::command]
+    pub async fn create_job_view(st: S<'_>, view: JobViewInput) -> Res<JobView> {
+        super::create_job_view(&st, &view).await
+    }
+    #[tauri::command]
+    pub async fn update_job_view(st: S<'_>, id: i64, view: JobViewInput) -> Res<JobView> {
+        super::update_job_view(&st, id, &view).await
+    }
+    #[tauri::command]
+    pub async fn delete_job_view(st: S<'_>, id: i64) -> Res<()> {
+        super::delete_job_view(&st, id).await
     }
     #[tauri::command]
     pub async fn list_job_statuses(st: S<'_>) -> Res<Vec<JobStatus>> {
@@ -782,7 +1388,12 @@ pub mod ipc {
         super::create_job_status(&st, &name, color).await
     }
     #[tauri::command]
-    pub async fn update_job_status(st: S<'_>, id: i64, name: String, color: StatusColor) -> Res<JobStatus> {
+    pub async fn update_job_status(
+        st: S<'_>,
+        id: i64,
+        name: String,
+        color: StatusColor,
+    ) -> Res<JobStatus> {
         super::update_job_status(&st, id, &name, color).await
     }
     #[tauri::command]
@@ -796,6 +1407,10 @@ pub mod ipc {
     #[tauri::command]
     pub async fn list_jobs(st: S<'_>) -> Res<Vec<JobDescription>> {
         super::list_jobs(&st).await
+    }
+    #[tauri::command]
+    pub async fn search_jobs(st: S<'_>, query: String) -> Res<Vec<i64>> {
+        super::search_jobs(&st, &query).await
     }
     #[tauri::command]
     pub async fn get_job(st: S<'_>, id: i64) -> Res<JobDescription> {
@@ -834,12 +1449,49 @@ pub mod ipc {
         super::delete_provider_key(&st, &provider).await
     }
     #[tauri::command]
+    pub async fn list_connections(st: S<'_>) -> Res<Vec<ConnectionView>> {
+        super::list_connections(&st).await
+    }
+    #[tauri::command]
+    pub async fn add_connection(
+        st: S<'_>,
+        provider: String,
+        label: String,
+        key: String,
+    ) -> Res<ConnectionView> {
+        super::add_connection(&st, &provider, &label, &key).await
+    }
+    #[tauri::command]
+    pub async fn rename_connection(st: S<'_>, id: String, label: String) -> Res<()> {
+        super::rename_connection(&st, &id, &label).await
+    }
+    #[tauri::command]
     pub async fn provider_key_status(st: S<'_>, provider: String) -> Res<KeyStatus> {
         super::provider_key_status(&st, &provider).await
     }
     #[tauri::command]
-    pub async fn list_remote_models(st: S<'_>, refresh: bool, role: Option<String>) -> Res<Vec<ProviderModels>> {
+    pub async fn list_remote_models(
+        st: S<'_>,
+        refresh: bool,
+        role: Option<String>,
+    ) -> Res<Vec<ProviderModels>> {
         super::list_remote_models(&st, refresh, role.as_deref().unwrap_or("decision")).await
+    }
+    #[tauri::command]
+    pub async fn get_apply_defaults(st: S<'_>) -> Res<ApplyDefaults> {
+        super::get_apply_defaults(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_apply_defaults(st: S<'_>, defaults: ApplyDefaults) -> Res<()> {
+        super::save_apply_defaults(&st, defaults).await
+    }
+    #[tauri::command]
+    pub async fn apply_facts(st: S<'_>) -> Res<Vec<Fact>> {
+        super::apply_facts(&st).await
+    }
+    #[tauri::command]
+    pub async fn start_apply(app: tauri::AppHandle, st: S<'_>, job_id: i64) -> Res<bool> {
+        crate::autofill::window::start_apply(&app, &st, job_id).await
     }
     #[tauri::command]
     pub async fn get_ui_setting(st: S<'_>, key: String) -> Res<Option<String>> {
@@ -854,32 +1506,21 @@ pub mod ipc {
         super::engine_status(&st).await
     }
     #[tauri::command]
-    pub fn cancel_download(st: S<'_>, id: String) -> Res<()> {
-        super::cancel_download(&st, &id)
-    }
-    #[tauri::command]
     pub async fn get_ranked(st: S<'_>, run_id: i64) -> Res<Ranked> {
         super::get_ranked(&st, run_id).await
     }
     #[tauri::command]
-    pub async fn fit_cv(st: S<'_>, run_id: i64, budget: u8, overrides: Vec<Override>) -> Res<FitOutput> {
+    pub async fn fit_cv(
+        st: S<'_>,
+        run_id: i64,
+        budget: u8,
+        overrides: Vec<Override>,
+    ) -> Res<FitOutput> {
         super::fit_cv(&st, run_id, budget, overrides).await
     }
     #[tauri::command]
     pub async fn export_cv(st: S<'_>, run_id: i64, selection: Selection, path: String) -> Res<i64> {
         super::export_cv(&st, run_id, selection, path).await
-    }
-    #[tauri::command]
-    pub fn system_ram_gb() -> u32 {
-        crate::models::system_ram_gb()
-    }
-    #[tauri::command]
-    pub fn list_models(st: S<'_>) -> Vec<ModelInfo> {
-        super::list_models(&st)
-    }
-    #[tauri::command]
-    pub async fn download_model(st: S<'_>, id: String) -> Res<()> {
-        super::download_model(&st, &id).await
     }
     #[tauri::command]
     pub async fn set_active_model(st: S<'_>, id: String) -> Res<()> {
@@ -916,6 +1557,96 @@ pub mod ipc {
     #[tauri::command]
     pub async fn get_research_model(st: S<'_>) -> Res<Option<String>> {
         st.research_model().await
+    }
+    #[tauri::command]
+    pub async fn get_mail_account(st: S<'_>) -> Res<Option<MailAccountView>> {
+        super::get_mail_account(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_mail_account(
+        st: S<'_>,
+        host: String,
+        port: u16,
+        address: String,
+        password: Option<String>,
+        folder: Option<String>,
+    ) -> Res<MailAccountView> {
+        super::save_mail_account(
+            &st,
+            &host,
+            port,
+            &address,
+            password.as_deref(),
+            folder.as_deref(),
+        )
+        .await
+    }
+    #[tauri::command]
+    pub async fn delete_mail_account(st: S<'_>) -> Res<()> {
+        super::delete_mail_account(&st).await
+    }
+    #[tauri::command]
+    pub async fn test_mail_account(
+        st: S<'_>,
+        host: String,
+        port: u16,
+        address: String,
+        password: Option<String>,
+    ) -> Res<Vec<String>> {
+        super::test_mail_account(&st, &host, port, &address, password.as_deref()).await
+    }
+    #[tauri::command]
+    pub async fn start_scan(st: S<'_>) -> Res<i64> {
+        super::start_scan(&st).await
+    }
+    #[tauri::command]
+    pub async fn get_scan_status(st: S<'_>) -> Res<ScanState> {
+        Ok(super::get_scan_status(&st))
+    }
+    #[tauri::command]
+    pub async fn list_job_emails(st: S<'_>, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
+        super::list_job_emails(&st, job_id).await
+    }
+    #[tauri::command]
+    pub async fn list_pending_reviews(st: S<'_>) -> Res<Vec<ProcessedEmailView>> {
+        super::list_pending_reviews(&st).await
+    }
+    #[tauri::command]
+    pub async fn apply_suggestion(st: S<'_>, message_id: String) -> Res<ProcessedEmailView> {
+        super::apply_suggestion(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn dismiss_suggestion(st: S<'_>, message_id: String) -> Res<()> {
+        super::dismiss_suggestion(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn get_watcher_status(st: S<'_>) -> Res<WatcherStatus> {
+        Ok(super::get_watcher_status(&st))
+    }
+    #[tauri::command]
+    pub async fn retry_watcher(st: S<'_>) -> Res<()> {
+        super::retry_watcher(&st);
+        Ok(())
+    }
+    #[tauri::command]
+    pub async fn list_inbox(st: S<'_>, filter: InboxFilter) -> Res<Vec<ProcessedEmailView>> {
+        super::list_inbox(&st, filter).await
+    }
+    #[tauri::command]
+    pub async fn unread_count(st: S<'_>) -> Res<i64> {
+        super::unread_count(&st).await
+    }
+    #[tauri::command]
+    pub async fn mark_read(st: S<'_>, message_id: String) -> Res<()> {
+        super::mark_read(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn mark_all_read(st: S<'_>) -> Res<()> {
+        super::mark_all_read(&st).await
+    }
+    #[tauri::command]
+    pub async fn undo_applied(st: S<'_>, message_id: String) -> Res<ProcessedEmailView> {
+        super::undo_applied(&st, &message_id).await
     }
 }
 

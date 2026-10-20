@@ -1,23 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, OnInit, output, signal } from '@angular/core';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { KeyStatus, ProviderId } from '../../core/ipc/types';
-
-const COPY: Record<ProviderId, { name: string; placeholder: string; hint: string }> = {
-  openrouter: {
-    name: 'OpenRouter',
-    placeholder: 'sk-or-...',
-    hint: 'Lets you run online models. Matching or researching with them sends your CV and job text to OpenRouter.',
-  },
-  exa: {
-    name: 'Exa',
-    placeholder: 'Exa API key',
-    hint: 'Web search for company research. Search queries (company names) are sent to Exa.',
-  },
-};
+import { PROVIDERS } from './provider-registry';
 
 /** A provider API key: paste, validate, save, remove. The key itself never comes back from the backend. */
 @Component({
@@ -52,7 +40,9 @@ const COPY: Record<ProviderId, { name: string; placeholder: string; hint: string
 })
 export class ProviderKeyComponent implements OnInit {
   readonly provider = input<ProviderId>('openrouter');
-  protected readonly copy = computed(() => COPY[this.provider()]);
+  protected readonly copy = computed(() => PROVIDERS.find((p) => p.id === this.provider()) ?? PROVIDERS[0]);
+  /** Fires after a key is saved or removed, so parents can refresh. */
+  readonly changed = output<void>();
   private readonly toast = inject(ZardSonnerService);
   protected readonly status = signal<KeyStatus>({ has_key: false, last4: null });
   protected readonly draft = signal('');
@@ -68,6 +58,7 @@ export class ProviderKeyComponent implements OnInit {
       this.status.set(await api.setProviderKey(this.provider(), this.draft()));
       this.draft.set('');
       this.toast.success(`${this.copy().name} key saved`);
+      this.changed.emit();
     } catch (e) {
       this.toast.error('Could not save key', { description: messageFor(e) });
     } finally {
@@ -80,6 +71,7 @@ export class ProviderKeyComponent implements OnInit {
     try {
       await api.deleteProviderKey(this.provider());
       this.status.set({ has_key: false, last4: null });
+      this.changed.emit();
     } catch (e) {
       this.toast.error('Could not remove key', { description: messageFor(e) });
     } finally {

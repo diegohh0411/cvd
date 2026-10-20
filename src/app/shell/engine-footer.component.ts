@@ -13,7 +13,7 @@ import { EngineStore } from '../core/stores/engine.store';
       <li z-sidebar-menu-item>
         <a
           z-sidebar-menu-button
-          routerLink="/ai/roles"
+          routerLink="/ai"
           [zTooltip]="text()"
           aria-live="polite"
           data-testid="engine-footer"

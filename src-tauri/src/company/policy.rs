@@ -21,7 +21,9 @@ pub enum Need {
 }
 
 pub fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
-    NaiveDateTime::parse_from_str(s, TS_FORMAT).ok().map(|t| t.and_utc())
+    NaiveDateTime::parse_from_str(s, TS_FORMAT)
+        .ok()
+        .map(|t| t.and_utc())
 }
 
 pub fn format_ts(t: DateTime<Utc>) -> String {
@@ -32,10 +34,18 @@ pub fn format_ts(t: DateTime<Utc>) -> String {
 /// forced refresh keeps the old profile); otherwise a pending backoff wins.
 pub fn need(c: &Company, now: DateTime<Utc>) -> Need {
     let ttl = chrono::Duration::from_std(COMPANY_TTL).expect("TTL fits");
-    if c.researched_at.as_deref().and_then(parse_ts).is_some_and(|at| at + ttl > now) {
+    if c.researched_at
+        .as_deref()
+        .and_then(parse_ts)
+        .is_some_and(|at| at + ttl > now)
+    {
         return Need::Fresh;
     }
-    if c.retry_after.as_deref().and_then(parse_ts).is_some_and(|at| at > now) {
+    if c.retry_after
+        .as_deref()
+        .and_then(parse_ts)
+        .is_some_and(|at| at > now)
+    {
         return Need::BackingOff;
     }
     Need::Research

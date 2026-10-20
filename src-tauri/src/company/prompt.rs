@@ -8,11 +8,16 @@ pub const SYSTEM: &str = "You research one company for a job seeker, using tools
 - List every page you relied on in sources.
 - Finish by calling submit_profile exactly once.";
 
-pub const NUDGE: &str = "Continue researching with the tools, or call submit_profile if you are done.";
+pub const NUDGE: &str =
+    "Continue researching with the tools, or call submit_profile if you are done.";
 pub const EXHAUSTED: &str = "Budget exhausted. Call submit_profile now with what you have.";
 
 pub fn user_message(input: &ResearchInput) -> String {
-    let domain = input.domain.as_deref().map(|d| format!("\nKnown website: {d}")).unwrap_or_default();
+    let domain = input
+        .domain
+        .as_deref()
+        .map(|d| format!("\nKnown website: {d}"))
+        .unwrap_or_default();
     format!(
         "Company: {}{domain}\n\nJob description excerpt:\n{}",
         input.name, input.jd_snippet

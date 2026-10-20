@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-facts"
+description = "Enables the apply_facts command without any pre-configured scope."
+commands.allow = ["apply_facts"]
+
+[[permission]]
+identifier = "deny-apply-facts"
+description = "Denies the apply_facts command without any pre-configured scope."
+commands.deny = ["apply_facts"]

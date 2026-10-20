@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    cv_decisions_lib::run()
+    cvd_lib::run()
 }

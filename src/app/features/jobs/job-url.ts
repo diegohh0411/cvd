@@ -23,3 +23,12 @@ export function urlHost(url: string): string {
     return url;
   }
 }
+
+/** Any HTTPS posting opens in cvd's apply window; cvd asks before filling an unfamiliar host. */
+export function canAutofill(url: string): boolean {
+  try {
+    return new URL(url.trim()).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}

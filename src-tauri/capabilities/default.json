@@ -7,8 +7,11 @@
   ],
   "permissions": [
     "core:default",
+    "main-window",
     "opener:default",
     "dialog:allow-save",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "opener:allow-open-path",
       "allow": [

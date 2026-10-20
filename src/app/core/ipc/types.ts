@@ -11,6 +11,27 @@ export interface Profile {
   summary: string;
 }
 
+/** Answers for application forms that are not in the CV (`autofill::ApplyDefaults`). */
+export interface ApplyDefaults {
+  first_name: string;
+  last_name: string;
+  city: string;
+  region: string;
+  country: string;
+  authorized_to_work: boolean | null;
+  needs_sponsorship: boolean | null;
+  willing_to_relocate: boolean | null;
+  notice_period: string;
+  earliest_start: string;
+  salary_expectation: string;
+}
+
+/** One value auto-apply may offer, in every spelling (`autofill::Fact`). */
+export interface ApplyFact {
+  key: string;
+  variants: string[];
+}
+
 export type EntryKind = 'experience' | 'project' | 'education' | 'volunteer';
 export const ENTRY_KINDS: readonly EntryKind[] = ['experience', 'project', 'education', 'volunteer'];
 
@@ -71,6 +92,34 @@ export interface JobDescription {
   /** Resolved company; null until a match resolves it. */
   company_id: number | null;
 }
+
+export type ViewLayout = 'table' | 'board';
+export type FieldKey = 'company' | 'title' | 'status' | 'url' | 'created';
+export type FilterOp = 'contains' | 'not_contains' | 'is' | 'is_not' | 'empty' | 'not_empty' | 'before' | 'after';
+
+export interface JobFilter {
+  field: FieldKey;
+  op: FilterOp;
+  /** Text for text fields, status ids for status, YYYY-MM-DD for created. */
+  value: string | number[];
+}
+
+export interface JobSort {
+  field: FieldKey;
+  dir: 'asc' | 'desc';
+}
+
+/** A saved view of the Jobs page. */
+export interface JobView {
+  id: number;
+  name: string;
+  layout: ViewLayout;
+  filters: JobFilter[];
+  sorts: JobSort[];
+  position: number;
+}
+
+export type JobViewInput = Omit<JobView, 'id' | 'position'>;
 
 export const STATUS_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'] as const;
 export type StatusColor = (typeof STATUS_COLORS)[number];
@@ -134,7 +183,7 @@ export interface Selection {
 export type Target = { Entry: number } | { Bullet: number };
 
 /** `{ Include: Target }`, `{ Exclude: Target }` or `{ Order: entryIds }`. */
-export type Override = { Include: Target } | { Exclude: Target } | { Order: number[] };
+export type Override = { Include: Target } | { Exclude: Target } | { Order: number[] } | { BulletOrder: number[] };
 
 export interface FitOutput {
   selection: Selection;
@@ -155,25 +204,6 @@ export interface Cv {
   created_at: string;
 }
 
-export interface ModelSpec {
-  id: string;
-  label: string;
-  hf_repo: string;
-  hf_file: string;
-  sha256: string;
-  size_bytes: number;
-  min_ram_gb: number;
-  /** `decision` = System One; `chat` = company research. */
-  kind: ModelKind;
-}
-
-export type ModelKind = 'decision' | 'chat';
-
-export interface ModelInfo {
-  spec: ModelSpec;
-  installed: boolean;
-}
-
 export type EngineState = 'none' | 'missing' | 'idle' | 'ready' | 'error';
 
 export interface EngineStatus {
@@ -191,9 +221,11 @@ export type AppErrorKind =
   | 'Io'
   | 'ProviderAuth'
   | 'ProviderCredits'
-  | 'ProviderUnavailable';
+  | 'ProviderUnavailable'
+  | 'MailAuth'
+  | 'MailUnavailable';
 
-export type ProviderId = 'openrouter' | 'exa';
+export type ProviderId = 'openrouter' | 'subq' | 'typesafe' | 'exa' | 'localhost';
 
 export interface KeyStatus {
   has_key: boolean;
@@ -209,8 +241,18 @@ export interface RemoteModel {
   price_per_mtok_in: number | null;
 }
 
+/** A saved key. The first key of a provider has the bare provider id; later ones are `<provider>~<n>`. */
+export interface Connection {
+  id: string;
+  provider: ProviderId;
+  label: string;
+  last4: string | null;
+}
+
 export interface ProviderModels {
+  /** The connection id: what model refs carry. */
   provider: string;
+  label?: string;
   models: RemoteModel[];
   error: string | null;
 }
@@ -233,11 +275,6 @@ export interface MatchProgressEvent {
   event: MatchStage;
 }
 
-export interface DownloadEvent {
-  id: string;
-  done: number;
-  total: number;
-}
 
 export interface Source {
   url: string;
@@ -294,3 +331,81 @@ export interface ResearchEvent {
 
 export type SkipMode = 'cancel' | 'background';
 export type ModelRole = 'decision' | 'chat';
+
+// ---- Gmail job updates (src-tauri/src/mail, store/email.rs) ----
+
+/** The app password never reaches the webview; `has_password` only says one is stored. */
+export interface MailAccountView {
+  host: string;
+  port: number;
+  address: string;
+  has_password: boolean;
+  /** The mailbox the scan reads. */
+  folder: string;
+}
+
+export type ScanOutcome = 'ignored' | 'no_change' | 'applied' | 'pending_review' | 'dismissed';
+
+export interface ProcessedEmail {
+  message_id: string;
+  run_id: number;
+  processed_at: string;
+  received_at: string;
+  subject: string;
+  sender: string;
+  matched_job_id: number | null;
+  previous_status_id: number | null;
+  suggested_status_id: number | null;
+  confidence: number | null;
+  summary: string | null;
+  outcome: ScanOutcome;
+  /** System One's job-related probability; null for rows from before the inbox. */
+  job_related: number | null;
+  /** Truncated body, kept only for job-related mail. */
+  body: string | null;
+  /** Null until the row is read in the inbox. */
+  read_at: string | null;
+  /** Set when an auto-applied status was undone. */
+  undone_at: string | null;
+  /** Computed by the backend so the webview never builds Gmail links. */
+  gmail_url: string;
+}
+
+export type InboxFilter = 'all' | 'review' | 'unread';
+
+export type WatchState = 'connecting' | 'watching' | 'scanning' | 'paused' | 'stopped';
+
+/** Payload of `mail://watcher` and `get_watcher_status`. */
+export interface WatcherStatus {
+  state: WatchState;
+  error: string | null;
+  error_kind: AppErrorKind | null;
+  /** RFC 3339 time of the last successful check. */
+  last_checked_at: string | null;
+}
+
+export type ScanSource = 'watch' | 'recheck' | 'manual';
+
+export interface ScanState {
+  running: boolean;
+}
+
+export interface ScanProgress {
+  checked: number;
+  total: number;
+}
+
+/** Payload of `scan://finished`. */
+export interface ScanFinished {
+  run_id: number;
+  source: ScanSource;
+  status: 'done' | 'failed';
+  error: string | null;
+  error_kind: AppErrorKind | null;
+  checked: number;
+  job_related: number;
+  applied: number;
+  pending: number;
+  no_change: number;
+  failed: number;
+}
