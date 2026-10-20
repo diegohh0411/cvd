@@ -294,35 +294,6 @@ pub async fn reorder_job_statuses(st: &AppState, ids: Vec<i64>) -> Res<()> {
     Ok(st.store.reorder_job_statuses(&ids).await?)
 }
 
-// ---- job views ----
-
-pub async fn list_job_views(st: &AppState) -> Res<Vec<JobView>> {
-    Ok(st.store.list_job_views().await?)
-}
-
-pub async fn create_job_view(st: &AppState, view: &JobViewInput) -> Res<JobView> {
-    let id = st.store.create_job_view(view).await?;
-    view_by_id(st, id).await
-}
-
-pub async fn update_job_view(st: &AppState, id: i64, view: &JobViewInput) -> Res<JobView> {
-    if !st.store.update_job_view(id, view).await? {
-        return Err(AppError::NotFound(format!("View {id} not found.")));
-    }
-    view_by_id(st, id).await
-}
-
-pub async fn delete_job_view(st: &AppState, id: i64) -> Res<()> {
-    Ok(st.store.delete_job_view(id).await?)
-}
-
-async fn view_by_id(st: &AppState, id: i64) -> Res<JobView> {
-    st.store
-        .get_job_view(id)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("View {id} not found.")))
-}
-
 async fn status_by_id(st: &AppState, id: i64) -> Res<JobStatus> {
     st.store
         .list_job_statuses()
@@ -1324,22 +1295,6 @@ pub mod ipc {
     #[tauri::command]
     pub async fn fetch_job_description(url: String) -> Res<String> {
         super::fetch_job_description(&url).await
-    }
-    #[tauri::command]
-    pub async fn list_job_views(st: S<'_>) -> Res<Vec<JobView>> {
-        super::list_job_views(&st).await
-    }
-    #[tauri::command]
-    pub async fn create_job_view(st: S<'_>, view: JobViewInput) -> Res<JobView> {
-        super::create_job_view(&st, &view).await
-    }
-    #[tauri::command]
-    pub async fn update_job_view(st: S<'_>, id: i64, view: JobViewInput) -> Res<JobView> {
-        super::update_job_view(&st, id, &view).await
-    }
-    #[tauri::command]
-    pub async fn delete_job_view(st: S<'_>, id: i64) -> Res<()> {
-        super::delete_job_view(&st, id).await
     }
     #[tauri::command]
     pub async fn list_job_statuses(st: S<'_>) -> Res<Vec<JobStatus>> {

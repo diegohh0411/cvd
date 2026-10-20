@@ -93,34 +93,6 @@ export interface JobDescription {
   company_id: number | null;
 }
 
-export type ViewLayout = 'table' | 'board';
-export type FieldKey = 'company' | 'title' | 'status' | 'url' | 'created';
-export type FilterOp = 'contains' | 'not_contains' | 'is' | 'is_not' | 'empty' | 'not_empty' | 'before' | 'after';
-
-export interface JobFilter {
-  field: FieldKey;
-  op: FilterOp;
-  /** Text for text fields, status ids for status, YYYY-MM-DD for created. */
-  value: string | number[];
-}
-
-export interface JobSort {
-  field: FieldKey;
-  dir: 'asc' | 'desc';
-}
-
-/** A saved view of the Jobs page. */
-export interface JobView {
-  id: number;
-  name: string;
-  layout: ViewLayout;
-  filters: JobFilter[];
-  sorts: JobSort[];
-  position: number;
-}
-
-export type JobViewInput = Omit<JobView, 'id' | 'position'>;
-
 export const STATUS_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'] as const;
 export type StatusColor = (typeof STATUS_COLORS)[number];
 

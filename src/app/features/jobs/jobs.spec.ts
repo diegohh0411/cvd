@@ -132,7 +132,6 @@ describe('JobsPageComponent scan controls', () => {
     mockTauri({
       list_jobs: [],
       list_job_statuses: [],
-      list_job_views: [{ id: 1, name: 'All jobs', layout: 'table', filters: [], sorts: [], position: 0 }],
       list_pending_reviews: [],
       list_scan_results: [],
       get_scan_status: { running: false },
@@ -209,7 +208,7 @@ describe('JobsPageComponent scan controls', () => {
     input.dispatchEvent(new Event('input'));
     await flush();
     f.detectChanges();
-    const rows = () => Array.from(el.querySelectorAll('table[aria-label="Jobs"] tbody tr')).map((li) => li.textContent);
+    const rows = () => Array.from(el.querySelectorAll('ul[aria-label="Jobs"] li')).map((li) => li.textContent);
     expect(rows()).toHaveLength(1);
     expect(rows()[0]).toContain('Acme');
   });

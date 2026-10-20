@@ -4,8 +4,6 @@ import { invoke } from '@tauri-apps/api/core';
 
 import { toAppError } from './errors';
 import type {
-  JobView,
-  JobViewInput,
   Company,
   ApplyDefaults,
   ApplyFact,
@@ -65,10 +63,6 @@ export const updateJobTracking = (id: number, statusId: number | null, url: stri
   call<void>('update_job_tracking', { id, statusId, url });
 export const updateJobDescription = (id: number, rawText: string) => call<void>('update_job_description', { id, rawText });
 export const fetchJobDescription = (url: string) => call<string>('fetch_job_description', { url });
-export const listJobViews = () => call<JobView[]>('list_job_views');
-export const createJobView = (view: JobViewInput) => call<JobView>('create_job_view', { view });
-export const updateJobView = (id: number, view: JobViewInput) => call<JobView>('update_job_view', { id, view });
-export const deleteJobView = (id: number) => call<void>('delete_job_view', { id });
 export const listJobs = () => call<JobDescription[]>('list_jobs');
 /** Ids of jobs matching a fuzzy query, best first; empty for a blank query. */
 export const searchJobs = (query: string) => call<number[]>('search_jobs', { query });

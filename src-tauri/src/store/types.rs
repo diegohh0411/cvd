@@ -114,33 +114,6 @@ pub struct JobStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum ViewLayout {
-    Table,
-    Board,
-}
-
-/// A saved view of the Jobs page. `filters`/`sorts` are opaque JSON arrays the UI defines.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JobView {
-    pub id: i64,
-    pub name: String,
-    pub layout: ViewLayout,
-    pub filters: serde_json::Value,
-    pub sorts: serde_json::Value,
-    pub position: i64,
-}
-
-/// Fields of a view to create or save.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JobViewInput {
-    pub name: String,
-    pub layout: ViewLayout,
-    pub filters: serde_json::Value,
-    pub sorts: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum RunStatus {
     Running,
     Done,
