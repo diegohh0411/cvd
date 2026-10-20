@@ -38,6 +38,8 @@ pub trait MailSource: Send + Sync {
     async fn check(&self) -> Result<(), MailError>;
     async fn recent_headers(&self, since: NaiveDate) -> Result<Vec<MailHeader>, MailError>;
     async fn body_text(&self, uid: u32) -> Result<String, MailError>;
+    /// The body of the message with this `Message-ID`, or `None` if it is gone.
+    async fn body_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError>;
 }
 
 pub struct ImapSource {
@@ -180,6 +182,25 @@ impl MailSource for ImapSource {
         Ok(headers)
     }
 
+    async fn body_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+        let mut session = self.open_session().await?;
+        self.examine_folder(&mut session).await?;
+        let uid = session
+            .uid_search(message_id_search(message_id))
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?
+            .into_iter()
+            .max();
+        session
+            .logout()
+            .await
+            .map_err(|error| MailError::Protocol(error.to_string()))?;
+        match uid {
+            Some(uid) => self.body_text(uid).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
     async fn body_text(&self, uid: u32) -> Result<String, MailError> {
         let mut session = self.open_session().await?;
         self.examine_folder(&mut session).await?;
@@ -241,6 +262,12 @@ fn find_mime_body(mail: &mailparse::ParsedMail<'_>, wanted: &str) -> Option<Stri
     mail.subparts
         .iter()
         .find_map(|part| find_mime_body(part, wanted))
+}
+
+/// `UID SEARCH` criteria matching one `Message-ID` header exactly.
+pub fn message_id_search(message_id: &str) -> String {
+    let quoted = message_id.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("HEADER Message-ID \"{quoted}\"")
 }
 
 pub fn chunk_uids(uids: &[u32]) -> Vec<Vec<u32>> {

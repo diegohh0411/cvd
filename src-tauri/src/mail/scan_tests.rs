@@ -8,7 +8,9 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::imap::{MailError, MailHeader, MailSource};
-use super::scan::{begin_run, run_scan, ScanDeps, ScanSummary};
+use super::scan::{
+    begin_run, run_scan, ScanDeps, ScanSummary, FINISHED_EVENT, INBOX_CHANGED_EVENT,
+};
 use crate::commands::AppError;
 use crate::engine::{Answer, FakeDecisionEngine};
 use crate::providers::ChatEndpoint;
@@ -60,6 +62,18 @@ impl MailSource for FakeMail {
             .get(&uid)
             .cloned()
             .ok_or_else(|| MailError::Protocol(format!("no body for {uid}")))
+    }
+
+    async fn body_by_message_id(&self, message_id: &str) -> Result<Option<String>, MailError> {
+        let Some(uid) = self
+            .headers
+            .iter()
+            .find(|h| h.message_id == message_id)
+            .map(|h| h.uid)
+        else {
+            return Ok(None);
+        };
+        self.body_text(uid).await.map(Some)
     }
 }
 
@@ -157,8 +171,19 @@ async fn run(
     chat: &ChatEndpoint,
 ) -> Result<ScanSummary, AppError> {
     let emit: Emitter = Arc::new(|_: &str, _: serde_json::Value| {});
+    run_with(store, mail, engine, chat, ScanSource::Manual, &emit).await
+}
+
+async fn run_with(
+    store: &Store,
+    mail: &FakeMail,
+    engine: &FakeDecisionEngine,
+    chat: &ChatEndpoint,
+    source: ScanSource,
+    emit: &Emitter,
+) -> Result<ScanSummary, AppError> {
     let http = reqwest::Client::new();
-    let run_id = begin_run(store).await?;
+    let run_id = begin_run(store, source).await?;
     run_scan(
         ScanDeps {
             store,
@@ -166,12 +191,126 @@ async fn run(
             engine,
             chat,
             http: &http,
-            emit: &emit,
+            emit,
             today: today(),
         },
         run_id,
+        source,
     )
     .await
+}
+
+type Events = Arc<Mutex<Vec<(String, serde_json::Value)>>>;
+
+fn capturing() -> (Emitter, Events) {
+    let events: Events = Arc::default();
+    let sink = events.clone();
+    let emit: Emitter = Arc::new(move |name: &str, payload: serde_json::Value| {
+        sink.lock().unwrap().push((name.to_string(), payload));
+    });
+    (emit, events)
+}
+
+#[tokio::test]
+async fn ignored_email_stores_score_without_body() {
+    let (store, _, _, _) = seeded().await;
+    let mail = FakeMail::new(vec![header(1, "<a>")]);
+
+    run(&store, &mail, &ignoring(), &unreachable_chat())
+        .await
+        .unwrap();
+
+    let row = store.get_processed("<a>").await.unwrap().unwrap();
+    assert_eq!(row.job_related, Some(0.1));
+    assert_eq!(row.body, None);
+}
+
+#[tokio::test]
+async fn job_related_unmatched_stores_body() {
+    let (store, _, _, interviewing) = seeded().await;
+    let mail = FakeMail::new(vec![header(1, "<a>")]);
+    let engine = scripted(
+        0.9,
+        "no_match".into(),
+        0.1,
+        format!("status_{interviewing}"),
+        0.5,
+    );
+
+    run(&store, &mail, &engine, &unreachable_chat())
+        .await
+        .unwrap();
+
+    let row = store.get_processed("<a>").await.unwrap().unwrap();
+    assert_eq!(row.outcome, Outcome::Ignored);
+    assert_eq!(row.job_related, Some(0.9));
+    assert_eq!(row.body.as_deref(), Some("body of 1"));
+}
+
+#[tokio::test]
+async fn matched_email_stores_body_and_emits_inbox_changed() {
+    let server = MockServer::start().await;
+    let chat = chat_endpoint(&server).await;
+    let (store, job, _, interviewing) = seeded().await;
+    let mail = FakeMail::new(vec![header(1, "<a>")]);
+    let engine = scripted(
+        0.95,
+        format!("job_{job}"),
+        0.95,
+        format!("status_{interviewing}"),
+        0.9,
+    );
+    let (emit, events) = capturing();
+
+    run_with(&store, &mail, &engine, &chat, ScanSource::Watch, &emit)
+        .await
+        .unwrap();
+
+    let row = store.get_processed("<a>").await.unwrap().unwrap();
+    assert_eq!(row.body.as_deref(), Some("body of 1"));
+    let changed: Vec<_> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name == INBOX_CHANGED_EVENT)
+        .map(|(_, payload)| payload.clone())
+        .collect();
+    assert_eq!(changed, vec![json!({ "message_id": "<a>" })]);
+}
+
+#[tokio::test]
+async fn ignored_email_does_not_emit_inbox_changed() {
+    let (store, _, _, _) = seeded().await;
+    let mail = FakeMail::new(vec![header(1, "<a>")]);
+    let (emit, events) = capturing();
+
+    run_with(&store, &mail, &ignoring(), &unreachable_chat(), ScanSource::Watch, &emit)
+        .await
+        .unwrap();
+
+    assert!(!events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(name, _)| name == INBOX_CHANGED_EVENT));
+}
+
+#[tokio::test]
+async fn finished_payload_carries_source() {
+    let (store, _, _, _) = seeded().await;
+    let mail = FakeMail::new(vec![]);
+    let (emit, events) = capturing();
+
+    run_with(&store, &mail, &ignoring(), &unreachable_chat(), ScanSource::Watch, &emit)
+        .await
+        .unwrap();
+
+    let events = events.lock().unwrap();
+    let (_, finished) = events
+        .iter()
+        .find(|(name, _)| name == FINISHED_EVENT)
+        .unwrap();
+    assert_eq!(finished["source"], "watch");
 }
 
 #[tokio::test]

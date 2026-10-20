@@ -31,7 +31,7 @@ use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
-use crate::store::{ProcessedEmail, Store};
+use crate::store::{ProcessedEmail, ScanSource, Store};
 use crate::web::{self, FetchPolicy};
 use tokio_util::sync::CancellationToken;
 
@@ -1163,7 +1163,7 @@ pub async fn start_scan(st: &AppState) -> Res<i64> {
     let model = st.active_model().await?;
     let engine = st.engine_for(&model)?;
     let chat = st.research_endpoint().await?;
-    let run_id = scan::begin_run(&st.store).await?;
+    let run_id = scan::begin_run(&st.store, ScanSource::Manual).await?;
 
     let store = st.store.clone();
     let emit = st.emitter();
@@ -1181,7 +1181,7 @@ pub async fn start_scan(st: &AppState) -> Res<i64> {
             today: chrono::Local::now().date_naive(),
         };
         // The outcome reaches the UI through `scan://finished`.
-        let _ = scan::run_scan(deps, run_id).await;
+        let _ = scan::run_scan(deps, run_id, ScanSource::Manual).await;
     });
     Ok(run_id)
 }
