@@ -16,10 +16,10 @@ use crate::mail::account::{self, MailAccount};
 use crate::mail::imap::{ImapSource, MailSource};
 use crate::mail::scan::{self, ScanDeps};
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
-use crate::models::{self, ModelError, ModelKind, ModelSpec, REGISTRY};
 use crate::providers::{
-    kind_of, load_rows, next_id, save_rows, Connection, ModelRef, OpenRouterProvider,
-    ProviderModels, SubQProvider, TypeSafeProvider, OPENROUTER, SUBQ, TYPESAFE,
+    kind_of, load_rows, next_id, normalize_url, save_rows, Connection, LocalProvider, ModelRef,
+    OpenRouterProvider, Provider, ProviderModels, SubQProvider, TypeSafeProvider, LOCAL_SERVER,
+    LOCAL_URL_KEY, OPENROUTER, SUBQ, TYPESAFE,
 };
 use crate::render::fit::{self, Override, Selection};
 use crate::render::{self, Compiled, RenderError, StyleStep};
@@ -36,13 +36,10 @@ use crate::web::{self, FetchPolicy};
 use tokio_util::sync::CancellationToken;
 
 pub const MATCH_EVENT: &str = "match://progress";
-pub const DOWNLOAD_EVENT: &str = "model://download";
 pub const ENGINE_EVENT: &str = "engine://status";
 /// Settings keys the webview may read and write (UI preferences only).
 const UI_SETTING_PREFIX: &str = "ui.";
 const TEMPLATE: &str = "Classic ATS";
-const DOWNLOAD_ATTEMPTS: usize = 4;
-pub const DOWNLOAD_PAUSED: &str = "Download paused.";
 const EMPTY_LIBRARY: &str = "Add at least one entry to your library first.";
 
 /// Serialized as `{ kind, message }`.
@@ -167,12 +164,6 @@ impl From<MatchError> for AppError {
 impl From<RenderError> for AppError {
     fn from(e: RenderError) -> Self {
         Self::Render(e.to_string())
-    }
-}
-
-impl From<ModelError> for AppError {
-    fn from(e: ModelError) -> Self {
-        Self::Io(e.to_string())
     }
 }
 
@@ -751,124 +742,77 @@ pub async fn engine_status(st: &AppState) -> Res<crate::state::EngineStatus> {
     st.engine_status().await
 }
 
-pub fn cancel_download(st: &AppState, id: &str) -> Res<()> {
-    if st.cancel_download(id) {
-        Ok(())
-    } else {
-        Err(AppError::NotFound(format!(
-            "Model {id} is not downloading."
-        )))
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct ModelInfo {
-    pub spec: &'static ModelSpec,
-    pub installed: bool,
-}
-
-pub fn list_models(st: &AppState) -> Vec<ModelInfo> {
-    let installed = models::installed(&st.models_dir);
-    REGISTRY
-        .iter()
-        .map(|spec| ModelInfo {
-            spec,
-            installed: installed.contains(&spec),
-        })
-        .collect()
-}
-
-/// Downloads a model unless it is already installed, retrying network errors
-/// (hf-hub resumes partial files, so a retry continues where it stopped).
-pub async fn download_model(st: &AppState, id: &str) -> Res<()> {
-    let spec = REGISTRY
-        .iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| AppError::NotFound(format!("Unknown model {id}.")))?;
-    if models::installed(&st.models_dir).contains(&spec) {
-        return Ok(());
-    }
-    let token = st
-        .register_download(spec.id)
-        .ok_or_else(|| AppError::Io(format!("Model {id} is already downloading.")))?;
-    let out = tokio::select! {
-        r = download_attempts(st, spec) => r,
-        _ = token.cancelled() => Err(AppError::Io(DOWNLOAD_PAUSED.into())),
-    };
-    st.finish_download(spec.id);
-    out
-}
-
-async fn download_attempts(st: &AppState, spec: &'static ModelSpec) -> Res<()> {
-    let mut last = None;
-    for _ in 0..DOWNLOAD_ATTEMPTS {
-        let emit = st.emitter();
-        let on_progress = move |done: u64, total: u64| {
-            emit(
-                DOWNLOAD_EVENT,
-                json!({ "id": spec.id, "done": done, "total": total }),
-            )
-        };
-        match models::download(spec, &st.models_dir, on_progress).await {
-            Ok(_) => return Ok(()),
-            Err(e @ ModelError::Network(_)) => last = Some(e),
-            Err(e) => return Err(e.into()),
-        }
-    }
-    Err(last.expect("at least one attempt").into())
-}
-
-/// A local model's kind; `NotFound` when the id is unknown.
-fn local_kind(id: &str) -> Res<ModelKind> {
-    REGISTRY
-        .iter()
-        .find(|s| s.id == id)
-        .map(|s| s.kind)
-        .ok_or_else(|| AppError::NotFound(format!("Unknown model {id}.")))
-}
-
-fn require_kind(id: &str, want: ModelKind) -> Res<()> {
-    if local_kind(id)? != want {
-        let role = if want == ModelKind::Chat {
-            "Company research"
-        } else {
-            "System One"
-        };
-        return Err(AppError::NotFound(format!(
-            "Model {id} can't be used for {role}."
-        )));
-    }
-    Ok(())
-}
-
 pub async fn set_research_model(st: &AppState, id: &str) -> Res<()> {
     let r = ModelRef::parse(id);
-    if r.is_local() {
-        require_kind(id, ModelKind::Chat)?;
-        st.installed_path(id)?;
-    } else {
-        st.providers().check(&r)?;
-    }
+    st.providers().check(&r)?;
     st.store
         .set_setting(crate::state::RESEARCH_MODEL_KEY, id)
         .await?;
-    st.reset_research();
     Ok(())
 }
 
 pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     let r = ModelRef::parse(id);
-    if r.is_local() {
-        require_kind(id, ModelKind::Decision)?;
-        st.installed_path(id)?;
-    } else {
-        st.providers().check(&r)?;
-    }
+    st.providers().check(&r)?;
     st.store
         .set_setting(crate::state::ACTIVE_MODEL_KEY, id)
         .await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct LocalConnectionView {
+    pub base_url: String,
+    pub has_key: bool,
+}
+
+pub async fn get_local_connection(st: &AppState) -> Res<LocalConnectionView> {
+    Ok(LocalConnectionView {
+        base_url: st
+            .store
+            .get_setting(LOCAL_URL_KEY)
+            .await?
+            .unwrap_or_else(|| crate::providers::DEFAULT_LOCAL_URL.into()),
+        has_key: st.store.get_secret(LOCAL_SERVER).await?.is_some(),
+    })
+}
+
+/// None preserves the saved key; an empty string clears it.
+pub async fn save_local_connection(st: &AppState, base_url: &str, key: Option<String>) -> Res<()> {
+    let base = normalize_url(base_url)?;
+    let secret = match &key {
+        Some(k) => Some(k.trim().to_string()).filter(|k| !k.is_empty()),
+        None => st.store.get_secret(LOCAL_SERVER).await?,
+    };
+    LocalProvider::new(base.clone(), secret.clone())
+        .list_models()
+        .await?;
+    st.store.set_setting(LOCAL_URL_KEY, &base).await?;
+    if let Some(key) = secret {
+        st.store.set_secret(LOCAL_SERVER, &key).await?;
+    } else {
+        st.store.delete_secret(LOCAL_SERVER).await?;
+    }
+    providers_changed(st).await
+}
+
+pub async fn test_local_connection(st: &AppState, model: &str, role: &str) -> Res<()> {
+    let base =
+        st.store.get_setting(LOCAL_URL_KEY).await?.ok_or_else(|| {
+            AppError::ModelMissing("Save your Local server connection first.".into())
+        })?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        LocalProvider::new(base, st.store.get_secret(LOCAL_SERVER).await?).test(model, role),
+    )
+    .await
+    .map_err(|_| {
+        AppError::EngineUnavailable(
+            "Local server connection test timed out after 30 seconds.".into(),
+        )
+    })??;
     Ok(())
 }
 
@@ -885,7 +829,12 @@ pub struct KeyStatus {
 fn known_provider(id: &str) -> Res<()> {
     let kind = kind_of(id);
     let extra = kind != id;
-    if kind == OPENROUTER || kind == SUBQ || kind == TYPESAFE || (kind == EXA && !extra) {
+    if (kind == LOCAL_SERVER && !extra)
+        || kind == OPENROUTER
+        || kind == SUBQ
+        || kind == TYPESAFE
+        || (kind == EXA && !extra)
+    {
         Ok(())
     } else {
         Err(AppError::NotFound(format!("Unknown provider {id}.")))
@@ -940,6 +889,11 @@ async fn providers_changed(st: &AppState) -> Res<()> {
 /// Leading/trailing whitespace is dropped.
 pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<KeyStatus> {
     known_provider(provider)?;
+    if provider == LOCAL_SERVER {
+        return Err(AppError::NotFound(
+            "Use Local server setup to save its URL and optional key.".into(),
+        ));
+    }
     let key = key.trim();
     validate_key(st, kind_of(provider), key).await?;
     st.store.set_secret(provider, key).await?;
@@ -950,6 +904,9 @@ pub async fn set_provider_key(st: &AppState, provider: &str, key: &str) -> Res<K
 pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
     known_provider(provider)?;
     st.store.delete_secret(provider).await?;
+    if provider == LOCAL_SERVER {
+        st.store.delete_setting(LOCAL_URL_KEY).await?;
+    }
     let rows = load_rows(&st.store).await?;
     // A removed extra key takes its label with it; a default key's row (just a rename) goes too.
     let kept: Vec<Connection> = rows.into_iter().filter(|r| r.id != provider).collect();
@@ -970,6 +927,14 @@ pub struct ConnectionView {
 pub async fn list_connections(st: &AppState) -> Res<Vec<ConnectionView>> {
     let rows = load_rows(&st.store).await?;
     let mut out = Vec::new();
+    if st.store.get_setting(LOCAL_URL_KEY).await?.is_some() {
+        out.push(ConnectionView {
+            id: LOCAL_SERVER.into(),
+            provider: LOCAL_SERVER.into(),
+            label: "Local server".into(),
+            last4: key_status(st.store.get_secret(LOCAL_SERVER).await?.as_deref()).last4,
+        });
+    }
     for kind in [OPENROUTER, SUBQ, TYPESAFE] {
         let extras = rows
             .iter()
@@ -1274,6 +1239,22 @@ pub mod ipc {
     type S<'a> = State<'a, AppState>;
 
     #[tauri::command]
+    pub async fn get_local_connection(st: S<'_>) -> Res<LocalConnectionView> {
+        super::get_local_connection(&st).await
+    }
+    #[tauri::command]
+    pub async fn save_local_connection(
+        st: S<'_>,
+        base_url: String,
+        key: Option<String>,
+    ) -> Res<()> {
+        super::save_local_connection(&st, &base_url, key).await
+    }
+    #[tauri::command]
+    pub async fn test_local_connection(st: S<'_>, model: String, role: String) -> Res<()> {
+        super::test_local_connection(&st, &model, &role).await
+    }
+    #[tauri::command]
     pub async fn get_profile(st: S<'_>) -> Res<Profile> {
         super::get_profile(&st).await
     }
@@ -1468,10 +1449,6 @@ pub mod ipc {
         super::engine_status(&st).await
     }
     #[tauri::command]
-    pub fn cancel_download(st: S<'_>, id: String) -> Res<()> {
-        super::cancel_download(&st, &id)
-    }
-    #[tauri::command]
     pub async fn get_ranked(st: S<'_>, run_id: i64) -> Res<Ranked> {
         super::get_ranked(&st, run_id).await
     }
@@ -1487,18 +1464,6 @@ pub mod ipc {
     #[tauri::command]
     pub async fn export_cv(st: S<'_>, run_id: i64, selection: Selection, path: String) -> Res<i64> {
         super::export_cv(&st, run_id, selection, path).await
-    }
-    #[tauri::command]
-    pub fn system_ram_gb() -> u32 {
-        crate::models::system_ram_gb()
-    }
-    #[tauri::command]
-    pub fn list_models(st: S<'_>) -> Vec<ModelInfo> {
-        super::list_models(&st)
-    }
-    #[tauri::command]
-    pub async fn download_model(st: S<'_>, id: String) -> Res<()> {
-        super::download_model(&st, &id).await
     }
     #[tauri::command]
     pub async fn set_active_model(st: S<'_>, id: String) -> Res<()> {

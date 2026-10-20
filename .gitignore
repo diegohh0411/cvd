@@ -48,7 +48,7 @@ Thumbs.db
 # Brainstorming companion mockups
 .superpowers/
 
-# llama-server sidecar (src-tauri/scripts/fetch-llama-server.sh)
+# Old local inference binaries (no longer bundled)
 src-tauri/binaries
 
 # Worktrees

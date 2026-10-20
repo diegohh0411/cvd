@@ -15,8 +15,8 @@ const PROFILE = { name: 'Ada', headline: '', email: '', phone: '', location: '',
 describe('routes', () => {
   it('maps old models tabs', () => {
     expect(modelsRedirect('engine')).toBe('/ai');
-    expect(modelsRedirect('download')).toBe('/ai/downloads');
-    expect(modelsRedirect(undefined)).toBe('/ai/downloads');
+    expect(modelsRedirect('download')).toBe('/ai');
+    expect(modelsRedirect(undefined)).toBe('/ai');
   });
 
   it('navigates /ai and /models to the new pages', async () => {
@@ -33,9 +33,9 @@ describe('routes', () => {
     expect(await go('/ai')).toBe('/ai');
     expect(await go('/ai/roles')).toBe('/ai');
     expect(await go('/ai/providers')).toBe('/ai');
-    expect(await go('/ai/models')).toBe('/ai/downloads');
+    expect(await go('/ai/models')).toBe('/ai');
     expect(await go('/models?tab=engine')).toBe('/ai');
-    expect(await go('/models?tab=online')).toBe('/ai/downloads');
+    expect(await go('/models?tab=online')).toBe('/ai');
   });
 });
 

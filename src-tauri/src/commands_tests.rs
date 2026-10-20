@@ -34,7 +34,6 @@ async fn state() -> (AppState, Events) {
     let sink = events.clone();
     let st = AppState::new(
         store,
-        std::env::temp_dir().join("cvd-test-models"),
         EngineSource::Fixed(Arc::new(fake())),
         Arc::new(move |name: &str, v: serde_json::Value| {
             sink.lock().unwrap().push((name.to_string(), v))
@@ -166,12 +165,6 @@ async fn cancel_unknown_run_is_not_found() {
 }
 
 #[tokio::test]
-async fn shutdown_without_engine_is_noop() {
-    let (st, _) = state().await;
-    st.shutdown();
-}
-
-#[tokio::test]
 async fn export_rejects_unsafe_paths() {
     let (st, _) = state().await;
     let sel = Selection {
@@ -278,21 +271,6 @@ async fn ui_settings_are_namespaced() {
 }
 
 #[tokio::test]
-async fn cancel_download_unknown_is_not_found() {
-    let (st, _) = state().await;
-    assert_eq!(
-        cancel_download(&st, "clef-flash").unwrap_err().kind(),
-        "NotFound"
-    );
-    let token = st.register_download("clef-flash").unwrap();
-    assert!(st.register_download("clef-flash").is_none());
-    cancel_download(&st, "clef-flash").unwrap();
-    assert!(token.is_cancelled());
-    st.finish_download("clef-flash");
-    assert!(st.register_download("clef-flash").is_some());
-}
-
-#[tokio::test]
 async fn missing_key_status() {
     let (st, _) = state().await;
     st.reload_providers().await.unwrap();
@@ -319,7 +297,6 @@ async fn bare_local_id_still_local() {
     let store = Store::open("sqlite::memory:").await.unwrap();
     let st = AppState::new(
         store,
-        std::env::temp_dir().join("cvd-test-models-empty"),
         EngineSource::Fixed(Arc::new(fake())),
         Arc::new(|_: &str, _| {}),
     );
@@ -327,10 +304,6 @@ async fn bare_local_id_still_local() {
     // Local refs keep the Fixed short-circuit; remote refs never do.
     assert!(st.engine_for("clef-flash").is_ok());
     assert!(st.engine_for("openrouter:x").is_err());
-    assert_eq!(
-        st.installed_path("clef-flash").unwrap_err().kind(),
-        "ModelMissing"
-    );
 }
 
 mod provider_keys {
@@ -690,14 +663,14 @@ mod provider_keys {
                 .await
                 .unwrap_err()
                 .kind(),
-            "NotFound"
+            "ModelMissing"
         );
         assert_eq!(
             set_active_model(&st, "lfm2.5-2.6b")
                 .await
                 .unwrap_err()
                 .kind(),
-            "NotFound"
+            "ModelMissing"
         );
         assert_eq!(
             set_research_model(&st, "openrouter:deepseek/x")
@@ -804,7 +777,6 @@ mod company_flow {
         let log = Arc::new(StateLog(fake(), Mutex::default()));
         let st = AppState::new(
             store,
-            std::env::temp_dir().join("cvd-test-models"),
             EngineSource::Fixed(log.clone()),
             Arc::new(move |n: &str, v: serde_json::Value| {
                 sink.lock().unwrap().push((n.to_string(), v))
@@ -1344,4 +1316,241 @@ async fn edits_teach_and_unteach_labels() {
         .await
         .unwrap()
         .contains_key("correo"));
+}
+
+mod local_server {
+    use super::*;
+    use crate::providers::{normalize_url, LOCAL_SERVER};
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn server() -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data":[{"id":"decision"},{"id":"chat"}]})),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+    async fn http_state() -> AppState {
+        AppState::new(
+            Store::open("sqlite::memory:").await.unwrap(),
+            EngineSource::Http,
+            Arc::new(|_, _| {}),
+        )
+    }
+
+    #[test]
+    fn urls_are_normalized_and_limited_to_loopback() {
+        assert_eq!(
+            normalize_url(" http://127.0.0.1:8080/ ").unwrap(),
+            "http://127.0.0.1:8080/v1"
+        );
+        assert_eq!(
+            normalize_url("http://localhost:8080/api/v1/").unwrap(),
+            "http://localhost:8080/api/v1"
+        );
+        assert_eq!(
+            normalize_url("http://[::1]:8080").unwrap(),
+            "http://[::1]:8080/v1"
+        );
+        for url in [
+            "https://example.com/v1",
+            "file:///tmp/model",
+            "http://key@localhost/v1",
+            "http://localhost/v1?key=x",
+            "http://localhost/v1#key",
+        ] {
+            assert!(normalize_url(url).is_err(), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn discovery_optional_auth_selection_and_removal() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let connections = list_connections(&st).await.unwrap();
+        assert_eq!(connections[0].id, LOCAL_SERVER);
+        assert_eq!(connections[0].last4, None);
+        assert_eq!(
+            list_remote_models(&st, false, "decision").await.unwrap()[0]
+                .models
+                .len(),
+            2
+        );
+        set_active_model(&st, "localhost:decision").await.unwrap();
+        set_research_model(&st, "localhost:chat").await.unwrap();
+        let ep = st.research_endpoint().await.unwrap();
+        assert_eq!(ep.model, "chat");
+        assert_eq!(ep.base_url, format!("{}/v1", server.uri()));
+        assert_eq!(ep.api_key, None);
+        assert!(server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| !r.headers.contains_key("authorization")));
+
+        save_local_connection(&st, &server.uri(), Some(" secret ".into()))
+            .await
+            .unwrap();
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            st.research_endpoint().await.unwrap().api_key.as_deref(),
+            Some("secret")
+        );
+        save_local_connection(&st, &server.uri(), Some("".into()))
+            .await
+            .unwrap();
+        assert_eq!(st.research_endpoint().await.unwrap().api_key, None);
+        delete_provider_key(&st, LOCAL_SERVER).await.unwrap();
+        assert!(list_connections(&st).await.unwrap().is_empty());
+        assert_eq!(engine_status(&st).await.unwrap().state, "error");
+    }
+
+    #[tokio::test]
+    async fn failed_discovery_does_not_replace_saved_connection() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let bad = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&bad)
+            .await;
+        assert!(
+            save_local_connection(&st, &bad.uri(), Some("bad-key".into()))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Local server key")
+        );
+        assert_eq!(
+            get_local_connection(&st).await.unwrap().base_url,
+            format!("{}/v1", server.uri())
+        );
+        assert_eq!(st.store.get_secret(LOCAL_SERVER).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn tests_report_unreachable_and_unsupported_capabilities() {
+        let st = http_state().await;
+        let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", socket.local_addr().unwrap());
+        drop(socket);
+        assert!(save_local_connection(&st, &base, None)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Nothing listening on 127.0.0.1:"));
+        let server = server().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        let err = test_local_connection(&st, "decision", "decision")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("/v1/systemone") && err.contains("logprobs/grammar"),
+            "{err}"
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/systemone"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"answers":{"test":{"type":"noul","noul":0.9}}})),
+            )
+            .mount(&server)
+            .await;
+        test_local_connection(&st, "decision", "decision")
+            .await
+            .unwrap();
+        Mock::given(method("POST")).and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"type":"function","function":{"name":"connection_test","arguments":"{}"}}]}}]})))
+            .mount(&server).await;
+        test_local_connection(&st, "chat", "chat").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn match_run_uses_user_server_and_selected_model() {
+        let server = server().await;
+        Mock::given(method("POST")).and(path("/v1/systemone")).and(header("authorization", "Bearer secret"))
+            .respond_with(|r: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                assert_eq!(body["model"], "decision");
+                let answers: serde_json::Map<String, serde_json::Value> = body["questions"].as_object().unwrap().iter().map(|(id,q)| {
+                    let a = match q["type"].as_str().unwrap() {
+                        "noul" => json!({"type":"noul","noul":0.8}),
+                        "choice" => { let option = q["criteria"].as_object().unwrap().keys().next().unwrap(); json!({"type":"choice","choice":option,"probabilities":{option:1.0}}) },
+                        "score" => json!({"type":"score","score":3.0,"probabilities":{"3":1.0}}),
+                        _ => panic!("unknown question"),
+                    }; (id.clone(),a)
+                }).collect();
+                ResponseTemplate::new(200).set_body_json(json!({"answers":answers}))
+            }).mount(&server).await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), Some("secret".into()))
+            .await
+            .unwrap();
+        set_active_model(&st, "localhost:decision").await.unwrap();
+        st.store.upsert_entry(&entry("Engineer")).await.unwrap();
+        let jd = st
+            .store
+            .create_jd("Rust role", "", "We need Rust", "", None)
+            .await
+            .unwrap();
+        let run = start_match(&st, jd).await.unwrap();
+        assert_eq!(wait_done(&st, run).await, RunStatus::Done);
+        assert!(!get_scores(&st, run).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn research_runs_through_local_connection() {
+        let server = server().await;
+        let st = http_state().await;
+        save_local_connection(&st, &server.uri(), None)
+            .await
+            .unwrap();
+        set_research_model(&st, "localhost:chat").await.unwrap();
+        Mock::given(method("POST")).and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":null,"tool_calls":[{"id":"submit","type":"function","function":{"name":"submit_profile","arguments":"{\"canonical_name\":\"Acme\",\"industry\":\"Software\"}"}}]}}]})))
+            .mount(&server).await;
+        let search_server = MockServer::start().await;
+        st.store.set_secret("exa", "test").await.unwrap();
+        let st = st.with_exa_base(search_server.uri());
+        st.reload_providers().await.unwrap();
+        let result = st.research_env().research_fn()(
+            ResearchInput {
+                name: "Acme".into(),
+                domain: None,
+                jd_snippet: "Rust".into(),
+            },
+            CancellationToken::new(),
+            Box::new(|_| {}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.0.profile.industry, "Software");
+        assert_eq!(result.1, "localhost:chat");
+        let requests = server.received_requests().await.unwrap();
+        let request = requests
+            .iter()
+            .find(|r| r.url.path() == "/v1/chat/completions")
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["model"], "chat");
+    }
 }

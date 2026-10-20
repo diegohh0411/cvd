@@ -54,7 +54,6 @@ export const NAV: readonly NavItem[] = [
     base: '/ai',
     items: [
       { title: 'AI Models', link: '/ai' },
-      { title: 'Downloads', link: '/ai/downloads' },
     ],
   },
 ];

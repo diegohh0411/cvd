@@ -1,5 +1,4 @@
-import type { ModelInfo, ProviderModels } from '../../core/ipc/types';
-import { formatBytes } from '../../core/stores/models.store';
+import type { ProviderModels } from '../../core/ipc/types';
 
 import type { Role } from './provider-registry';
 
@@ -24,20 +23,10 @@ export function formatPrice(perMtok: number | null): string {
   return `$${Number(perMtok.toPrecision(3))} / M tokens`;
 }
 
-/** Remote ids are `<provider>:<model>`; local ids never contain a colon. */
+/** Model references include their connection; bare ids belong to legacy history. */
 export function providerOf(id: string | null): ProviderKind {
   const i = id?.indexOf(':') ?? -1;
   return id && i > 0 ? id.slice(0, i) : 'local';
-}
-
-const KIND: Record<Role, 'decision' | 'chat'> = { 'system-one': 'decision', research: 'chat' };
-
-/** Every catalog model that can fill `role`, installed ones first. */
-export function localOptions(role: Role, models: ModelInfo[]): RoleOption[] {
-  return models
-    .filter((m) => m.spec.kind === KIND[role])
-    .sort((a, b) => Number(b.installed) - Number(a.installed))
-    .map((m) => ({ id: m.spec.id, label: m.spec.label, installed: m.installed, detail: formatBytes(m.spec.size_bytes) }));
 }
 
 export function onlineOptions(lists: ProviderModels[]): RoleOption[] {
@@ -48,7 +37,6 @@ export function onlineOptions(lists: ProviderModels[]): RoleOption[] {
 
 export function roleStatus(i: {
   active: string | null;
-  installed: ModelInfo[];
   /** Which providers have a saved key, by provider id. */
   keys: Record<string, boolean>;
   /** Research only; undefined means the role needs no Exa key. */
@@ -58,6 +46,5 @@ export function roleStatus(i: {
   if (i.engineError) return 'error';
   if (!i.active || i.hasExaKey === false) return 'needs-setup';
   const provider = providerOf(i.active);
-  if (provider !== 'local') return i.keys[provider] ? 'ready' : 'needs-setup';
-  return i.installed.some((m) => m.spec.id === i.active) ? 'ready' : 'needs-setup';
+  return i.keys[provider] ? 'ready' : 'needs-setup';
 }

@@ -6,6 +6,7 @@ import type { Connection, ProviderId } from '../ipc/types';
 /** Saved model-provider keys, shared by the model pickers and the Connections list. */
 @Injectable({ providedIn: 'root' })
 export class ConnectionsStore {
+  readonly revision = signal(0);
   readonly list = signal<Connection[]>([]);
   /** Connection ids, for "does this model's key exist". */
   readonly ids = computed(() => new Set(this.list().map((c) => c.id)));
@@ -13,6 +14,7 @@ export class ConnectionsStore {
   async load(): Promise<void> {
     try {
       this.list.set(await api.listConnections());
+      this.revision.update(n => n + 1);
     } catch {
       // Keep the last known list; the pickers show a locked group instead.
     }

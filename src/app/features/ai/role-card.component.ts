@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
-import { RouterLink } from '@angular/router';
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
@@ -11,8 +10,8 @@ import { ConnectionsStore } from '../../core/stores/connections.store';
 import { EngineStore } from '../../core/stores/engine.store';
 import { ModelsStore } from '../../core/stores/models.store';
 import { ProviderKeyComponent } from './provider-key.component';
-import { LOCAL_PROVIDER, modelProviders, providerName, type Role } from './provider-registry';
-import { localOptions, onlineOptions, providerOf, REMOTE_NOTICE_SETTING, type RoleOption, roleStatus } from './role-options';
+import { modelProviders, providerName, type Role } from './provider-registry';
+import { onlineOptions, providerOf, REMOTE_NOTICE_SETTING, type RoleOption, roleStatus } from './role-options';
 
 const COPY: Record<Role, { title: string; subtitle: string }> = {
   'system-one': { title: 'Fast Model', subtitle: 'Scores your library against each job and sorts the results.' },
@@ -39,7 +38,7 @@ interface Group {
 /** One model slot: shows the active model and a grouped picker over every connected provider. */
 @Component({
   selector: 'app-role-card',
-  imports: [RouterLink, ZardBadgeComponent, ZardButtonComponent, ProviderKeyComponent],
+  imports: [ ZardBadgeComponent, ZardButtonComponent, ProviderKeyComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="grid gap-4 rounded-lg border p-4 text-sm">
@@ -104,8 +103,12 @@ interface Group {
                 <div class="bg-muted/50 text-muted-foreground px-3 py-1.5 text-xs font-medium">{{ g.name }}</div>
                 @if (g.locked) {
                   <div class="grid gap-2 p-3">
-                    <p class="text-muted-foreground">Add your {{ g.name }} key to use its models.</p>
-                    <app-provider-key [provider]="$any(g.provider)" (changed)="connections.load()" />
+                    @if (g.provider === 'localhost') {
+                      <p class="text-muted-foreground">Set up your Local server connection below.</p>
+                    } @else {
+                      <p class="text-muted-foreground">Add your {{ g.name }} key to use its models.</p>
+                      <app-provider-key [provider]="$any(g.provider)" (changed)="connections.load()" />
+                    }
                   </div>
                 } @else if (g.error; as err) {
                   <div class="grid justify-items-start gap-2 p-3">
@@ -114,12 +117,7 @@ interface Group {
                   </div>
                 } @else if (!g.options.length) {
                   <p class="text-muted-foreground p-3">
-                    @if (g.id === 'local') {
-                      {{ query() ? 'No matching model.' : 'No model installed.' }}
-                      <a routerLink="/ai/downloads" class="underline">Download one →</a>
-                    } @else {
-                      {{ loading() ? 'Loading models…' : query() ? 'No matching model.' : 'No models available.' }}
-                    }
+                    {{ loading() ? 'Loading models…' : query() ? 'No matching model.' : 'No models available.' }}
                   </p>
                 } @else {
                   @for (o of g.options; track o.id) {
@@ -149,9 +147,7 @@ interface Group {
                           }
                         </span>
                       </button>
-                      @if (!o.installed) {
-                        <a routerLink="/ai/downloads" class="text-xs underline">Download</a>
-                      } @else if (o.id === active()) {
+                      @if (o.id === active()) {
                         <span class="text-xs text-emerald-600">Active</span>
                       }
                     </div>
@@ -167,10 +163,10 @@ interface Group {
         <div class="grid gap-2 border-t pt-3">
           <div class="flex flex-wrap items-center gap-3">
             <span class="text-muted-foreground">
-              {{ engine.remote() ? 'Online model' : 'llama.cpp on 127.0.0.1, started on the first match' }} ·
+              {{ engine.remote() ? 'Online model' : 'User-run local server' }} ·
               {{ engine.stateLabel() }}
             </span>
-            <button z-button zType="outline" zSize="sm" (click)="restart()">Restart</button>
+            <button z-button zType="outline" zSize="sm" (click)="restart()">Reset connection</button>
           </div>
           @if (engine.status().error; as log) {
             <details>
@@ -218,19 +214,11 @@ export class RoleCardComponent implements OnInit {
   });
   protected readonly anyOnline = computed(() => this.slotConnections().length > 0);
   /** Changes when a key is added or removed, so the model lists reload. */
-  private readonly connectionKey = computed(() => this.slotConnections().map((c) => c.id).join(','));
+  private readonly connectionKey = computed(() => `${this.connections.revision()}:${this.slotConnections().map((c) => c.id).join(',')}`);
 
   protected readonly groups = computed<Group[]>(() => {
     const q = this.query().trim().toLowerCase();
     const match = (o: RoleOption) => !q || o.label.toLowerCase().includes(q);
-    const local: Group = {
-      id: LOCAL_PROVIDER.id,
-      provider: LOCAL_PROVIDER.id,
-      name: LOCAL_PROVIDER.name,
-      options: localOptions(this.role(), this.models.models()).filter(match),
-      locked: false,
-      error: null,
-    };
     const remote = modelProviders(this.role()).flatMap<Group>((p) => {
       const mine = this.connections.forProvider(p.id);
       if (!mine.length) return [{ id: p.id, provider: p.id, name: p.name, options: [], locked: true, error: null }];
@@ -247,13 +235,12 @@ export class RoleCardComponent implements OnInit {
         };
       });
     });
-    return [local, ...remote];
+    return remote;
   });
 
   private readonly status = computed(() =>
     roleStatus({
       active: this.active(),
-      installed: this.models.installed(),
       keys: this.keys(),
       hasExaKey: this.role() === 'research' ? this.hasExa() : undefined,
       engineError: this.role() === 'system-one' && this.engine.status().state === 'error',
@@ -265,8 +252,7 @@ export class RoleCardComponent implements OnInit {
     const a = this.active();
     if (!a) return 'Choose a model below.';
     const p = providerOf(a);
-    if (p !== 'local' && !this.keys()[p]) return `The selected online model needs its ${providerName(p)} key.`;
-    if (p === 'local' && !this.models.installed().some((m) => m.spec.id === a)) return 'The selected model is not installed.';
+    if (!this.keys()[p]) return `Set up the ${providerName(p)} connection for the selected model.`;
     return null;
   });
 
@@ -276,13 +262,13 @@ export class RoleCardComponent implements OnInit {
     const hit = this.groups()
       .flatMap((g) => g.options)
       .find((o) => o.id === a);
-    return hit?.label ?? this.models.models().find((m) => m.spec.id === a)?.spec.label ?? (providerOf(a) === 'local' ? a : a.slice(a.indexOf(':') + 1));
+    return hit?.label ?? a.slice(a.indexOf(':') + 1);
   });
   protected readonly activeWhere = computed(() => {
     const a = this.active();
     if (!a) return 'Pick one to get started.';
     const p = providerOf(a);
-    if (p === 'local') return 'Runs on this computer';
+    if (p === 'localhost') return 'User-run local server';
     const label = this.connections.list().find((c) => c.id === p)?.label;
     return label && label !== providerName(p) ? `Online · ${providerName(p)} · ${label}` : `Online · ${providerName(p)}`;
   });
@@ -303,7 +289,6 @@ export class RoleCardComponent implements OnInit {
     const research = this.role() === 'research';
     await Promise.all([
       research ? this.models.loadResearchModel() : null,
-      this.models.load(),
       this.engine.load(),
       this.connections.load(),
       research ? this.refreshExa() : null,
@@ -336,7 +321,7 @@ export class RoleCardComponent implements OnInit {
 
   protected async pick(o: RoleOption): Promise<void> {
     if (this.picking() || o.id === this.active() || !o.installed) return;
-    if (providerOf(o.id) !== 'local') {
+    if (providerOf(o.id) !== 'localhost') {
       const ack = await api.getUiSetting(REMOTE_NOTICE_SETTING).catch(() => null);
       if (ack !== '1') {
         this.pending.set(o);
@@ -367,14 +352,14 @@ export class RoleCardComponent implements OnInit {
     }
   }
 
-  /** Re-selecting the active model resets the engine (and its error). */
+  /** Re-selecting the active model resets the cached HTTP client and error. */
   protected async restart(): Promise<void> {
     const id = this.active();
     if (!id) return;
     try {
       await this.models.activate(id);
       await this.engine.refresh();
-      this.toast.success('Engine restarted', { description: 'It starts again on the next match.' });
+      this.toast.success('Connection reset', { description: 'CVD reconnects on the next match.' });
     } catch (e) {
       this.toast.error('Could not restart', { description: messageFor(e) });
     }

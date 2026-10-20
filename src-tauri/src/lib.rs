@@ -10,8 +10,6 @@ mod engine;
 #[allow(dead_code)]
 mod matcher;
 pub mod mcp;
-#[allow(dead_code)]
-mod models;
 mod providers;
 #[allow(dead_code)]
 mod render;
@@ -32,7 +30,6 @@ use state::{AppState, EngineSource};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -45,8 +42,7 @@ pub fn run() {
             let emit_handle = handle.clone();
             let state = AppState::new(
                 store,
-                dir.join("models"),
-                EngineSource::Sidecar(handle),
+                EngineSource::Http,
                 Arc::new(move |event: &str, payload: serde_json::Value| {
                     let _ = emit_handle.emit(event, payload);
                 }),
@@ -62,6 +58,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ipc::get_local_connection,
+            ipc::save_local_connection,
+            ipc::test_local_connection,
             ipc::get_profile,
             ipc::save_profile,
             ipc::list_entries,
@@ -96,13 +95,9 @@ pub fn run() {
             ipc::save_apply_defaults,
             ipc::apply_facts,
             ipc::engine_status,
-            ipc::cancel_download,
             ipc::get_ranked,
             ipc::fit_cv,
             ipc::export_cv,
-            ipc::system_ram_gb,
-            ipc::list_models,
-            ipc::download_model,
             ipc::set_active_model,
             ipc::set_research_model,
             ipc::skip_research,
@@ -135,12 +130,5 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                // Kills the llama-server sidecar; a no-op if it was never built.
-                if let Some(state) = app.try_state::<AppState>() {
-                    state.shutdown();
-                }
-            }
-        });
+        .run(|_, _| {});
 }

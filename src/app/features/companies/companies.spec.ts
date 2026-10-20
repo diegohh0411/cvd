@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 
 import { pageProviders } from '../../../testing/providers';
 import { mockTauri, type TauriMock } from '../../../testing/tauri-mock';
-import type { Company, JobDescription, MatchRun, ModelInfo, ProviderModels } from '../../core/ipc/types';
+import type { Company, JobDescription, MatchRun, ProviderModels } from '../../core/ipc/types';
 import { RANKED } from '../workspace/fixtures';
 import { WorkspaceStore } from '../workspace/workspace.store';
 import { contextBadge, needsRefreshConfirm } from './company-panel.component';

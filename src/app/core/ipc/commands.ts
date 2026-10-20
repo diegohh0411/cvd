@@ -20,7 +20,6 @@ import type {
   KeyStatus,
   MailAccountView,
   MatchRun,
-  ModelInfo,
   Override,
   Profile,
   ProcessedEmail,
@@ -109,10 +108,6 @@ export const getUiSetting = (key: `ui.${string}`) => call<string | null>('get_ui
 export const setUiSetting = (key: `ui.${string}`, value: string) => call<void>('set_ui_setting', { key, value });
 
 // ---- models & engine ----
-export const systemRamGb = () => call<number>('system_ram_gb');
-export const listModels = () => call<ModelInfo[]>('list_models');
-export const downloadModel = (id: string) => call<void>('download_model', { id });
-export const cancelDownload = (id: string) => call<void>('cancel_download', { id });
 export const setActiveModel = (id: string) => call<void>('set_active_model', { id });
 export const setResearchModel = (id: string) => call<void>('set_research_model', { id });
 export const getResearchModel = () => call<string | null>('get_research_model');
@@ -146,3 +141,7 @@ export const listPendingReviews = () => call<ProcessedEmail[]>('list_pending_rev
 export const listJobEmails = (jobId: number) => call<ProcessedEmail[]>('list_job_emails', { jobId });
 export const applySuggestion = (messageId: string) => call<ProcessedEmail>('apply_suggestion', { messageId });
 export const dismissSuggestion = (messageId: string) => call<void>('dismiss_suggestion', { messageId });
+
+export const getLocalConnection = () => call<{ base_url: string; has_key: boolean }>('get_local_connection');
+export const saveLocalConnection = (baseUrl: string, key: string | null) => call<void>('save_local_connection', { baseUrl, key });
+export const testLocalConnection = (model: string, role: 'decision' | 'chat') => call<void>('test_local_connection', { model, role });

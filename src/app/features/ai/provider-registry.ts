@@ -14,6 +14,7 @@ export interface ProviderDef {
 
 /** Every online service the app can hold a key for, in display order. */
 export const PROVIDERS: readonly ProviderDef[] = [
+  { id: 'localhost', name: 'Local server', placeholder: '', hint: 'Connect to a server you run on this computer.', roles: ['system-one', 'research'] },
   {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -44,7 +45,6 @@ export const PROVIDERS: readonly ProviderDef[] = [
   },
 ];
 
-export const LOCAL_PROVIDER = { id: 'local', name: 'Local (llama.cpp)' } as const;
 
 /** Providers that serve models for `role`. */
 export const modelProviders = (role: Role): ProviderDef[] => PROVIDERS.filter((p) => p.roles.includes(role));

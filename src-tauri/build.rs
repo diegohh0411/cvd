@@ -1,6 +1,9 @@
 /// Every command in `generate_handler!`. Declaring an app manifest puts all app
 /// commands under the ACL, so each one needs a permission or the webview is denied.
 const COMMANDS: &[&str] = &[
+    "get_local_connection",
+    "save_local_connection",
+    "test_local_connection",
     "get_profile",
     "save_profile",
     "list_entries",
@@ -35,13 +38,9 @@ const COMMANDS: &[&str] = &[
     "save_apply_defaults",
     "apply_facts",
     "engine_status",
-    "cancel_download",
     "get_ranked",
     "fit_cv",
     "export_cv",
-    "system_ram_gb",
-    "list_models",
-    "download_model",
     "set_active_model",
     "set_research_model",
     "skip_research",
@@ -74,35 +73,9 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
-    copy_llama_dylibs();
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
     )
     .expect("failed to run tauri-build");
-}
-
-/// Dev builds run the `llama-server` sidecar straight from `target/<profile>`,
-/// where bundling (`macOS.files`) never puts its dylibs. Copy them alongside so
-/// its `@loader_path` rpath resolves.
-fn copy_llama_dylibs() {
-    use std::path::PathBuf;
-    println!("cargo:rerun-if-changed=binaries");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
-        return;
-    }
-    // OUT_DIR is target/<profile>/build/<pkg>/out.
-    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let Some(profile_dir) = out.ancestors().nth(3) else {
-        return;
-    };
-    let Ok(entries) = std::fs::read_dir("binaries") else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "dylib") {
-            let _ = std::fs::copy(&path, profile_dir.join(entry.file_name()));
-        }
-    }
 }

@@ -1,7 +1,6 @@
 //! Shared application state behind the Tauri commands.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
@@ -10,8 +9,7 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::AppError;
 use crate::company::agent::ResearchError;
 use crate::company::coordinator::{ResearchCoordinator, ResearchFn};
-use crate::engine::{DecisionEngine, LlamaSidecar, TauriLauncher};
-use crate::models::{self, ModelKind, REGISTRY};
+use crate::engine::DecisionEngine;
 use crate::providers::{
     ChatEndpoint, ModelRef, ProviderError, ProviderRegistry, OPENROUTER_BASE, SUBQ_BASE,
     TYPESAFE_BASE,
@@ -29,8 +27,8 @@ pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
 /// Where the decision engine comes from.
 pub enum EngineSource {
-    /// Production: a lazily started `llama-server` for the active model.
-    Sidecar(tauri::AppHandle),
+    /// Production: HTTP connections owned by the user.
+    Http,
     /// Tests: a fixed engine (e.g. `FakeDecisionEngine`); no model file needed.
     #[cfg_attr(not(test), allow(dead_code))]
     Fixed(Arc<dyn DecisionEngine>),
@@ -39,16 +37,13 @@ pub enum EngineSource {
 struct Built {
     model_id: String,
     engine: Arc<dyn DecisionEngine>,
-    sidecar: Option<Arc<LlamaSidecar>>,
 }
 
 pub struct AppState {
     pub store: Store,
-    pub models_dir: PathBuf,
     source: EngineSource,
     engine: Mutex<Option<Built>>,
     runs: Arc<Mutex<HashMap<i64, CancellationToken>>>,
-    downloads: Mutex<HashMap<String, CancellationToken>>,
     /// Last engine failure, shown in the UI until the engine is reset or a run succeeds.
     engine_error: Arc<Mutex<Option<String>>>,
     emit: Emitter,
@@ -60,9 +55,6 @@ pub struct AppState {
     /// Web search for company research; `None` until an Exa key is stored.
     search: RwLock<Option<Arc<dyn SearchProvider>>>,
     pub exa_base: String,
-    /// The local chat-model server for research, kept apart from the decision
-    /// sidecar so switching System One models never stops it.
-    research: ResearchSlot,
     /// Tests: replaces the real research agent.
     research_fn: Option<ResearchFn>,
     /// Per-run signal to stop waiting for company research (see `skip_research`).
@@ -86,8 +78,7 @@ impl Drop for ScanGuard {
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct EngineStatus {
     pub model_id: Option<String>,
-    /// `none` (no active model), `missing` (active model not installed),
-    /// `idle` (starts on the next match), `ready` (server running) or `error`.
+    /// `none` (no model), `idle` (configured), `ready` (engine built), or `error`.
     pub state: &'static str,
     pub error: Option<String>,
 }
@@ -97,16 +88,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl AppState {
-    pub fn new(store: Store, models_dir: PathBuf, source: EngineSource, emit: Emitter) -> Self {
+    pub fn new(store: Store, source: EngineSource, emit: Emitter) -> Self {
         let coordinator = Arc::new(ResearchCoordinator::new(1, emit.clone()));
         Self {
             coordinator,
             store,
-            models_dir,
             source,
             engine: Mutex::new(None),
             runs: Arc::default(),
-            downloads: Mutex::default(),
             engine_error: Arc::default(),
             emit,
             providers: RwLock::default(),
@@ -115,7 +104,6 @@ impl AppState {
             typesafe_base: TYPESAFE_BASE.into(),
             search: RwLock::default(),
             exa_base: EXA_BASE.into(),
-            research: ResearchSlot::default(),
             research_fn: None,
             skips: Skips::default(),
             scan_running: Arc::default(),
@@ -167,8 +155,7 @@ impl AppState {
         Ok(self.store.get_setting(RESEARCH_MODEL_KEY).await?)
     }
 
-    /// Where the research agent sends chat requests. A local model starts (or
-    /// reuses) its own llama-server.
+    /// Where the research agent sends chat requests.
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn research_endpoint(&self) -> Result<ChatEndpoint, AppError> {
         self.research_env().endpoint().await
@@ -186,12 +173,6 @@ impl AppState {
             store: self.store.clone(),
             providers: self.providers(),
             search: self.search().ok(),
-            app: match &self.source {
-                EngineSource::Sidecar(app) => Some(app.clone()),
-                EngineSource::Fixed(_) => None,
-            },
-            slot: self.research.clone(),
-            models_dir: self.models_dir.clone(),
             override_fn: self.research_fn.clone(),
         }
     }
@@ -213,13 +194,6 @@ impl AppState {
 
     pub fn skips(&self) -> Skips {
         self.skips.clone()
-    }
-
-    /// Stops the local research server, if any (e.g. after the research model changes).
-    pub fn reset_research(&self) {
-        if let Some((_, s)) = lock(&self.research).take() {
-            s.shutdown();
-        }
     }
 
     /// The web search backend, or why there is none.
@@ -247,87 +221,44 @@ impl AppState {
         self.store
             .get_setting(ACTIVE_MODEL_KEY)
             .await?
-            .ok_or_else(|| {
-                AppError::ModelMissing("No decision model is active. Download one first.".into())
-            })
+            .ok_or_else(|| AppError::ModelMissing("Choose a Fast Model in AI Models.".into()))
     }
 
-    /// The engine for `model_id`, built on first use. Switching models shuts
-    /// the previous sidecar down.
+    /// The HTTP engine for `model_id`, cached until the connection changes.
     pub fn engine_for(&self, model_id: &str) -> Result<Arc<dyn DecisionEngine>, AppError> {
         let mut slot = lock(&self.engine);
         if let Some(b) = slot.as_ref().filter(|b| b.model_id == model_id) {
             return Ok(b.engine.clone());
         }
-        let r = ModelRef::parse(model_id);
-        let built = match &self.source {
-            _ if !r.is_local() => Built {
-                model_id: model_id.into(),
-                engine: self.providers().engine(&r)?,
-                sidecar: None,
-            },
-            EngineSource::Fixed(e) => Built {
-                model_id: model_id.into(),
-                engine: e.clone(),
-                sidecar: None,
-            },
-            EngineSource::Sidecar(app) => {
-                let path = self.installed_path(model_id)?;
-                let sidecar = Arc::new(LlamaSidecar::new(
-                    Box::new(TauriLauncher(app.clone())),
-                    path,
-                ));
-                Built {
-                    model_id: model_id.into(),
-                    engine: sidecar.clone(),
-                    sidecar: Some(sidecar),
-                }
-            }
+        let engine = match &self.source {
+            EngineSource::Fixed(e) if ModelRef::parse(model_id).is_local() => e.clone(),
+            _ => self.providers().engine(&ModelRef::parse(model_id))?,
         };
-        let engine = built.engine.clone();
-        if let Some(old) = slot.replace(built).and_then(|b| b.sidecar) {
-            old.shutdown();
-        }
+        *slot = Some(Built {
+            model_id: model_id.into(),
+            engine: engine.clone(),
+        });
         Ok(engine)
-    }
-
-    /// Path of an installed model file, or `ModelMissing`.
-    pub fn installed_path(&self, model_id: &str) -> Result<PathBuf, AppError> {
-        installed_path(&self.models_dir, model_id)
     }
 
     pub async fn engine_status(&self) -> Result<EngineStatus, AppError> {
         let model_id = self.store.get_setting(ACTIVE_MODEL_KEY).await?;
-        let error = lock(&self.engine_error).clone();
-        let remote_problem = model_id
+        let problem = model_id
             .as_deref()
             .map(ModelRef::parse)
             .filter(|r| !r.is_local())
             .and_then(|r| self.providers().check(&r).err());
-        let error = error.or(remote_problem.map(|e| e.to_string()));
-        let state = match &model_id {
-            None => "none",
-            Some(_) if error.is_some() => "error",
-            Some(id)
-                if ModelRef::parse(id).is_local()
-                    && self.installed_path(id).is_err()
-                    && matches!(self.source, EngineSource::Sidecar(_)) =>
-            {
-                "missing"
-            }
-            Some(id) => {
-                let slot = lock(&self.engine);
-                let running = slot
-                    .as_ref()
-                    .filter(|b| &b.model_id == id)
-                    .and_then(|b| b.sidecar.as_ref())
-                    .is_some_and(|s| s.is_running());
-                if running || matches!(self.source, EngineSource::Fixed(_)) && slot.is_some() {
-                    "ready"
-                } else {
-                    "idle"
-                }
-            }
+        let error = lock(&self.engine_error)
+            .clone()
+            .or(problem.map(|e| e.to_string()));
+        let state = if model_id.is_none() {
+            "none"
+        } else if error.is_some() {
+            "error"
+        } else if lock(&self.engine).is_some() {
+            "ready"
+        } else {
+            "idle"
         };
         Ok(EngineStatus {
             model_id,
@@ -340,40 +271,9 @@ impl AppState {
         self.engine_error.clone()
     }
 
-    /// Registers a cancellable download; `None` if `id` is already downloading.
-    pub fn register_download(&self, id: &str) -> Option<CancellationToken> {
-        let mut d = lock(&self.downloads);
-        if d.contains_key(id) {
-            return None;
-        }
-        let token = CancellationToken::new();
-        d.insert(id.to_string(), token.clone());
-        Some(token)
-    }
-
-    pub fn finish_download(&self, id: &str) {
-        lock(&self.downloads).remove(id);
-    }
-
-    pub fn cancel_download(&self, id: &str) -> bool {
-        lock(&self.downloads).get(id).map(|t| t.cancel()).is_some()
-    }
-
-    /// Drops the cached engine (and kills its sidecar).
     pub fn reset_engine(&self) {
         *lock(&self.engine_error) = None;
-        if let Some(s) = lock(&self.engine).take().and_then(|b| b.sidecar) {
-            s.shutdown();
-        }
-    }
-
-    /// Kills the sidecar if one was ever built; a no-op otherwise.
-    pub fn shutdown(&self) {
-        for token in lock(&self.runs).values() {
-            token.cancel();
-        }
-        self.reset_engine();
-        self.reset_research();
+        *lock(&self.engine) = None;
     }
 
     pub fn runs(&self) -> Arc<Mutex<HashMap<i64, CancellationToken>>> {
@@ -421,32 +321,14 @@ pub fn remove_run(runs: &Mutex<HashMap<i64, CancellationToken>>, run_id: i64) {
     lock(runs).remove(&run_id);
 }
 
-fn installed_path(models_dir: &Path, model_id: &str) -> Result<PathBuf, AppError> {
-    let missing = || AppError::ModelMissing(format!("Model {model_id} is not installed."));
-    let spec = REGISTRY
-        .iter()
-        .find(|s| s.id == model_id)
-        .ok_or_else(missing)?;
-    if !models::installed(models_dir).contains(&spec) {
-        return Err(missing());
-    }
-    models::model_path(spec, models_dir).ok_or_else(missing)
-}
-
 /// Runs currently waiting on company research, by run id.
 pub type Skips = Arc<Mutex<HashMap<i64, CancellationToken>>>;
-
-/// The local research server, keyed by model id.
-type ResearchSlot = Arc<Mutex<Option<(String, Arc<LlamaSidecar>)>>>;
 
 #[derive(Clone)]
 pub struct ResearchEnv {
     pub store: Store,
     providers: Arc<ProviderRegistry>,
     search: Option<Arc<dyn SearchProvider>>,
-    app: Option<tauri::AppHandle>,
-    slot: ResearchSlot,
-    models_dir: PathBuf,
     override_fn: Option<ResearchFn>,
 }
 
@@ -459,38 +341,7 @@ impl ResearchEnv {
             .ok_or_else(|| {
                 AppError::ModelMissing("Choose a Company research model in Settings.".into())
             })?;
-        let r = ModelRef::parse(&id);
-        if !r.is_local() {
-            return Ok(self.providers.chat_endpoint(&r)?);
-        }
-        let Some(app) = &self.app else {
-            return Err(AppError::EngineUnavailable(
-                "Local research models need the app runtime.".into(),
-            ));
-        };
-        let sidecar = {
-            let mut slot = lock(&self.slot);
-            match slot.as_ref().filter(|(m, _)| *m == id) {
-                Some((_, s)) => s.clone(),
-                None => {
-                    let path = installed_path(&self.models_dir, &id)?;
-                    let s = Arc::new(
-                        LlamaSidecar::new(Box::new(TauriLauncher(app.clone())), path)
-                            .with_kind(ModelKind::Chat),
-                    );
-                    if let Some((_, old)) = slot.replace((id.clone(), s.clone())) {
-                        old.shutdown();
-                    }
-                    s
-                }
-            }
-        };
-        let port = sidecar.ensure_started().await?;
-        Ok(ChatEndpoint {
-            base_url: format!("http://127.0.0.1:{port}/v1"),
-            api_key: None,
-            model: r.id,
-        })
+        Ok(self.providers.chat_endpoint(&ModelRef::parse(&id))?)
     }
 
     /// The agent run the coordinator executes. Endpoint and search are resolved
@@ -541,7 +392,6 @@ mod scan_slot_tests {
         let store = Store::open("sqlite::memory:").await.unwrap();
         let st = AppState::new(
             store,
-            std::env::temp_dir().join("cvd-test-models-scan"),
             EngineSource::Fixed(Arc::new(FakeDecisionEngine::new(|_, _, _| {
                 crate::engine::Answer::Noul { p: 0.0 }
             }))),

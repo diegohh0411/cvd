@@ -2,6 +2,9 @@
 identifier = "main-window"
 description = "Every app command the main window calls (all except autofill_bridge)."
 permissions = [
+  "allow-get-local-connection",
+  "allow-save-local-connection",
+  "allow-test-local-connection",
   "allow-get-profile",
   "allow-save-profile",
   "allow-list-entries",
@@ -36,13 +39,9 @@ permissions = [
   "allow-save-apply-defaults",
   "allow-apply-facts",
   "allow-engine-status",
-  "allow-cancel-download",
   "allow-get-ranked",
   "allow-fit-cv",
   "allow-export-cv",
-  "allow-system-ram-gb",
-  "allow-list-models",
-  "allow-download-model",
   "allow-set-active-model",
   "allow-set-research-model",
   "allow-skip-research",
