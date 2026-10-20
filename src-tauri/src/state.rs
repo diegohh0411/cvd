@@ -221,7 +221,7 @@ impl AppState {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-            .ok_or_else(|| ProviderError::Missing("Add your Exa key in Settings.".into()))
+            .ok_or_else(|| ProviderError::Missing("Add your Exa key in AI → Models.".into()))
     }
 
     pub fn providers(&self) -> Arc<ProviderRegistry> {
@@ -364,7 +364,7 @@ impl ResearchEnv {
             .get_setting(RESEARCH_MODEL_KEY)
             .await?
             .ok_or_else(|| {
-                AppError::ModelMissing("Choose a Company research model in Settings.".into())
+                AppError::ModelMissing("Choose a Company research model in AI → Models.".into())
             })?;
         Ok(self.providers.chat_endpoint(&ModelRef::parse(&id))?)
     }
@@ -389,12 +389,12 @@ impl ResearchEnv {
                     .ok()
                     .flatten()
                     .ok_or_else(|| {
-                        unavailable("Choose a Company research model in Settings.".into())
+                        unavailable("Choose a Company research model in AI → Models.".into())
                     })?;
                 let search = env
                     .search
                     .clone()
-                    .ok_or_else(|| unavailable("Add your Exa key in Settings.".into()))?;
+                    .ok_or_else(|| unavailable("Add your Exa key in AI → Models.".into()))?;
                 let ep = env
                     .endpoint()
                     .await

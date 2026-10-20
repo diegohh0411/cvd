@@ -631,7 +631,7 @@ mod provider_keys {
         let st = st.with_exa_base(server.uri());
         assert_eq!(
             st.search().err().map(|e| e.to_string()).as_deref(),
-            Some("Add your Exa key in Settings.")
+            Some("Add your Exa key in AI → Models.")
         );
         assert_eq!(
             set_provider_key(&st, "exa", "bad")
@@ -656,7 +656,7 @@ mod provider_keys {
         assert_eq!(err.kind(), "ModelMissing");
         assert_eq!(
             err.to_string(),
-            "Choose a Company research model in Settings."
+            "Choose a Company research model in AI → Models."
         );
         assert_eq!(
             set_research_model(&st, "clef-flash")
@@ -964,7 +964,7 @@ mod company_flow {
         assert_eq!(wait_done(&st, run).await, RunStatus::Done);
         let failed = events.lock().unwrap().iter().any(|(n, v)| {
             n == crate::company::coordinator::RESEARCH_EVENT
-                && v["event"]["error"] == "Choose a Company research model in Settings."
+                && v["event"]["error"] == "Choose a Company research model in AI → Models."
         });
         assert!(failed);
         assert_eq!(

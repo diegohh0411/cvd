@@ -47,7 +47,7 @@ fn kind_name(kind: &str) -> &str {
 fn missing_key(provider: &str) -> ProviderError {
     let provider = kind_of(provider);
     if provider == super::LOCAL_SERVER {
-        return ProviderError::Missing("Set up your Local server connection in AI Models.".into());
+        return ProviderError::Missing("Set up your Local server connection in AI → Models.".into());
     }
     let name = match provider {
         OPENROUTER => "OpenRouter",
@@ -55,7 +55,7 @@ fn missing_key(provider: &str) -> ProviderError {
         TYPESAFE => "TypeSafe",
         _ => provider,
     };
-    ProviderError::Missing(format!("Add your {name} key in Settings."))
+    ProviderError::Missing(format!("Add your {name} key in AI → Models."))
 }
 
 impl ProviderRegistry {
