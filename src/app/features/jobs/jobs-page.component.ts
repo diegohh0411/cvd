@@ -8,23 +8,22 @@ import { ZardButtonComponent } from '@/shared/components/button/button.component
 import { ZardInputComponent } from '@/shared/components/input';
 import { ZardSkeletonComponent } from '@/shared/components/skeleton/skeleton.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
-import { formatTimestamp } from '../../core/format';
 import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { JobDescription } from '../../core/ipc/types';
 import { JobStatusesStore } from '../../core/stores/job-statuses.store';
-import { jobLabel, JobsStore } from '../../core/stores/jobs.store';
+import { JobsStore } from '../../core/stores/jobs.store';
 import { ScanStore } from '../../core/stores/scan.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
-import { openJobUrl, urlHost } from './job-url';
-import { RunStatusBadgeComponent } from './run-status-badge.component';
+import { JobViewToolbarComponent } from './job-view-toolbar.component';
+import { applyView, JobViewsStore } from './job-views';
+import { JobsBoardComponent } from './jobs-board.component';
+import { JobsTableComponent } from './jobs-table.component';
 import { ScanResultsDialogComponent } from './scan-results-dialog.component';
-import { StatusPickerComponent } from './status-picker.component';
-import { StatusPillComponent } from './status-pill.component';
 
 @Component({
   selector: 'app-jobs-page',
-  imports: [FormsModule, ZardInputComponent, PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, RunStatusBadgeComponent, NgIcon, StatusPickerComponent, StatusPillComponent, ScanResultsDialogComponent],
+  imports: [FormsModule, ZardInputComponent, PageHeaderComponent, RouterLink, ZardButtonComponent, ZardSkeletonComponent, NgIcon, ScanResultsDialogComponent, JobViewToolbarComponent, JobsTableComponent, JobsBoardComponent],
   viewProviders: [provideIcons({ lucidePlus })],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -63,86 +62,50 @@ import { StatusPillComponent } from './status-pill.component';
           [ngModel]="query()"
           (ngModelChange)="search($event)"
         />
-        <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by status">
-          <button z-button zSize="xs" [zType]="filter() === 'all' ? 'secondary' : 'ghost'" (click)="filter.set('all')">
-            All <span class="text-muted-foreground tabular-nums">{{ jobs.jobs().length }}</span>
-          </button>
-          @for (s of statuses.statuses(); track s.id) {
-            <button z-button zSize="xs" [zType]="filter() === s.id ? 'secondary' : 'ghost'" (click)="filter.set(s.id)">
-              <app-status-pill [name]="s.name" [color]="s.color" />
-              <span class="text-muted-foreground tabular-nums">{{ counts().get(s.id) ?? 0 }}</span>
-            </button>
-          }
-        </div>
+        @if (view()) {
+          <app-job-view-toolbar />
+        }
       }
       @if (jobs.loading() && !jobs.jobs().length) {
         @for (i of [1, 2, 3]; track i) {
           <z-skeleton class="h-14 w-full" />
         }
+      } @else if (view()?.layout === 'board' && jobs.jobs().length) {
+        <app-jobs-board [jobs]="visible()" (statusChange)="setStatus($event.job, $event.statusId)" />
       } @else {
-        <ul class="divide-y rounded-xl border" aria-label="Jobs">
-          @for (j of visible(); track j.id) {
-            <li class="hover:bg-muted/50 flex items-center gap-3 pr-4">
-              <a [routerLink]="['/jobs', j.id]" class="flex min-w-0 flex-1 items-center justify-between gap-3 py-3 pl-4">
-                <div class="min-w-0">
-                  <div class="truncate font-medium">{{ label(j) }}</div>
-                  <div class="text-muted-foreground flex gap-1.5 text-xs">
-                    {{ date(j.created_at) }}
-                    @if (j.url) {
-                      <span aria-hidden="true">·</span>
-                      <button type="button" class="truncate hover:underline" [title]="j.url" (click)="$event.preventDefault(); open(j.url)">
-                        {{ host(j.url) }}
-                      </button>
-                    }
-                  </div>
-                </div>
-                <app-run-status-badge [run]="jobs.latestRuns()[j.id]" />
-              </a>
-              <app-status-picker class="w-32 shrink-0" [value]="j.status_id" (valueChange)="setStatus(j, $event)" />
-            </li>
-          } @empty {
-            <li class="text-muted-foreground flex flex-col items-center gap-3 p-10 text-center text-sm">
-              @if (hits() !== null) {
-                <span class="text-foreground font-medium">No jobs match “{{ query().trim() }}”</span>
-              } @else if (filter() !== 'all' && jobs.jobs().length) {
-                <span class="text-foreground font-medium">No jobs with this status</span>
-              } @else {
+        <app-jobs-table [jobs]="visible()" (statusChange)="setStatus($event.job, $event.statusId)">
+          <div class="text-muted-foreground flex flex-col items-center gap-3 p-10 text-center text-sm">
+            @if (hits() !== null) {
+              <span class="text-foreground font-medium">No jobs match “{{ query().trim() }}”</span>
+            } @else if (jobs.jobs().length) {
+              <span class="text-foreground font-medium">No jobs match this view’s filters</span>
+            } @else {
               <span class="text-foreground font-medium">No jobs yet</span>
               Paste a job description to rank your library against it.
               <a z-button routerLink="/jobs/new"><ng-icon name="lucidePlus" /> New job</a>
-              }
-            </li>
-          }
-        </ul>
+            }
+          </div>
+        </app-jobs-table>
       }
     </div>
   `,
 })
 export class JobsPageComponent implements OnInit {
   protected readonly jobs = inject(JobsStore);
-  protected readonly label = jobLabel;
   protected readonly statuses = inject(JobStatusesStore);
   private readonly toast = inject(ZardSonnerService);
-  protected readonly date = formatTimestamp;
-  protected readonly host = urlHost;
-  protected readonly open = openJobUrl;
 
-  protected readonly filter = signal<'all' | number>('all');
-  protected readonly counts = computed(() => {
-    const m = new Map<number, number>();
-    for (const j of this.jobs.jobs()) if (j.status_id !== null) m.set(j.status_id, (m.get(j.status_id) ?? 0) + 1);
-    return m;
-  });
+  private readonly views = inject(JobViewsStore);
+  protected readonly view = this.views.active;
   protected readonly query = signal('');
   /** Fuzzy-ranked job ids for the current query; null when not searching. */
   protected readonly hits = signal<number[] | null>(null);
   protected readonly visible = computed(() => {
-    const f = this.filter();
-    const byStatus = (j: JobDescription) => f === 'all' || j.status_id === f;
     const ids = this.hits();
-    if (ids === null) return this.jobs.sorted().filter(byStatus);
     const byId = new Map(this.jobs.jobs().map((j) => [j.id, j]));
-    return ids.flatMap((id) => byId.get(id) ?? []).filter(byStatus);
+    const base = ids === null ? this.jobs.sorted() : ids.flatMap((id) => byId.get(id) ?? []);
+    const view = this.view();
+    return view ? applyView(base, view, this.statuses.byId()) : base;
   });
 
   protected readonly scanStore = inject(ScanStore);
@@ -170,6 +133,7 @@ export class JobsPageComponent implements OnInit {
   ngOnInit(): void {
     void this.jobs.load();
     void this.statuses.ensureLoaded();
+    void this.views.ensureLoaded();
     void this.scanStore.ensureReady();
     void this.scanStore.refreshPending();
     void api.getMailAccount().then(
