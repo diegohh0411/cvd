@@ -16,6 +16,7 @@ use crate::mail::account::{self, MailAccount};
 use crate::mail::cycle::{self, CycleError};
 use crate::mail::imap::{ImapSource, MailSource};
 use crate::mail::scan;
+use crate::mail::watch::{Control, WatcherStatus};
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::providers::{
     kind_of, load_rows, next_id, normalize_url, save_rows, Connection, LocalProvider, ModelRef,
@@ -25,14 +26,14 @@ use crate::providers::{
 use crate::render::fit::{self, Override, Selection};
 use crate::render::{self, Compiled, RenderError, StyleStep};
 use crate::search::{ExaSearch, SearchProvider, EXA};
-use crate::state::AppState;
 use crate::state::ResearchEnv;
+use crate::state::{AppState, JOB_UPDATED_EVENT};
 #[cfg(test)]
 use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
-use crate::store::{ProcessedEmail, ScanSource, Store};
+use crate::store::{InboxFilter, ProcessedEmail, ScanSource, Store};
 use crate::web::{self, FetchPolicy};
 use tokio_util::sync::CancellationToken;
 
@@ -216,10 +217,13 @@ pub async fn create_job(
     url: &str,
     status_id: Option<i64>,
 ) -> Res<i64> {
-    Ok(st
+    let id = st
         .store
         .create_jd(title, company, raw_text, url, status_id)
-        .await?)
+        .await?;
+    // Earlier mail may be about this job; the watcher re-checks it.
+    st.watcher.send(Control::Nudge);
+    Ok(id)
 }
 
 pub async fn update_job_tracking(
@@ -749,6 +753,7 @@ pub async fn set_research_model(st: &AppState, id: &str) -> Res<()> {
     st.store
         .set_setting(crate::state::RESEARCH_MODEL_KEY, id)
         .await?;
+    st.retry_watcher_if_paused();
     Ok(())
 }
 
@@ -760,6 +765,7 @@ pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
         .await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    st.retry_watcher_if_paused();
     Ok(())
 }
 
@@ -883,6 +889,7 @@ async fn providers_changed(st: &AppState) -> Res<()> {
     st.reload_providers().await?;
     st.reset_engine();
     (st.emitter())(ENGINE_EVENT, json!({}));
+    st.retry_watcher_if_paused();
     Ok(())
 }
 
@@ -1128,11 +1135,14 @@ pub async fn save_mail_account(
         account::set_folder(&st.store, folder).await?;
     }
     let folder = account::folder(&st.store).await?;
+    st.watcher.send(Control::Restart);
     Ok(mail_view(&account, &folder))
 }
 
 pub async fn delete_mail_account(st: &AppState) -> Res<()> {
-    Ok(account::remove(&st.store).await?)
+    account::remove(&st.store).await?;
+    st.watcher.send(Control::Stop);
+    Ok(())
 }
 
 /// Logs in with the typed values and returns the mailboxes the account can
@@ -1175,16 +1185,6 @@ pub fn get_scan_status(st: &AppState) -> ScanState {
     }
 }
 
-pub async fn list_scan_results(st: &AppState, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
-    Ok(st
-        .store
-        .list_run_results(run_id)
-        .await?
-        .into_iter()
-        .map(scan_view)
-        .collect())
-}
-
 pub async fn list_pending_reviews(st: &AppState) -> Res<Vec<ProcessedEmailView>> {
     Ok(st
         .store
@@ -1206,11 +1206,85 @@ pub async fn list_job_emails(st: &AppState, job_id: i64) -> Res<Vec<ProcessedEma
 }
 
 pub async fn apply_suggestion(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
-    Ok(scan_view(st.store.apply_suggestion(message_id).await?))
+    let email = st.store.apply_suggestion(message_id).await?;
+    emit_job_change(st, &email);
+    Ok(scan_view(email))
 }
 
 pub async fn dismiss_suggestion(st: &AppState, message_id: &str) -> Res<()> {
-    Ok(st.store.dismiss_suggestion(message_id).await?)
+    st.store.dismiss_suggestion(message_id).await?;
+    emit_inbox_changed(st, message_id);
+    Ok(())
+}
+
+fn emit_inbox_changed(st: &AppState, message_id: &str) {
+    (st.emitter())(
+        scan::INBOX_CHANGED_EVENT,
+        json!({ "message_id": message_id }),
+    );
+}
+
+/// The row's job status changed: refresh the jobs list and the inbox.
+fn emit_job_change(st: &AppState, email: &ProcessedEmail) {
+    if let Some(job_id) = email.matched_job_id {
+        let status_id = status_after(email);
+        (st.emitter())(
+            JOB_UPDATED_EVENT,
+            json!({ "job_id": job_id, "status_id": status_id }),
+        );
+    }
+    emit_inbox_changed(st, &email.message_id);
+}
+
+/// The job's status once `email` was applied or undone.
+fn status_after(email: &ProcessedEmail) -> Option<i64> {
+    if email.undone_at.is_some() {
+        email.previous_status_id
+    } else {
+        email.suggested_status_id
+    }
+}
+
+// ---- inbox and watcher ----
+
+pub fn get_watcher_status(st: &AppState) -> WatcherStatus {
+    st.watcher.status()
+}
+
+pub fn retry_watcher(st: &AppState) {
+    st.watcher.send(Control::Retry);
+}
+
+pub async fn list_inbox(st: &AppState, filter: InboxFilter) -> Res<Vec<ProcessedEmailView>> {
+    Ok(st
+        .store
+        .list_inbox(filter)
+        .await?
+        .into_iter()
+        .map(scan_view)
+        .collect())
+}
+
+pub async fn unread_count(st: &AppState) -> Res<i64> {
+    Ok(st.store.unread_count().await?)
+}
+
+pub async fn mark_read(st: &AppState, message_id: &str) -> Res<()> {
+    st.store.mark_read(message_id).await?;
+    emit_inbox_changed(st, message_id);
+    Ok(())
+}
+
+pub async fn mark_all_read(st: &AppState) -> Res<()> {
+    st.store.mark_all_read().await?;
+    (st.emitter())(scan::INBOX_CHANGED_EVENT, json!({}));
+    Ok(())
+}
+
+pub async fn undo_applied(st: &AppState, message_id: &str) -> Res<ProcessedEmailView> {
+    let email = st.store.undo_applied(message_id).await?;
+    emit_job_change(st, &email);
+    Ok(scan_view(email))
 }
 
 pub mod ipc {
@@ -1530,10 +1604,6 @@ pub mod ipc {
         Ok(super::get_scan_status(&st))
     }
     #[tauri::command]
-    pub async fn list_scan_results(st: S<'_>, run_id: i64) -> Res<Vec<ProcessedEmailView>> {
-        super::list_scan_results(&st, run_id).await
-    }
-    #[tauri::command]
     pub async fn list_job_emails(st: S<'_>, job_id: i64) -> Res<Vec<ProcessedEmailView>> {
         super::list_job_emails(&st, job_id).await
     }
@@ -1548,6 +1618,35 @@ pub mod ipc {
     #[tauri::command]
     pub async fn dismiss_suggestion(st: S<'_>, message_id: String) -> Res<()> {
         super::dismiss_suggestion(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn get_watcher_status(st: S<'_>) -> Res<WatcherStatus> {
+        Ok(super::get_watcher_status(&st))
+    }
+    #[tauri::command]
+    pub async fn retry_watcher(st: S<'_>) -> Res<()> {
+        super::retry_watcher(&st);
+        Ok(())
+    }
+    #[tauri::command]
+    pub async fn list_inbox(st: S<'_>, filter: InboxFilter) -> Res<Vec<ProcessedEmailView>> {
+        super::list_inbox(&st, filter).await
+    }
+    #[tauri::command]
+    pub async fn unread_count(st: S<'_>) -> Res<i64> {
+        super::unread_count(&st).await
+    }
+    #[tauri::command]
+    pub async fn mark_read(st: S<'_>, message_id: String) -> Res<()> {
+        super::mark_read(&st, &message_id).await
+    }
+    #[tauri::command]
+    pub async fn mark_all_read(st: S<'_>) -> Res<()> {
+        super::mark_all_read(&st).await
+    }
+    #[tauri::command]
+    pub async fn undo_applied(st: S<'_>, message_id: String) -> Res<ProcessedEmailView> {
+        super::undo_applied(&st, &message_id).await
     }
 }
 

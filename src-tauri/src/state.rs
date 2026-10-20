@@ -68,6 +68,8 @@ pub struct AppState {
     scan_running: Arc<AtomicBool>,
     /// Woken whenever the scan slot frees.
     scan_freed: Arc<tokio::sync::Notify>,
+    /// The Gmail watcher task's controls and status.
+    pub watcher: crate::mail::watch::WatcherControl,
 }
 
 /// Holds the single Gmail scan slot; the slot frees when the guard drops.
@@ -114,6 +116,7 @@ impl AppState {
             skips: Skips::default(),
             scan_running: Arc::default(),
             scan_freed: Arc::default(),
+            watcher: Default::default(),
         }
     }
 
@@ -155,7 +158,16 @@ impl AppState {
                 Arc::new(ExaSearch::new(self.exa_base.clone(), k)) as Arc<dyn SearchProvider>
             });
         *self.search.write().unwrap_or_else(|e| e.into_inner()) = search;
+        self.retry_watcher_if_paused();
         Ok(())
+    }
+
+    /// AI settings changed: a watcher paused on an AI error may work now.
+    pub fn retry_watcher_if_paused(&self) {
+        use crate::mail::watch::{Control, WatchState};
+        if self.watcher.status().state == WatchState::Paused {
+            self.watcher.send(Control::Retry);
+        }
     }
 
     pub async fn research_model(&self) -> Result<Option<String>, AppError> {

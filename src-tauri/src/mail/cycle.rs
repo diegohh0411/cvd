@@ -4,9 +4,13 @@
 use std::sync::Arc;
 
 use super::account::{self, MailAccount};
-use super::imap::ImapSource;
+use tauri::Manager;
+use tokio::sync::Notify;
+
+use super::imap::{ImapSource, MailError};
 use super::recheck;
 use super::scan::{self, ScanDeps, ScanSummary};
+use super::watch::{IdleConn, WatchDeps};
 use crate::commands::AppError;
 use crate::engine::DecisionEngine;
 use crate::providers::ChatEndpoint;
@@ -97,4 +101,35 @@ pub async fn run_cycle(
         }
     }
     scan::run_scan(deps(), run_id, source).await
+}
+
+/// The watcher's view of the running app.
+pub struct AppWatchDeps {
+    pub handle: tauri::AppHandle,
+}
+
+#[async_trait::async_trait]
+impl WatchDeps for AppWatchDeps {
+    async fn connect(&self) -> Result<Option<Box<dyn IdleConn>>, MailError> {
+        let st = self.handle.state::<AppState>();
+        let stored = |e: crate::store::StoreError| MailError::Connection(e.to_string());
+        let Some(account) = account::load(&st.store).await.map_err(stored)? else {
+            return Ok(None);
+        };
+        let folder = account::folder(&st.store).await.map_err(stored)?;
+        let idle = ImapSource::new(account, folder).open_idle().await?;
+        Ok(Some(Box::new(idle)))
+    }
+
+    async fn cycle(&self) -> Result<(), CycleError> {
+        let st = self.handle.state::<AppState>();
+        let prepared = prepare(&st).await?;
+        let run_id = scan::begin_run(&prepared.store, ScanSource::Watch).await?;
+        run_cycle(prepared, ScanSource::Watch, run_id).await?;
+        Ok(())
+    }
+
+    fn scan_freed(&self) -> Arc<Notify> {
+        self.handle.state::<AppState>().scan_freed()
+    }
 }
