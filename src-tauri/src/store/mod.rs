@@ -141,6 +141,35 @@ fn dup_status(e: sqlx::Error, name: &str) -> StoreError {
     }
 }
 
+fn job_view_from_row(r: &SqliteRow) -> Result<JobView> {
+    let layout: String = r.get("layout");
+    Ok(JobView {
+        id: r.get("id"),
+        name: r.get("name"),
+        layout: serde_json::from_value(serde_json::Value::String(layout.clone()))
+            .map_err(|_| StoreError::Invalid(format!("view layout {layout}")))?,
+        filters: serde_json::from_str(r.get("filters"))?,
+        sorts: serde_json::from_str(r.get("sorts"))?,
+        position: r.get("position"),
+    })
+}
+
+/// Validates a view's fields, returning (name, layout, filters, sorts) ready to bind.
+fn view_columns(v: &JobViewInput) -> Result<(&str, &'static str, String, String)> {
+    let name = v.name.trim();
+    if name.is_empty() {
+        return Err(StoreError::Invalid("view name must not be empty".into()));
+    }
+    if !v.filters.is_array() || !v.sorts.is_array() {
+        return Err(StoreError::Invalid("view filters and sorts must be lists".into()));
+    }
+    let layout = match v.layout {
+        ViewLayout::Table => "table",
+        ViewLayout::Board => "board",
+    };
+    Ok((name, layout, v.filters.to_string(), v.sorts.to_string()))
+}
+
 fn skill_from_row(r: &SqliteRow) -> Skill {
     Skill {
         id: r.get("id"),
@@ -626,6 +655,71 @@ impl Store {
                 .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    // ---- job views ----
+
+    pub async fn list_job_views(&self) -> Result<Vec<JobView>> {
+        let rows = sqlx::query("SELECT * FROM job_view ORDER BY position, id")
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(job_view_from_row).collect()
+    }
+
+    pub async fn get_job_view(&self, id: i64) -> Result<Option<JobView>> {
+        let row = sqlx::query("SELECT * FROM job_view WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(job_view_from_row).transpose()
+    }
+
+    /// Appends a view at the end of the tabs.
+    pub async fn create_job_view(&self, v: &JobViewInput) -> Result<i64> {
+        let (name, layout, filters, sorts) = view_columns(v)?;
+        Ok(sqlx::query(
+            "INSERT INTO job_view (name, layout, filters, sorts, position)
+             VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position) + 1, 0) FROM job_view))",
+        )
+        .bind(name)
+        .bind(layout)
+        .bind(filters)
+        .bind(sorts)
+        .execute(&self.pool)
+        .await?
+        .last_insert_rowid())
+    }
+
+    /// Saves a view. Returns false when it does not exist.
+    pub async fn update_job_view(&self, id: i64, v: &JobViewInput) -> Result<bool> {
+        let (name, layout, filters, sorts) = view_columns(v)?;
+        let done = sqlx::query("UPDATE job_view SET name = ?, layout = ?, filters = ?, sorts = ? WHERE id = ?")
+            .bind(name)
+            .bind(layout)
+            .bind(filters)
+            .bind(sorts)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Deletes a view, refusing to remove the last one so the page always has a view.
+    pub async fn delete_job_view(&self, id: i64) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let others: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM job_view WHERE id != ?")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+        if others == 0 {
+            return Err(StoreError::Invalid("the last view cannot be deleted".into()));
+        }
+        sqlx::query("DELETE FROM job_view WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }

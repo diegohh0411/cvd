@@ -669,3 +669,34 @@ async fn job_emails_are_scoped_to_the_job_newest_first() {
         .collect();
     assert_eq!(ids, ["msg-new", "msg-old"]);
 }
+
+#[tokio::test]
+async fn job_views_seed_one_and_keep_the_last() {
+    let s = store().await;
+    let seeded = s.list_job_views().await.unwrap();
+    assert_eq!(seeded.len(), 1);
+    assert_eq!(seeded[0].layout, ViewLayout::Table);
+    assert_eq!(seeded[0].filters, serde_json::json!([]));
+    assert_eq!(seeded[0].sorts, serde_json::json!([]));
+
+    let board = JobViewInput {
+        name: " Pipeline ".into(),
+        layout: ViewLayout::Board,
+        filters: serde_json::json!([{ "field": "status", "op": "is", "value": [1] }]),
+        sorts: serde_json::json!([]),
+    };
+    let id = s.create_job_view(&board).await.unwrap();
+    let saved = s.get_job_view(id).await.unwrap().unwrap();
+    assert_eq!(saved.name, "Pipeline");
+    assert_eq!(saved.filters, board.filters);
+    assert_eq!(saved.position, 1);
+
+    let renamed = JobViewInput { name: "Board".into(), ..board.clone() };
+    assert!(s.update_job_view(id, &renamed).await.unwrap());
+    assert!(!s.update_job_view(9999, &renamed).await.unwrap());
+    assert!(s.create_job_view(&JobViewInput { name: " ".into(), ..board }).await.is_err());
+
+    s.delete_job_view(seeded[0].id).await.unwrap();
+    assert!(s.delete_job_view(id).await.is_err(), "the last view stays");
+    assert_eq!(s.list_job_views().await.unwrap().len(), 1);
+}
