@@ -1554,3 +1554,42 @@ mod local_server {
         assert_eq!(body["model"], "chat");
     }
 }
+
+#[tokio::test]
+async fn prepare_without_account_is_no_account() {
+    let (st, _) = state().await;
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(
+        result,
+        Err(crate::mail::cycle::CycleError::NoAccount)
+    ));
+    assert!(!st.scan_running(), "the slot is released on failure");
+}
+
+#[tokio::test]
+async fn prepare_while_slot_held_is_busy() {
+    let (st, _) = state().await;
+    let _held = st.begin_scan().unwrap();
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(result, Err(crate::mail::cycle::CycleError::Busy)));
+}
+
+#[tokio::test]
+async fn scan_freed_notifies_on_guard_drop() {
+    let (st, _) = state().await;
+    let guard = st.begin_scan().unwrap();
+    let freed = st.scan_freed();
+    let waiter = tokio::spawn(async move { freed.notified().await });
+    tokio::task::yield_now().await;
+
+    drop(guard);
+
+    tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .expect("waiter woke")
+        .unwrap();
+}

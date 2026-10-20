@@ -75,6 +75,20 @@ pub async fn run_scan(
     finish_run(&deps, summary, source, result).await
 }
 
+/// Closes a run that could not start its scan, e.g. after a failed re-check.
+pub async fn run_scan_failed(
+    deps: ScanDeps<'_>,
+    run_id: i64,
+    source: ScanSource,
+    error: AppError,
+) -> Result<ScanSummary, AppError> {
+    let summary = ScanSummary {
+        run_id,
+        ..ScanSummary::default()
+    };
+    finish_run(&deps, summary, source, Err(error)).await
+}
+
 /// Records how a run ended and announces it on `scan://finished`.
 pub(crate) async fn finish_run(
     deps: &ScanDeps<'_>,

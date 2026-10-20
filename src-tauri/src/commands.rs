@@ -13,8 +13,9 @@ use crate::company::{
 };
 use crate::engine::EngineError;
 use crate::mail::account::{self, MailAccount};
+use crate::mail::cycle::{self, CycleError};
 use crate::mail::imap::{ImapSource, MailSource};
-use crate::mail::scan::{self, ScanDeps};
+use crate::mail::scan;
 use crate::matcher::{self, MatchConfig, MatchError, Ranked};
 use crate::providers::{
     kind_of, load_rows, next_id, normalize_url, save_rows, Connection, LocalProvider, ModelRef,
@@ -1153,35 +1154,17 @@ pub async fn test_mail_account(
 /// Claims the scan slot, creates the run, and scans in the background.
 /// Progress and the final result arrive as `scan://` events.
 pub async fn start_scan(st: &AppState) -> Res<i64> {
-    let guard = st
-        .begin_scan()
-        .ok_or_else(|| AppError::Io("A scan is already running.".into()))?;
-    let account = account::load(&st.store)
-        .await?
-        .ok_or_else(|| AppError::Io("Connect Gmail in Settings › Integrations first.".into()))?;
-    let folder = account::folder(&st.store).await?;
-    let model = st.active_model().await?;
-    let engine = st.engine_for(&model)?;
-    let chat = st.research_endpoint().await?;
-    let run_id = scan::begin_run(&st.store, ScanSource::Manual).await?;
-
-    let store = st.store.clone();
-    let emit = st.emitter();
-    let mail = ImapSource::new(account, folder);
+    let prepared = cycle::prepare(st).await.map_err(|e| match e {
+        CycleError::Busy => AppError::Io("A scan is already running.".into()),
+        CycleError::NoAccount => {
+            AppError::Io("Connect Gmail in Settings › Integrations first.".into())
+        }
+        CycleError::Failed(e) => e,
+    })?;
+    let run_id = scan::begin_run(&prepared.store, ScanSource::Manual).await?;
     tauri::async_runtime::spawn(async move {
-        let _guard = guard;
-        let http = reqwest::Client::new();
-        let deps = ScanDeps {
-            store: &store,
-            mail: &mail,
-            engine: engine.as_ref(),
-            chat: &chat,
-            http: &http,
-            emit: &emit,
-            today: chrono::Local::now().date_naive(),
-        };
         // The outcome reaches the UI through `scan://finished`.
-        let _ = scan::run_scan(deps, run_id, ScanSource::Manual).await;
+        let _ = cycle::run_cycle(prepared, ScanSource::Manual, run_id).await;
     });
     Ok(run_id)
 }
