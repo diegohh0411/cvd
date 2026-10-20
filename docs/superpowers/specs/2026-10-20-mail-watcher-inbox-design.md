@@ -56,7 +56,7 @@ A long-lived tokio task owned by `AppState`.
   - **Check now:** runs a scan with source `manual`. Disabled while a scan runs. On finish it shows one toast ("2 updates" or "No new updates"). This replaces "Read emails for updates" on the Jobs page.
   - **Mark all read.**
 - **Filters:** tabs **All · Needs review · Unread**, kept in the `filter` query param.
-- **Ordering:** `pending_review` rows first, then everything by `received_at` descending.
+- **Ordering:** `pending_review` rows first, then everything by `processed_at` descending. (`received_at` stores the raw RFC 2822 `Date` header, which does not sort as text. A re-matched email surfacing at the top is intended.)
 - **Rows** use the popup's current layout (divided list, `StatusPillComponent`): job name, one-sentence summary, relative received time, unread dot, Gmail link icon.
   - **Applied:** old → new pills and **Undo**.
   - **Needs review:** suggested status pill, confidence, **Apply** and **Dismiss**.
