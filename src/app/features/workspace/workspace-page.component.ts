@@ -160,8 +160,12 @@ export function failureCopy(e: AppError | null): { title: string; body: string }
                 }
               }
               <div class="flex gap-2">
-                <button z-button (click)="resume()">{{ ws.phase() === 'cancelled' ? 'Resume' : 'Retry' }}</button>
-                <button z-button zType="outline" (click)="rematch(true)">Start over</button>
+                @if (ws.phase() === 'cancelled') {
+                  <button z-button (click)="resume()">Resume</button>
+                  <button z-button zType="outline" (click)="rematch(true)">Start over</button>
+                } @else {
+                  <button z-button (click)="rematch(true)">Retry</button>
+                }
               </div>
             </div>
           }

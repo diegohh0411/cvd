@@ -785,6 +785,16 @@ impl Store {
         self.pool.close().await;
     }
 
+    /// Records the model a run is (re)scored with.
+    pub async fn set_run_model(&self, run_id: i64, model_id: &str) -> Result<()> {
+        sqlx::query("UPDATE match_run SET model_id = ? WHERE id = ?")
+            .bind(model_id)
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_run_status(&self, run_id: i64, status: RunStatus) -> Result<()> {
         sqlx::query("UPDATE match_run SET status = ? WHERE id = ?")
             .bind(status_str(status))

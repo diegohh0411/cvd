@@ -361,10 +361,14 @@ pub async fn start_match(st: &AppState, jd_id: i64) -> Res<i64> {
     Ok(run_id)
 }
 
-/// Continues a cancelled or failed run in the background.
+/// Continues a cancelled or failed run in the background, with the model
+/// that is active now, so switching models fixes a run the old one failed.
 pub async fn resume_match(st: &AppState, run_id: i64) -> Res<()> {
-    let run = st.store.get_run(run_id).await?;
-    spawn_run(st, run_id, &run.model_id)
+    st.store.get_run(run_id).await?;
+    let model_id = st.active_model().await?;
+    spawn_run(st, run_id, &model_id)?;
+    st.store.set_run_model(run_id, &model_id).await?;
+    Ok(())
 }
 
 pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
