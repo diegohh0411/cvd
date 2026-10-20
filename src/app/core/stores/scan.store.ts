@@ -1,26 +1,25 @@
-import { Injectable, signal } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
 
+import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import * as api from '../ipc/commands';
 import { onScanFinished, onScanProgress } from '../ipc/events';
 import type { AppErrorKind, ScanFinished, ScanProgress } from '../ipc/types';
 
-/** The counts of a finished scan, as shown in the results popup header. */
-export type ScanSummary = Omit<ScanFinished, 'status' | 'error' | 'error_kind'>;
-
 /**
- * The Gmail scan, shared app-wide. Events are subscribed once, so a scan that
- * finishes while the Jobs page is closed still updates the badge and popup.
+ * The Gmail scan, shared app-wide. Scans run in the background (the mail
+ * watcher) or from "Check now"; only the latter announces its result.
  */
 @Injectable({ providedIn: 'root' })
 export class ScanStore {
   readonly running = signal(false);
   readonly progress = signal<ScanProgress | null>(null);
-  /** Set when a scan finishes; the Jobs page opens the popup and acknowledges it. */
-  readonly finishedRunId = signal<number | null>(null);
   readonly lastError = signal<string | null>(null);
   readonly lastErrorKind = signal<AppErrorKind | null>(null);
-  readonly finishedSummary = signal<ScanSummary | null>(null);
   readonly pendingCount = signal(0);
+
+  private readonly toast = inject(ZardSonnerService);
+  /** Set by `start()`, so only the scan the user asked for is toasted. */
+  private manualStarted = false;
 
   private ready: Promise<void> | null = null;
 
@@ -35,10 +34,12 @@ export class ScanStore {
     this.running.set(true);
     this.progress.set(null);
     this.lastError.set(null);
+    this.manualStarted = true;
     try {
       await api.startScan();
     } catch (e) {
       this.running.set(false);
+      this.manualStarted = false;
       throw e;
     }
   }
@@ -51,13 +52,13 @@ export class ScanStore {
     }
   }
 
-  acknowledgeFinished(): void {
-    this.finishedRunId.set(null);
-  }
-
   private async setUp(): Promise<void> {
     await Promise.all([
-      onScanProgress((p) => this.progress.set(p)),
+      onScanProgress((p) => {
+        // Background scans start without `start()`.
+        this.running.set(true);
+        this.progress.set(p);
+      }),
       onScanFinished((f) => this.finish(f)),
     ]);
     try {
@@ -71,18 +72,22 @@ export class ScanStore {
   private finish(f: ScanFinished): void {
     this.running.set(false);
     this.progress.set(null);
-    this.finishedRunId.set(f.run_id);
     this.lastError.set(f.error);
     this.lastErrorKind.set(f.error_kind);
-    this.finishedSummary.set({
-      run_id: f.run_id,
-      checked: f.checked,
-      job_related: f.job_related,
-      applied: f.applied,
-      pending: f.pending,
-      no_change: f.no_change,
-      failed: f.failed,
-    });
+    if (f.source === 'manual' && this.manualStarted) {
+      this.manualStarted = false;
+      this.announce(f);
+    }
     void this.refreshPending();
+  }
+
+  private announce(f: ScanFinished): void {
+    if (f.status === 'failed') {
+      this.toast.error('The check stopped', { description: f.error ?? undefined });
+      return;
+    }
+    const updates = f.applied + f.pending;
+    if (updates === 0) this.toast.info('No new updates');
+    else this.toast.success(updates === 1 ? '1 update' : `${updates} updates`);
   }
 }

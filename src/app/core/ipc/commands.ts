@@ -22,12 +22,14 @@ import type {
   MatchRun,
   Override,
   Profile,
+  InboxFilter,
   ProcessedEmail,
   Connection,
   ProviderId,
   ProviderModels,
   Ranked,
   ScanState,
+  WatcherStatus,
   ScoreRow,
   Selection,
   Skill,
@@ -135,11 +137,20 @@ export const testMailAccount = (host: string, port: number, address: string, pas
   call<string[]>('test_mail_account', { host, port, address, password });
 export const startScan = () => call<number>('start_scan');
 export const getScanStatus = () => call<ScanState>('get_scan_status');
-export const listScanResults = (runId: number) => call<ProcessedEmail[]>('list_scan_results', { runId });
 export const listPendingReviews = () => call<ProcessedEmail[]>('list_pending_reviews');
 /** Emails matched to a job, newest first. */
 export const listJobEmails = (jobId: number) => call<ProcessedEmail[]>('list_job_emails', { jobId });
 export const applySuggestion = (messageId: string) => call<ProcessedEmail>('apply_suggestion', { messageId });
+// ---- Inbox and mail watcher ----
+export const getWatcherStatus = () => call<WatcherStatus>('get_watcher_status');
+export const retryWatcher = () => call<void>('retry_watcher');
+/** Job-related results, reviews first, newest first. */
+export const listInbox = (filter: InboxFilter) => call<ProcessedEmail[]>('list_inbox', { filter });
+export const unreadCount = () => call<number>('unread_count');
+export const markRead = (messageId: string) => call<void>('mark_read', { messageId });
+export const markAllRead = () => call<void>('mark_all_read');
+/** Restores the status an auto-apply replaced; fails if the job moved since. */
+export const undoApplied = (messageId: string) => call<ProcessedEmail>('undo_applied', { messageId });
 export const dismissSuggestion = (messageId: string) => call<void>('dismiss_suggestion', { messageId });
 
 export const getLocalConnection = () => call<{ base_url: string; has_key: boolean }>('get_local_connection');

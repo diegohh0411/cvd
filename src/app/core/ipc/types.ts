@@ -359,9 +359,32 @@ export interface ProcessedEmail {
   confidence: number | null;
   summary: string | null;
   outcome: ScanOutcome;
+  /** System One's job-related probability; null for rows from before the inbox. */
+  job_related: number | null;
+  /** Truncated body, kept only for job-related mail. */
+  body: string | null;
+  /** Null until the row is read in the inbox. */
+  read_at: string | null;
+  /** Set when an auto-applied status was undone. */
+  undone_at: string | null;
   /** Computed by the backend so the webview never builds Gmail links. */
   gmail_url: string;
 }
+
+export type InboxFilter = 'all' | 'review' | 'unread';
+
+export type WatchState = 'connecting' | 'watching' | 'scanning' | 'paused' | 'stopped';
+
+/** Payload of `mail://watcher` and `get_watcher_status`. */
+export interface WatcherStatus {
+  state: WatchState;
+  error: string | null;
+  error_kind: AppErrorKind | null;
+  /** RFC 3339 time of the last successful check. */
+  last_checked_at: string | null;
+}
+
+export type ScanSource = 'watch' | 'recheck' | 'manual';
 
 export interface ScanState {
   running: boolean;
@@ -375,6 +398,7 @@ export interface ScanProgress {
 /** Payload of `scan://finished`. */
 export interface ScanFinished {
   run_id: number;
+  source: ScanSource;
   status: 'done' | 'failed';
   error: string | null;
   error_kind: AppErrorKind | null;

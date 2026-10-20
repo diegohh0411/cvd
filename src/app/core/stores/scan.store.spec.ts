@@ -1,5 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 
+import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
+
 import { pageProviders } from '../../../testing/providers';
 import { flush, mockTauri, type TauriMock } from '../../../testing/tauri-mock';
 import { ScanStore } from './scan.store';
@@ -21,6 +23,7 @@ async function setup(extra: Record<string, unknown> = {}): Promise<{ t: TauriMoc
 
 const finished = (overrides: Record<string, unknown> = {}) => ({
   run_id: 7,
+  source: 'manual',
   status: 'done',
   error: null,
   error_kind: null,
@@ -42,7 +45,7 @@ describe('ScanStore', () => {
     expect(store.progress()).toEqual({ checked: 3, total: 10 });
   });
 
-  it('a done scan clears running, records the run, and refreshes the pending count', async () => {
+  it('a done scan clears running and refreshes the pending count', async () => {
     const { t, store } = await setup({ list_pending_reviews: PENDING });
     await store.start();
     expect(store.running()).toBe(true);
@@ -50,18 +53,61 @@ describe('ScanStore', () => {
     await t.emit('scan://finished', finished());
 
     expect(store.running()).toBe(false);
-    expect(store.finishedRunId()).toBe(7);
-    expect(store.finishedSummary()).toEqual({
-      run_id: 7,
-      checked: 12,
-      job_related: 3,
-      applied: 1,
-      pending: 1,
-      no_change: 1,
-      failed: 0,
-    });
     expect(store.lastError()).toBeNull();
     expect(store.pendingCount()).toBe(2);
+  });
+
+  it('toasts once for a manual scan', async () => {
+    const { t, store } = await setup();
+    const toast = TestBed.inject(ZardSonnerService);
+    const success = vi.spyOn(toast, 'success');
+    await store.start();
+
+    await t.emit('scan://finished', finished());
+    await t.emit('scan://finished', finished({ source: 'watch' }));
+
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success).toHaveBeenCalledWith('2 updates');
+  });
+
+  it('a manual scan with nothing new says so', async () => {
+    const { t, store } = await setup();
+    const info = vi.spyOn(TestBed.inject(ZardSonnerService), 'info');
+    await store.start();
+
+    await t.emit('scan://finished', finished({ applied: 0, pending: 0 }));
+
+    expect(info).toHaveBeenCalledWith('No new updates');
+  });
+
+  it('a failed manual scan toasts the error', async () => {
+    const { t, store } = await setup();
+    const error = vi.spyOn(TestBed.inject(ZardSonnerService), 'error');
+    await store.start();
+
+    await t.emit('scan://finished', finished({ status: 'failed', error: 'Gmail authentication failed' }));
+
+    expect(error).toHaveBeenCalledWith('The check stopped', { description: 'Gmail authentication failed' });
+  });
+
+  it('does not toast for watch scans', async () => {
+    const { t } = await setup();
+    const toast = TestBed.inject(ZardSonnerService);
+    const success = vi.spyOn(toast, 'success');
+    const info = vi.spyOn(toast, 'info');
+
+    await t.emit('scan://finished', finished({ source: 'watch' }));
+
+    expect(success).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('a watch scan starting elsewhere shows as running from progress', async () => {
+    const { t, store } = await setup();
+
+    await t.emit('scan://progress', { checked: 0, total: 4 });
+
+    expect(store.running()).toBe(true);
   });
 
   it('a failed scan sets lastError and its kind', async () => {
