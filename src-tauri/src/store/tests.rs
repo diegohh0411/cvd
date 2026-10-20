@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::types::*;
-use super::{NewProcessed, Outcome, Store};
+use super::{InboxFilter, NewProcessed, Outcome, ScanSource, Store};
 
 async fn store() -> Store {
     Store::open("sqlite::memory:").await.unwrap()
@@ -484,13 +484,15 @@ fn processed(message_id: &str, run_id: i64, outcome: Outcome) -> NewProcessed {
         confidence: Some(0.9),
         summary: Some("The application was received.".into()),
         outcome,
+        job_related: Some(0.9),
+        body: None,
     }
 }
 
 #[tokio::test]
 async fn record_then_list_run_results_round_trips_fields() {
     let s = store().await;
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     let row = processed("msg-applied", run, Outcome::Applied);
     s.record_processed(&row, None).await.unwrap();
 
@@ -504,7 +506,7 @@ async fn record_then_list_run_results_round_trips_fields() {
 #[tokio::test]
 async fn processed_ids_contains_every_recorded_message() {
     let s = store().await;
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     for id in ["msg-one", "msg-two"] {
         s.record_processed(&processed(id, run, Outcome::Ignored), None)
             .await
@@ -526,7 +528,7 @@ async fn record_with_apply_status_updates_the_job() {
         .create_jd("Engineer", "Acme", "text", "", Some(status_a))
         .await
         .unwrap();
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     let mut row = processed("msg-record-apply", run, Outcome::Applied);
     row.matched_job_id = Some(job);
     s.record_processed(&row, Some(status_b)).await.unwrap();
@@ -547,7 +549,7 @@ async fn apply_suggestion_sets_status_and_outcome() {
         .create_jd("Engineer", "Acme", "text", "", Some(previous))
         .await
         .unwrap();
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     let mut row = processed("msg-suggestion", run, Outcome::PendingReview);
     row.matched_job_id = Some(job);
     row.previous_status_id = Some(previous);
@@ -565,7 +567,7 @@ async fn apply_suggestion_sets_status_and_outcome() {
 #[tokio::test]
 async fn dismiss_keeps_the_row_processed() {
     let s = store().await;
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     s.record_processed(&processed("msg-dismiss", run, Outcome::PendingReview), None)
         .await
         .unwrap();
@@ -578,8 +580,8 @@ async fn dismiss_keeps_the_row_processed() {
 #[tokio::test]
 async fn pending_reviews_span_runs() {
     let s = store().await;
-    let first_run = s.create_scan_run().await.unwrap();
-    let second_run = s.create_scan_run().await.unwrap();
+    let first_run = s.create_scan_run(ScanSource::Manual).await.unwrap();
+    let second_run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     s.record_processed(
         &processed("msg-review-one", first_run, Outcome::PendingReview),
         None,
@@ -602,7 +604,7 @@ async fn pending_reviews_span_runs() {
 #[tokio::test]
 async fn processed_email_serializes_outcomes_in_snake_case() {
     let s = store().await;
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     s.record_processed(
         &processed("msg-serialized", run, Outcome::PendingReview),
         None,
@@ -613,6 +615,333 @@ async fn processed_email_serializes_outcomes_in_snake_case() {
     let row = s.get_processed("msg-serialized").await.unwrap().unwrap();
     let value = serde_json::to_value(row).unwrap();
     assert_eq!(value["outcome"], "pending_review");
+}
+
+/// A job at `statuses[0]`, and a row auto-applied from `statuses[0]` to `statuses[1]`.
+async fn applied_row(s: &Store) -> (i64, i64, i64) {
+    let statuses = s.list_job_statuses().await.unwrap();
+    let (a, b) = (statuses[0].id, statuses[1].id);
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(a))
+        .await
+        .unwrap();
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    let mut row = processed("msg-undo", run, Outcome::Applied);
+    row.matched_job_id = Some(job);
+    row.previous_status_id = Some(a);
+    row.suggested_status_id = Some(b);
+    s.record_processed(&row, Some(b)).await.unwrap();
+    (job, a, b)
+}
+
+#[tokio::test]
+async fn migration_marks_existing_rows_read() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
+    s.record_processed(&processed("msg-old", run, Outcome::Applied), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET read_at = NULL")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+    let migration = include_str!("../../migrations/0010_inbox.sql");
+    let backfill = migration
+        .lines()
+        .find(|l| l.starts_with("UPDATE processed_email SET read_at"))
+        .unwrap();
+    sqlx::query(backfill).execute(&s.pool).await.unwrap();
+
+    let row = s.get_processed("msg-old").await.unwrap().unwrap();
+    assert_eq!(row.read_at.as_deref(), Some(row.processed_at.as_str()));
+}
+
+#[tokio::test]
+async fn new_rows_are_unread_and_counted() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    s.record_processed(&processed("msg-a", run, Outcome::Applied), None)
+        .await
+        .unwrap();
+    s.record_processed(&processed("msg-i", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+
+    assert_eq!(s.unread_count().await.unwrap(), 1);
+    assert_eq!(
+        s.get_processed("msg-a").await.unwrap().unwrap().read_at,
+        None
+    );
+}
+
+#[tokio::test]
+async fn upsert_rematch_marks_unread() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    s.record_processed(&processed("msg-r", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+    s.mark_all_read().await.unwrap();
+    sqlx::query("UPDATE processed_email SET read_at = '2026-01-01 00:00:00'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    let recheck = s.create_scan_run(ScanSource::Recheck).await.unwrap();
+    let mut row = processed("msg-r", recheck, Outcome::PendingReview);
+    row.summary = Some("Now matched.".into());
+    s.record_processed(&row, None).await.unwrap();
+
+    let got = s.get_processed("msg-r").await.unwrap().unwrap();
+    assert_eq!(got.outcome, Outcome::PendingReview);
+    assert_eq!(got.run_id, recheck);
+    assert_eq!(got.summary.as_deref(), Some("Now matched."));
+    assert_eq!(got.read_at, None);
+}
+
+#[tokio::test]
+async fn upsert_still_ignored_keeps_read() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    s.record_processed(&processed("msg-k", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET read_at = '2026-01-01 00:00:00'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    s.record_processed(&processed("msg-k", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+
+    let got = s.get_processed("msg-k").await.unwrap().unwrap();
+    assert_eq!(got.read_at.as_deref(), Some("2026-01-01 00:00:00"));
+}
+
+#[tokio::test]
+async fn list_inbox_orders_review_first_and_hides_ignored() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    for (id, outcome) in [
+        ("msg-review", Outcome::PendingReview),
+        ("msg-applied", Outcome::Applied),
+        ("msg-ignored", Outcome::Ignored),
+        ("msg-nochange", Outcome::NoChange),
+    ] {
+        s.record_processed(&processed(id, run, outcome), None)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE processed_email SET processed_at = '2026-10-01 00:00:00' WHERE message_id = 'msg-review'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET processed_at = '2026-10-03 00:00:00' WHERE message_id = 'msg-nochange'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET processed_at = '2026-10-02 00:00:00' WHERE message_id = 'msg-applied'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    let ids: Vec<String> = s
+        .list_inbox(InboxFilter::All)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.message_id)
+        .collect();
+    assert_eq!(ids, ["msg-review", "msg-nochange", "msg-applied"]);
+
+    let review = s.list_inbox(InboxFilter::Review).await.unwrap();
+    assert_eq!(review.len(), 1);
+    assert_eq!(review[0].message_id, "msg-review");
+}
+
+#[tokio::test]
+async fn list_inbox_unread_filter() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    for id in ["msg-1", "msg-2"] {
+        s.record_processed(&processed(id, run, Outcome::Applied), None)
+            .await
+            .unwrap();
+    }
+    s.mark_read("msg-1").await.unwrap();
+
+    let unread = s.list_inbox(InboxFilter::Unread).await.unwrap();
+    assert_eq!(unread.len(), 1);
+    assert_eq!(unread[0].message_id, "msg-2");
+}
+
+#[tokio::test]
+async fn undo_restores_previous_status() {
+    let s = store().await;
+    let (job, a, _) = applied_row(&s).await;
+
+    let got = s.undo_applied("msg-undo").await.unwrap();
+
+    assert_eq!(s.get_jd(job).await.unwrap().unwrap().status_id, Some(a));
+    assert!(got.undone_at.is_some());
+}
+
+#[tokio::test]
+async fn undo_blocked_after_manual_status_change() {
+    let s = store().await;
+    let (job, _, _) = applied_row(&s).await;
+    let c = s.list_job_statuses().await.unwrap()[2].id;
+    s.update_jd_tracking(job, Some(c), "").await.unwrap();
+
+    let err = s.undo_applied("msg-undo").await.unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("The status was changed after this update."));
+    assert_eq!(s.get_jd(job).await.unwrap().unwrap().status_id, Some(c));
+    assert_eq!(
+        s.get_processed("msg-undo")
+            .await
+            .unwrap()
+            .unwrap()
+            .undone_at,
+        None
+    );
+}
+
+#[tokio::test]
+async fn undo_twice_errors() {
+    let s = store().await;
+    applied_row(&s).await;
+    s.undo_applied("msg-undo").await.unwrap();
+
+    assert!(s.undo_applied("msg-undo").await.is_err());
+}
+
+#[tokio::test]
+async fn apply_and_dismiss_mark_read() {
+    let s = store().await;
+    let statuses = s.list_job_statuses().await.unwrap();
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(statuses[0].id))
+        .await
+        .unwrap();
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    let mut row = processed("msg-apply", run, Outcome::PendingReview);
+    row.matched_job_id = Some(job);
+    row.suggested_status_id = Some(statuses[1].id);
+    s.record_processed(&row, None).await.unwrap();
+    s.record_processed(&processed("msg-dismiss", run, Outcome::PendingReview), None)
+        .await
+        .unwrap();
+
+    s.apply_suggestion("msg-apply").await.unwrap();
+    s.dismiss_suggestion("msg-dismiss").await.unwrap();
+
+    assert!(s
+        .get_processed("msg-apply")
+        .await
+        .unwrap()
+        .unwrap()
+        .read_at
+        .is_some());
+    assert!(s
+        .get_processed("msg-dismiss")
+        .await
+        .unwrap()
+        .unwrap()
+        .read_at
+        .is_some());
+}
+
+#[tokio::test]
+async fn recheck_candidates_selects_job_related_and_legacy() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    let cases = [
+        ("msg-related", Outcome::Ignored, Some(0.7)),
+        ("msg-legacy", Outcome::Ignored, None),
+        ("msg-unrelated", Outcome::Ignored, Some(0.2)),
+        ("msg-applied", Outcome::Applied, Some(0.9)),
+        ("msg-old", Outcome::Ignored, Some(0.7)),
+    ];
+    for (id, outcome, score) in cases {
+        let mut row = processed(id, run, outcome);
+        row.job_related = score;
+        s.record_processed(&row, None).await.unwrap();
+    }
+    sqlx::query("UPDATE processed_email SET processed_at = datetime('now', '-40 days') WHERE message_id = 'msg-old'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    let mut ids: Vec<String> = s
+        .recheck_candidates()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.message_id)
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["msg-legacy", "msg-related"]);
+}
+
+#[tokio::test]
+async fn max_job_id_is_zero_without_jobs() {
+    let s = store().await;
+    assert_eq!(s.max_job_id().await.unwrap(), 0);
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", None)
+        .await
+        .unwrap();
+    assert_eq!(s.max_job_id().await.unwrap(), job);
+}
+
+#[tokio::test]
+async fn undo_after_manual_apply_restores_the_status_at_apply_time() {
+    let s = store().await;
+    let statuses = s.list_job_statuses().await.unwrap();
+    let (recorded, by_hand, suggested) = (statuses[0].id, statuses[1].id, statuses[2].id);
+    let job = s
+        .create_jd("Engineer", "Acme", "text", "", Some(recorded))
+        .await
+        .unwrap();
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    let mut row = processed("msg-manual", run, Outcome::PendingReview);
+    row.matched_job_id = Some(job);
+    row.previous_status_id = Some(recorded);
+    row.suggested_status_id = Some(suggested);
+    s.record_processed(&row, None).await.unwrap();
+    s.update_jd_tracking(job, Some(by_hand), "").await.unwrap();
+
+    s.apply_suggestion("msg-manual").await.unwrap();
+    s.undo_applied("msg-manual").await.unwrap();
+
+    assert_eq!(
+        s.get_jd(job).await.unwrap().unwrap().status_id,
+        Some(by_hand)
+    );
+}
+
+#[tokio::test]
+async fn recheck_that_stays_ignored_keeps_processed_at() {
+    let s = store().await;
+    let run = s.create_scan_run(ScanSource::Watch).await.unwrap();
+    s.record_processed(&processed("msg-aging", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE processed_email SET processed_at = '2026-01-01 00:00:00'")
+        .execute(&s.pool)
+        .await
+        .unwrap();
+
+    s.record_processed(&processed("msg-aging", run, Outcome::Ignored), None)
+        .await
+        .unwrap();
+
+    let got = s.get_processed("msg-aging").await.unwrap().unwrap();
+    assert_eq!(got.processed_at, "2026-01-01 00:00:00");
 }
 
 #[tokio::test]
@@ -648,7 +977,7 @@ async fn job_emails_are_scoped_to_the_job_newest_first() {
         .create_jd("Designer", "Beta", "text", "", None)
         .await
         .unwrap();
-    let run = s.create_scan_run().await.unwrap();
+    let run = s.create_scan_run(ScanSource::Manual).await.unwrap();
     for (id, job_id, received) in [
         ("msg-old", job, "2026-10-01 09:00:00"),
         ("msg-new", job, "2026-10-10 09:00:00"),
@@ -691,10 +1020,19 @@ async fn job_views_seed_one_and_keep_the_last() {
     assert_eq!(saved.filters, board.filters);
     assert_eq!(saved.position, 1);
 
-    let renamed = JobViewInput { name: "Board".into(), ..board.clone() };
+    let renamed = JobViewInput {
+        name: "Board".into(),
+        ..board.clone()
+    };
     assert!(s.update_job_view(id, &renamed).await.unwrap());
     assert!(!s.update_job_view(9999, &renamed).await.unwrap());
-    assert!(s.create_job_view(&JobViewInput { name: " ".into(), ..board }).await.is_err());
+    assert!(s
+        .create_job_view(&JobViewInput {
+            name: " ".into(),
+            ..board
+        })
+        .await
+        .is_err());
 
     s.delete_job_view(seeded[0].id).await.unwrap();
     assert!(s.delete_job_view(id).await.is_err(), "the last view stays");

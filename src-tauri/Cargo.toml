@@ -69,3 +69,4 @@ strip = true
 pdf-extract = "0.12.1"
 tempfile = "3.27.0"
 wiremock = "0.6.5"
+tokio = { version = "1", features = ["test-util", "macros", "rt"] }

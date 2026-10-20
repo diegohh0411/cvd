@@ -2,7 +2,10 @@ mod apply_memory;
 mod companies;
 mod email;
 pub mod types;
-pub use email::{NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanStatus};
+pub use email::{
+    InboxFilter, NewProcessed, Outcome, ProcessedEmail, ScanRun, ScanSource, ScanStatus,
+    UNDO_BLOCKED,
+};
 
 #[cfg(test)]
 mod tests;
@@ -161,7 +164,9 @@ fn view_columns(v: &JobViewInput) -> Result<(&str, &'static str, String, String)
         return Err(StoreError::Invalid("view name must not be empty".into()));
     }
     if !v.filters.is_array() || !v.sorts.is_array() {
-        return Err(StoreError::Invalid("view filters and sorts must be lists".into()));
+        return Err(StoreError::Invalid(
+            "view filters and sorts must be lists".into(),
+        ));
     }
     let layout = match v.layout {
         ViewLayout::Table => "table",
@@ -695,14 +700,16 @@ impl Store {
     /// Saves a view. Returns false when it does not exist.
     pub async fn update_job_view(&self, id: i64, v: &JobViewInput) -> Result<bool> {
         let (name, layout, filters, sorts) = view_columns(v)?;
-        let done = sqlx::query("UPDATE job_view SET name = ?, layout = ?, filters = ?, sorts = ? WHERE id = ?")
-            .bind(name)
-            .bind(layout)
-            .bind(filters)
-            .bind(sorts)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        let done = sqlx::query(
+            "UPDATE job_view SET name = ?, layout = ?, filters = ?, sorts = ? WHERE id = ?",
+        )
+        .bind(name)
+        .bind(layout)
+        .bind(filters)
+        .bind(sorts)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(done.rows_affected() > 0)
     }
 
@@ -714,7 +721,9 @@ impl Store {
             .fetch_one(&mut *tx)
             .await?;
         if others == 0 {
-            return Err(StoreError::Invalid("the last view cannot be deleted".into()));
+            return Err(StoreError::Invalid(
+                "the last view cannot be deleted".into(),
+            ));
         }
         sqlx::query("DELETE FROM job_view WHERE id = ?")
             .bind(id)

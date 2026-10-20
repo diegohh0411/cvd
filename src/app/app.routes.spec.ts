@@ -36,6 +36,7 @@ describe('routes', () => {
     expect(await go('/ai/models')).toBe('/ai');
     expect(await go('/models?tab=engine')).toBe('/ai');
     expect(await go('/models?tab=online')).toBe('/ai');
+    expect(await go('/inbox')).toBe('/inbox');
   });
 });
 

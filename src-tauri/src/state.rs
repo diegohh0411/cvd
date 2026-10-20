@@ -66,14 +66,19 @@ pub struct AppState {
     pub coordinator: Arc<ResearchCoordinator>,
     /// Set while a Gmail scan runs; see `begin_scan`.
     scan_running: Arc<AtomicBool>,
+    /// Woken whenever the scan slot frees.
+    scan_freed: Arc<tokio::sync::Notify>,
+    /// The Gmail watcher task's controls and status.
+    pub watcher: crate::mail::watch::WatcherControl,
 }
 
 /// Holds the single Gmail scan slot; the slot frees when the guard drops.
-pub struct ScanGuard(Arc<AtomicBool>);
+pub struct ScanGuard(Arc<AtomicBool>, Arc<tokio::sync::Notify>);
 
 impl Drop for ScanGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
+        self.1.notify_waiters();
     }
 }
 
@@ -110,6 +115,8 @@ impl AppState {
             research_fn: None,
             skips: Skips::default(),
             scan_running: Arc::default(),
+            scan_freed: Arc::default(),
+            watcher: Default::default(),
         }
     }
 
@@ -151,7 +158,16 @@ impl AppState {
                 Arc::new(ExaSearch::new(self.exa_base.clone(), k)) as Arc<dyn SearchProvider>
             });
         *self.search.write().unwrap_or_else(|e| e.into_inner()) = search;
+        self.retry_watcher_if_paused();
         Ok(())
+    }
+
+    /// AI settings changed: a watcher paused on an AI error may work now.
+    pub fn retry_watcher_if_paused(&self) {
+        use crate::mail::watch::{Control, WatchState};
+        if self.watcher.status().state == WatchState::Paused {
+            self.watcher.send(Control::Retry);
+        }
     }
 
     pub async fn research_model(&self) -> Result<Option<String>, AppError> {
@@ -288,7 +304,13 @@ impl AppState {
         self.scan_running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .ok()
-            .map(|_| ScanGuard(self.scan_running.clone()))
+            .map(|_| ScanGuard(self.scan_running.clone(), self.scan_freed.clone()))
+    }
+
+    /// Notified each time the scan slot frees. Create the `notified()` future
+    /// before checking the slot, or a release in between is missed.
+    pub fn scan_freed(&self) -> Arc<tokio::sync::Notify> {
+        self.scan_freed.clone()
     }
 
     pub fn scan_running(&self) -> bool {

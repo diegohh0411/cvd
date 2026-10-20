@@ -6,7 +6,7 @@ use futures::FutureExt;
 use serde_json::{json, Value};
 
 use super::classify::{classify, EmailInput, JobCtx};
-use super::decide::{decide, Decision};
+use super::decide::{decide, Decision, JOB_RELATED_THRESHOLD};
 use super::imap::{MailHeader, MailSource};
 use super::summary::summarize;
 use crate::commands::AppError;
@@ -14,13 +14,15 @@ use crate::engine::DecisionEngine;
 use crate::providers::ChatEndpoint;
 use crate::state::{Emitter, JOB_UPDATED_EVENT};
 use crate::store::types::{JobDescription, JobStatus};
-use crate::store::{NewProcessed, Outcome, ScanStatus, Store};
+use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, Store};
 
 pub const SCAN_DAYS: i64 = 30;
 /// Most emails fetched, classified and summarised at the same time.
 pub const MAX_CONCURRENT_EMAILS: usize = 4;
 pub const PROGRESS_EVENT: &str = "scan://progress";
 pub const FINISHED_EVENT: &str = "scan://finished";
+/// A job-related inbox row was written or changed.
+pub const INBOX_CHANGED_EVENT: &str = "inbox://changed";
 
 pub struct ScanDeps<'a> {
     pub store: &'a Store,
@@ -44,23 +46,58 @@ pub struct ScanSummary {
 }
 
 /// Refuses to start without a job and a status, otherwise creates the run row.
-pub async fn begin_run(store: &Store) -> Result<i64, AppError> {
+pub async fn begin_run(store: &Store, source: ScanSource) -> Result<i64, AppError> {
+    ensure_ready(store).await?;
+    Ok(store.create_scan_run(source).await?)
+}
+
+/// A scan needs at least one job to match against and one status to suggest.
+pub async fn ensure_ready(store: &Store) -> Result<(), AppError> {
     let jobs = store.list_jds().await?;
     let statuses = store.list_job_statuses().await?;
     if jobs.is_empty() || statuses.is_empty() {
         return Err(AppError::Io("Add a job and a status first.".into()));
     }
-    Ok(store.create_scan_run().await?)
+    Ok(())
 }
 
 /// Runs the scan for a run created by `begin_run`, and always finishes that run.
-pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, AppError> {
+pub async fn run_scan(
+    deps: ScanDeps<'_>,
+    run_id: i64,
+    source: ScanSource,
+) -> Result<ScanSummary, AppError> {
     let mut summary = ScanSummary {
         run_id,
         ..ScanSummary::default()
     };
+    let result = scan(&deps, &mut summary).await;
+    finish_run(&deps, summary, source, result).await
+}
 
-    match scan(&deps, &mut summary).await {
+/// Closes a run that could not start its scan, e.g. after a failed re-check.
+pub async fn run_scan_failed(
+    deps: ScanDeps<'_>,
+    run_id: i64,
+    source: ScanSource,
+    error: AppError,
+) -> Result<ScanSummary, AppError> {
+    let summary = ScanSummary {
+        run_id,
+        ..ScanSummary::default()
+    };
+    finish_run(&deps, summary, source, Err(error)).await
+}
+
+/// Records how a run ended and announces it on `scan://finished`.
+pub(crate) async fn finish_run(
+    deps: &ScanDeps<'_>,
+    summary: ScanSummary,
+    source: ScanSource,
+    result: Result<(), AppError>,
+) -> Result<ScanSummary, AppError> {
+    let run_id = summary.run_id;
+    match result {
         Ok(()) => {
             deps.store
                 .finish_scan_run(
@@ -71,7 +108,10 @@ pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, Ap
                     summary.failed as i64,
                 )
                 .await?;
-            (deps.emit)(FINISHED_EVENT, finished_payload(&summary, "done", None));
+            (deps.emit)(
+                FINISHED_EVENT,
+                finished_payload(&summary, source, "done", None),
+            );
             Ok(summary)
         }
         Err(e) => {
@@ -87,7 +127,7 @@ pub async fn run_scan(deps: ScanDeps<'_>, run_id: i64) -> Result<ScanSummary, Ap
                 .await?;
             (deps.emit)(
                 FINISHED_EVENT,
-                finished_payload(&summary, "failed", Some(&e)),
+                finished_payload(&summary, source, "failed", Some(&e)),
             );
             Err(e)
         }
@@ -140,7 +180,7 @@ async fn scan(deps: &ScanDeps<'_>, summary: &mut ScanSummary) -> Result<(), AppE
 }
 
 /// What happened to one email.
-enum Tally {
+pub(crate) enum Tally {
     Failed,
     Ignored,
     Recorded(Outcome),
@@ -157,12 +197,41 @@ async fn handle_header(
     let Ok(body) = deps.mail.body_text(header.uid).await else {
         return Ok(Tally::Failed);
     };
+    process_email(deps, &EmailMeta::from(header), &body, run_id).await
+}
 
+/// The parts of a message the pipeline records, whether it came from IMAP or
+/// from a stored row being re-checked.
+pub(crate) struct EmailMeta {
+    pub message_id: String,
+    pub subject: String,
+    pub sender: String,
+    pub received_at: String,
+}
+
+impl From<&MailHeader> for EmailMeta {
+    fn from(h: &MailHeader) -> Self {
+        Self {
+            message_id: h.message_id.clone(),
+            subject: h.subject.clone(),
+            sender: h.sender.clone(),
+            received_at: h.received_at.clone(),
+        }
+    }
+}
+
+/// Classifies one email body and records (or re-records) its row.
+pub(crate) async fn process_email(
+    deps: &ScanDeps<'_>,
+    header: &EmailMeta,
+    body: &str,
+    run_id: i64,
+) -> Result<Tally, AppError> {
     // Re-read per email so a status applied earlier in this scan is seen here.
     let jobs = deps.store.list_jds().await?;
     let statuses = deps.store.list_job_statuses().await?;
     let contexts = job_contexts(&jobs, &statuses);
-    let email = EmailInput::new(&header.subject, &header.sender, &body);
+    let email = EmailInput::new(&header.subject, &header.sender, body);
 
     let classified = match classify(deps.engine, &email, &contexts, &statuses).await {
         Ok(c) => c,
@@ -193,6 +262,8 @@ async fn handle_header(
         confidence: None,
         summary: None,
         outcome: Outcome::Ignored,
+        job_related: Some(classified.job_related),
+        body: (classified.job_related >= JOB_RELATED_THRESHOLD).then(|| email.body.clone()),
     };
 
     let (job_id, next_status, confidence, outcome) = match decision {
@@ -250,6 +321,7 @@ async fn handle_header(
         None
     };
     deps.store.record_processed(&row, apply_status).await?;
+    (deps.emit)(INBOX_CHANGED_EVENT, json!({ "message_id": row.message_id }));
 
     // Notify the main window after the transaction commits so its job signal
     // reflects the classifier's status update without a manual refresh.
@@ -283,9 +355,15 @@ fn status_name(statuses: &[JobStatus], id: Option<i64>) -> Option<&str> {
         .map(|s| s.name.as_str())
 }
 
-fn finished_payload(summary: &ScanSummary, status: &str, error: Option<&AppError>) -> Value {
+fn finished_payload(
+    summary: &ScanSummary,
+    source: ScanSource,
+    status: &str,
+    error: Option<&AppError>,
+) -> Value {
     json!({
         "run_id": summary.run_id,
+        "source": source.as_str(),
         "status": status,
         "error": error.map(AppError::to_string),
         "error_kind": error.map(AppError::kind),

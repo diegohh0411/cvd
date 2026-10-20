@@ -1554,3 +1554,187 @@ mod local_server {
         assert_eq!(body["model"], "chat");
     }
 }
+
+#[tokio::test]
+async fn prepare_without_account_is_no_account() {
+    let (st, _) = state().await;
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(
+        result,
+        Err(crate::mail::cycle::CycleError::NoAccount)
+    ));
+    assert!(!st.scan_running(), "the slot is released on failure");
+}
+
+#[tokio::test]
+async fn prepare_while_slot_held_is_busy() {
+    let (st, _) = state().await;
+    let _held = st.begin_scan().unwrap();
+
+    let result = crate::mail::cycle::prepare(&st).await;
+
+    assert!(matches!(result, Err(crate::mail::cycle::CycleError::Busy)));
+}
+
+#[tokio::test]
+async fn scan_freed_notifies_on_guard_drop() {
+    let (st, _) = state().await;
+    let guard = st.begin_scan().unwrap();
+    let freed = st.scan_freed();
+    let waiter = tokio::spawn(async move { freed.notified().await });
+    tokio::task::yield_now().await;
+
+    drop(guard);
+
+    tokio::time::timeout(Duration::from_secs(1), waiter)
+        .await
+        .expect("waiter woke")
+        .unwrap();
+}
+
+mod inbox {
+    use super::*;
+    use crate::mail::watch::Control;
+    use crate::store::{NewProcessed, Outcome, ScanSource};
+
+    fn drain(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Control>) -> Vec<Control> {
+        let mut got = Vec::new();
+        while let Ok(c) = rx.try_recv() {
+            got.push(c);
+        }
+        got
+    }
+
+    #[tokio::test]
+    async fn save_mail_account_restarts_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        save_mail_account(
+            &st,
+            "imap.gmail.com",
+            993,
+            "me@gmail.com",
+            Some("abcdefghijklmnop"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Restart]);
+    }
+
+    #[tokio::test]
+    async fn delete_mail_account_stops_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        delete_mail_account(&st).await.unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Stop]);
+    }
+
+    #[tokio::test]
+    async fn create_job_nudges_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        create_job(&st, "Engineer", "Acme", "raw", "", None)
+            .await
+            .unwrap();
+
+        assert_eq!(drain(&mut rx), vec![Control::Nudge]);
+    }
+
+    #[tokio::test]
+    async fn ai_settings_change_retries_only_a_paused_watcher() {
+        let (st, _) = state().await;
+        let mut rx = st.watcher.take_receiver().unwrap();
+
+        st.reload_providers().await.unwrap();
+        assert!(drain(&mut rx).is_empty());
+
+        st.watcher.status_handle().lock().unwrap().state = crate::mail::watch::WatchState::Paused;
+        st.reload_providers().await.unwrap();
+        assert_eq!(drain(&mut rx), vec![Control::Retry]);
+    }
+
+    /// A job at the first status with a row auto-applied to the second.
+    async fn applied(st: &AppState) -> (i64, i64) {
+        let statuses = st.store.list_job_statuses().await.unwrap();
+        let job = st
+            .store
+            .create_jd("Engineer", "Acme", "raw", "", Some(statuses[0].id))
+            .await
+            .unwrap();
+        let run = st.store.create_scan_run(ScanSource::Watch).await.unwrap();
+        st.store
+            .record_processed(
+                &NewProcessed {
+                    message_id: "<m@example.com>".into(),
+                    run_id: run,
+                    received_at: "Tue, 20 Oct 2026 10:00:00 +0000".into(),
+                    subject: "Interview".into(),
+                    sender: "hr@acme.com".into(),
+                    matched_job_id: Some(job),
+                    previous_status_id: Some(statuses[0].id),
+                    suggested_status_id: Some(statuses[1].id),
+                    confidence: Some(0.9),
+                    summary: Some("Interview invite.".into()),
+                    outcome: Outcome::Applied,
+                    job_related: Some(0.95),
+                    body: Some("Let's talk".into()),
+                },
+                Some(statuses[1].id),
+            )
+            .await
+            .unwrap();
+        (job, statuses[0].id)
+    }
+
+    #[tokio::test]
+    async fn undo_applied_emits_job_updated_and_inbox_changed() {
+        let (st, events) = state().await;
+        let (job, previous) = applied(&st).await;
+
+        undo_applied(&st, "<m@example.com>").await.unwrap();
+
+        let names: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        assert!(names.contains(&"job://updated".to_string()));
+        assert!(names.contains(&"inbox://changed".to_string()));
+        assert_eq!(
+            st.store.get_jd(job).await.unwrap().unwrap().status_id,
+            Some(previous)
+        );
+    }
+
+    #[tokio::test]
+    async fn list_inbox_returns_views_with_gmail_url() {
+        let (st, _) = state().await;
+        applied(&st).await;
+
+        let rows = list_inbox(&st, InboxFilter::All).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].gmail_url.contains("rfc822msgid"));
+        assert_eq!(unread_count(&st).await.unwrap(), 1);
+        mark_all_read(&st).await.unwrap();
+        assert_eq!(unread_count(&st).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn watcher_status_starts_stopped() {
+        let (st, _) = state().await;
+
+        let status = get_watcher_status(&st);
+
+        assert_eq!(status.state, crate::mail::watch::WatchState::Stopped);
+    }
+}

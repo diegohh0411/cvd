@@ -49,6 +49,7 @@ pub fn run() {
             );
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
+            start_mail_watcher(app.handle());
             app.manage(autofill::window::Sessions::default());
             // Dev hook: open an apply window on any supported posting, with no job attached.
             #[cfg(debug_assertions)]
@@ -113,11 +114,17 @@ pub fn run() {
             ipc::test_mail_account,
             ipc::start_scan,
             ipc::get_scan_status,
-            ipc::list_scan_results,
             ipc::list_pending_reviews,
             ipc::list_job_emails,
             ipc::apply_suggestion,
             ipc::dismiss_suggestion,
+            ipc::get_watcher_status,
+            ipc::retry_watcher,
+            ipc::list_inbox,
+            ipc::unread_count,
+            ipc::mark_read,
+            ipc::mark_all_read,
+            ipc::undo_applied,
             ipc::set_provider_key,
             ipc::delete_provider_key,
             ipc::provider_key_status,
@@ -131,4 +138,23 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_, _| {});
+}
+
+/// Runs the Gmail watcher for the life of the app. It connects right away
+/// when an account is saved, and otherwise waits for one.
+fn start_mail_watcher(handle: &tauri::AppHandle) {
+    let st = handle.state::<AppState>();
+    let Some(rx) = st.watcher.take_receiver() else {
+        return;
+    };
+    let deps = Arc::new(mail::cycle::AppWatchDeps {
+        handle: handle.clone(),
+    });
+    tauri::async_runtime::spawn(mail::watch::run_watcher(
+        deps,
+        rx,
+        st.watcher.status_handle(),
+        st.emitter(),
+    ));
+    st.watcher.send(mail::watch::Control::Restart);
 }

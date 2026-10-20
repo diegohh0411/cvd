@@ -7,6 +7,7 @@ import type {
   ResearchEvent,
   ScanFinished,
   ScanProgress,
+  WatcherStatus,
 } from './types';
 
 export const MATCH_EVENT = 'match://progress';
@@ -14,6 +15,9 @@ export const ENGINE_EVENT = 'engine://status';
 export const RESEARCH_EVENT = 'company://research';
 export const SCAN_PROGRESS_EVENT = 'scan://progress';
 export const SCAN_FINISHED_EVENT = 'scan://finished';
+export const WATCHER_EVENT = 'mail://watcher';
+/** An inbox row was written, re-checked, read, applied, dismissed or undone. */
+export const INBOX_CHANGED_EVENT = 'inbox://changed';
 /** A job's tracking changed outside the main window (auto-apply marked it Applied). */
 export const JOB_UPDATED_EVENT = 'job://updated';
 
@@ -41,6 +45,13 @@ export function onScanFinished(cb: (e: ScanFinished) => void): Promise<UnlistenF
   return listen<ScanFinished>(SCAN_FINISHED_EVENT, ({ payload }) => cb(payload));
 }
 
+export function onWatcherStatus(cb: (e: WatcherStatus) => void): Promise<UnlistenFn> {
+  return listen<WatcherStatus>(WATCHER_EVENT, ({ payload }) => cb(payload));
+}
+
+export function onInboxChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen(INBOX_CHANGED_EVENT, () => cb());
+}
 
 export function onJobUpdated(cb: (e: { job_id: number; status_id: number | null }) => void): Promise<UnlistenFn> {
   return listen<{ job_id: number; status_id: number | null }>(JOB_UPDATED_EVENT, ({ payload }) => cb(payload));

@@ -467,3 +467,15 @@ async fn folder_defaults_to_all_mail_and_round_trips() {
 
     assert_eq!(account::folder(&store).await.unwrap(), "INBOX");
 }
+
+#[test]
+fn message_id_search_quotes_the_id() {
+    assert_eq!(
+        super::imap::message_id_search("<abc@mail.gmail.com>"),
+        r#"HEADER Message-ID "<abc@mail.gmail.com>""#
+    );
+    assert_eq!(
+        super::imap::message_id_search(r#"<a"b\c>"#),
+        r#"HEADER Message-ID "<a\"b\\c>""#
+    );
+}
