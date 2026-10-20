@@ -28,7 +28,6 @@ const COMMANDS: &[&str] = &[
     "get_job",
     "start_match",
     "cancel_match",
-    "resume_match",
     "list_runs",
     "get_scores",
     "list_cvs",

@@ -361,12 +361,6 @@ pub async fn start_match(st: &AppState, jd_id: i64) -> Res<i64> {
     Ok(run_id)
 }
 
-/// Continues a cancelled or failed run in the background.
-pub async fn resume_match(st: &AppState, run_id: i64) -> Res<()> {
-    let run = st.store.get_run(run_id).await?;
-    spawn_run(st, run_id, &run.model_id)
-}
-
 pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
     if st.cancel_run(run_id) {
         Ok(())
@@ -378,7 +372,7 @@ pub fn cancel_match(st: &AppState, run_id: i64) -> Res<()> {
 }
 
 /// Scores `run_id` in a spawned task. A freshly created run has no scores,
-/// so `matcher::resume_match` scores it end to end. Company research runs
+/// so `matcher::score_run` scores it end to end. Company research runs
 /// first and blocks scoring unless skipped (see `skip_research`).
 fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
     let engine = st.engine_for(model_id)?;
@@ -409,7 +403,7 @@ fn spawn_run(st: &AppState, run_id: i64, model_id: &str) -> Res<()> {
             .remove(&run_id);
         let outcome = match context {
             Ok(ctx) => {
-                matcher::resume_match(
+                matcher::score_run(
                     &store,
                     &*engine,
                     run_id,
@@ -1423,10 +1417,6 @@ pub mod ipc {
     #[tauri::command]
     pub fn cancel_match(st: S<'_>, run_id: i64) -> Res<()> {
         super::cancel_match(&st, run_id)
-    }
-    #[tauri::command]
-    pub async fn resume_match(st: S<'_>, run_id: i64) -> Res<()> {
-        super::resume_match(&st, run_id).await
     }
     #[tauri::command]
     pub async fn list_runs(st: S<'_>, jd_id: i64) -> Res<Vec<MatchRun>> {

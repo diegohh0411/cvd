@@ -76,7 +76,6 @@ export const searchJobs = (query: string) => call<number[]>('search_jobs', { que
 export const getJob = (id: number) => call<JobDescription>('get_job', { id });
 export const startMatch = (jdId: number) => call<number>('start_match', { jdId });
 export const cancelMatch = (runId: number) => call<void>('cancel_match', { runId });
-export const resumeMatch = (runId: number) => call<void>('resume_match', { runId });
 export const listRuns = (jdId: number) => call<MatchRun[]>('list_runs', { jdId });
 export const getScores = (runId: number) => call<ScoreRow[]>('get_scores', { runId });
 export const getRanked = (runId: number) => call<Ranked>('get_ranked', { runId });

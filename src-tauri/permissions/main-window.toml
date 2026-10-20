@@ -29,7 +29,6 @@ permissions = [
   "allow-get-job",
   "allow-start-match",
   "allow-cancel-match",
-  "allow-resume-match",
   "allow-list-runs",
   "allow-get-scores",
   "allow-list-cvs",

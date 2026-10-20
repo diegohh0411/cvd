@@ -73,6 +73,7 @@ pub struct Ranked {
 const TAG_THRESHOLD: f64 = 0.5;
 
 /// Starts a new run for `jd_id` and scores it end to end.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub async fn run_match(
     store: &Store,
@@ -106,8 +107,8 @@ pub async fn run_match(
     .await
 }
 
-/// Continues a cancelled or failed run, scoring only targets without scores.
-pub async fn resume_match(
+/// Scores the existing run `run_id` end to end.
+pub async fn score_run(
     store: &Store,
     engine: &dyn DecisionEngine,
     run_id: i64,
@@ -161,12 +162,6 @@ fn check_cancel(cancel: &CancellationToken, run_id: i64) -> Result<(), MatchErro
     } else {
         Ok(())
     }
-}
-
-fn has(rows: &[ScoreRow], t: TargetType, id: i64, question: Option<&str>) -> bool {
-    rows.iter().any(|r| {
-        r.target_type == t && r.target_id == id && question.is_none_or(|q| r.question == q)
-    })
 }
 
 fn yes_no(p: f64) -> BTreeMap<String, f64> {
@@ -303,7 +298,6 @@ async fn execute(
         .get_jd(jd_id)
         .await?
         .ok_or(MatchError::JdNotFound(jd_id))?;
-    let existing = store.scores_for_run(run_id).await?;
     on_progress(Progress::ReadingJd);
 
     let mut all = vec![
@@ -363,16 +357,12 @@ async fn execute(
         }
     }
     let total = all.len();
-    let todo: Vec<Pending> = all
-        .into_iter()
-        .filter(|p| !has(&existing, p.target.0, p.target.1, Some(&p.stored)))
-        .collect();
-    let mut done = total - todo.len();
+    let mut done = 0;
     on_progress(Progress::Scoring { done, total });
 
     let state = questions::jd_state(&jd.raw_text, company);
     let cap = engine.max_questions();
-    for batch in batches(todo, &state, cfg.token_budget, cap) {
+    for batch in batches(all, &state, cfg.token_budget, cap) {
         check_cancel(cancel, run_id)?;
         let n = batch.len();
         ask(store, engine, run_id, &state, batch).await?;
