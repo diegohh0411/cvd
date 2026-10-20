@@ -2,7 +2,6 @@ import { DestroyRef } from '@angular/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 import type {
-  DownloadEvent,
   MatchProgressEvent,
   MatchStage,
   ResearchEvent,
@@ -11,7 +10,6 @@ import type {
 } from './types';
 
 export const MATCH_EVENT = 'match://progress';
-export const DOWNLOAD_EVENT = 'model://download';
 export const ENGINE_EVENT = 'engine://status';
 export const RESEARCH_EVENT = 'company://research';
 export const SCAN_PROGRESS_EVENT = 'scan://progress';
@@ -43,9 +41,6 @@ export function onScanFinished(cb: (e: ScanFinished) => void): Promise<UnlistenF
   return listen<ScanFinished>(SCAN_FINISHED_EVENT, ({ payload }) => cb(payload));
 }
 
-export function onDownload(cb: (e: DownloadEvent) => void): Promise<UnlistenFn> {
-  return listen<DownloadEvent>(DOWNLOAD_EVENT, ({ payload }) => cb(payload));
-}
 
 export function onJobUpdated(cb: (e: { job_id: number; status_id: number | null }) => void): Promise<UnlistenFn> {
   return listen<{ job_id: number; status_id: number | null }>(JOB_UPDATED_EVENT, ({ payload }) => cb(payload));

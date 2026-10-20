@@ -47,14 +47,27 @@ impl HttpSystemOneEngine {
         self
     }
 
+    pub fn without_proxy(mut self) -> Self {
+        self.http = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .no_proxy()
+            .build()
+            .expect("HTTP client");
+        self
+    }
+
     async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
-        self.http
+        let mut request = self
+            .http
             .post(format!(
                 "{}/v1/systemone",
                 self.base_url.trim_end_matches('/')
             ))
-            .bearer_auth(&self.api_key)
-            .json(body)
+            .json(body);
+        if !self.api_key.is_empty() {
+            request = request.bearer_auth(&self.api_key);
+        }
+        request
             .send()
             .await
             .map_err(|e| EngineError::Network(e.to_string()))

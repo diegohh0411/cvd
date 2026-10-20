@@ -3,7 +3,7 @@
 A local-first desktop app that tailors your CV to each job. Keep one library of your real experience, paste a job description, and CVD ranks your entries and bullets against the role, then exports a one-page, ATS-friendly PDF.
 
 - **Truthful:** it only selects and orders your own content. It never writes or rewrites it.
-- **Private:** your data lives in a local SQLite database. Matching runs on a local model by default; the only network use is downloading the model, plus optional online models (OpenRouter, or SubQ Snap for decisions) if you add a key.
+- **Private:** your data lives in a local SQLite database. Matching runs on a local model by default; connect to a server you run on localhost, or add a key for optional online providers (OpenRouter, SubQ, TypeSafe). Company research also sends search queries to Exa.
 - **Explainable:** you can see why each item was picked, override any choice, and watch the page fill live.
 
 ## How it works
@@ -15,7 +15,7 @@ A local-first desktop app that tailors your CV to each job. Keep one library of 
 
 ## Stack
 
-Tauri 2 (Rust core), Angular 22 with ZardUI, SQLite, llama.cpp as a bundled `llama-server` sidecar, Typst for PDFs. Design notes live in [`docs/superpowers`](docs/superpowers).
+Tauri 2 (Rust core), Angular 22 with ZardUI, SQLite, user-run llama.cpp (or a compatible HTTP server) for local inference, Typst for PDFs. Design notes live in [`docs/superpowers`](docs/superpowers).
 
 ## Development
 
@@ -23,13 +23,26 @@ Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) and the [Tauri p
 
 ```bash
 bun install
-bash src-tauri/scripts/fetch-llama-server.sh   # downloads the llama-server sidecar
 bun run tauri dev                              # run the desktop app
 bun run test                                   # Angular tests
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Local inference is currently set up for macOS on Apple Silicon.
+### Local inference
+
+CVD does not install models or start an inference process. Install [llama.cpp](https://github.com/ggml-org/llama.cpp#quick-start) yourself (release binaries or a source build), download a compatible GGUF, and start a server:
+
+```bash
+llama-server -m /path/to/decision.gguf --host 127.0.0.1 --port 8080 -b 16384 -ub 16384
+```
+
+In **AI Models → Connections → Local server**, save `http://127.0.0.1:8080/v1` and an optional API key. CVD discovers models from `/v1/models`; choose them in the Fast Model and Smart Model pickers, then use the connection tests to verify their capabilities. Connections are limited to loopback addresses.
+
+**Fast Model (System One):** needs a compatible decision model (e.g. Clef, Kev or d1) and a server implementing `POST /v1/systemone`, including the model's logprobs/grammar support. An OpenAI-compatible chat endpoint alone is insufficient. The `-b 16384 -ub 16384` flags preserve the previous bundled server's batch settings, needed for large decision prompts. Server builds without System One support will fail the Fast Model test with a capability error.
+
+**Smart Model (company research):** needs OpenAI-compatible `/v1/chat/completions` with tool calling and an Exa key. For llama.cpp, use a tool-capable chat GGUF and add `--jinja -c 32768`. To use different local models simultaneously, expose them through a single compatible multi-model endpoint (such as [llama.cpp router mode](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#using-multiple-models)); the app sends the selected model ID with every request. CVD never stops your server when you switch models or exit.
+
+On upgrade, old registry-based local selections are cleared and a dismissible notice points to Local server setup. Online selections and match history are preserved. Old GGUFs are kept; you can remove the app data `models/` folder yourself (on macOS: `~/Library/Application Support/com.diego.cvd/models/`).
 
 ## Agent access (MCP)
 

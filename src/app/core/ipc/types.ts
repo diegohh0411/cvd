@@ -204,25 +204,6 @@ export interface Cv {
   created_at: string;
 }
 
-export interface ModelSpec {
-  id: string;
-  label: string;
-  hf_repo: string;
-  hf_file: string;
-  sha256: string;
-  size_bytes: number;
-  min_ram_gb: number;
-  /** `decision` = System One; `chat` = company research. */
-  kind: ModelKind;
-}
-
-export type ModelKind = 'decision' | 'chat';
-
-export interface ModelInfo {
-  spec: ModelSpec;
-  installed: boolean;
-}
-
 export type EngineState = 'none' | 'missing' | 'idle' | 'ready' | 'error';
 
 export interface EngineStatus {
@@ -244,7 +225,7 @@ export type AppErrorKind =
   | 'MailAuth'
   | 'MailUnavailable';
 
-export type ProviderId = 'openrouter' | 'subq' | 'typesafe' | 'exa';
+export type ProviderId = 'openrouter' | 'subq' | 'typesafe' | 'exa' | 'localhost';
 
 export interface KeyStatus {
   has_key: boolean;
@@ -294,11 +275,6 @@ export interface MatchProgressEvent {
   event: MatchStage;
 }
 
-export interface DownloadEvent {
-  id: string;
-  done: number;
-  total: number;
-}
 
 export interface Source {
   url: string;

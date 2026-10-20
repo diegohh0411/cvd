@@ -19,9 +19,6 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # tauri-build requires the externalBin sidecar to exist at compile time.
-      - run: bash src-tauri/scripts/fetch-llama-server.sh
-
       - name: Build
         run: cargo check --all-targets
         working-directory: src-tauri

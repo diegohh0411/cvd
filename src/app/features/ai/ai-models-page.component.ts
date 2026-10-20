@@ -36,5 +36,5 @@ import { RoleCardComponent } from './role-card.component';
   `,
 })
 export class AiModelsPageComponent {
-  protected readonly modelProviders = PROVIDERS.filter((p) => p.roles.length > 0);
+  protected readonly modelProviders = PROVIDERS.filter((p) => p.roles.length > 0 && p.id !== 'localhost');
 }

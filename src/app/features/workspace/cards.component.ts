@@ -4,7 +4,6 @@ import { lucideBriefcase, lucideChevronDown, lucideChevronUp, lucideSparkles, lu
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
 import { ZardCardImports } from '@/shared/components/card/card.imports';
-import { ModelsStore } from '../../core/stores/models.store';
 import { FillMeterComponent } from './fill-meter.component';
 import { WorkspaceStore } from './workspace.store';
 
@@ -168,7 +167,6 @@ export function formatDuration(ms: number | null): string {
 })
 export class WorkspaceCardsComponent {
   protected readonly ws = inject(WorkspaceStore);
-  private readonly models = inject(ModelsStore);
 
   protected readonly showAllSkills = signal(false);
 
@@ -177,7 +175,7 @@ export class WorkspaceCardsComponent {
   protected readonly duration = computed(() => formatDuration(this.ws.durationMs()));
   protected readonly model = computed(() => {
     const id = this.ws.run()?.model_id;
-    return this.models.models().find((m) => m.spec.id === id)?.spec.label.replace(/\s*\(.*\)$/, '') ?? (id || '—');
+    return id || '—';
   });
 
   protected readonly strongSkills = computed(() =>

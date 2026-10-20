@@ -3,29 +3,19 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { pageProviders } from '../../../testing/providers';
 import { flush, mockTauri, type TauriMock } from '../../../testing/tauri-mock';
-import type { Connection, ModelInfo, ModelSpec, ProviderModels } from '../../core/ipc/types';
+import type { Connection, ProviderModels } from '../../core/ipc/types';
 import { EngineStore } from '../../core/stores/engine.store';
 import { ModelsStore } from '../../core/stores/models.store';
 import { AiModelsPageComponent } from './ai-models-page.component';
-import { DownloadsPageComponent } from './downloads-page.component';
+import { LocalProviderComponent } from './local-provider.component';
 import { RoleCardComponent } from './role-card.component';
-import { localOptions, onlineOptions, providerOf, type Role, roleStatus } from './role-options';
+import { onlineOptions, providerOf, type Role, roleStatus } from './role-options';
 
-const spec = (id: string, kind: ModelSpec['kind'], size = 2e9): ModelSpec => ({
-  id,
-  label: id,
-  hf_repo: '',
-  hf_file: '',
-  sha256: '',
-  size_bytes: size,
-  min_ram_gb: 4,
-  kind,
-});
-const info = (id: string, kind: ModelSpec['kind'], installed: boolean): ModelInfo => ({ spec: spec(id, kind), installed });
-
+const localLists: ProviderModels[] = [{ provider: 'localhost', models: ['kev-4b', 'clef', 'chat-1', 'chat-2'].map(id => ({ provider: 'localhost', id, display_name: id, context_length: null, price_per_mtok_in: null })), error: null }];
 const conn = (id: string, provider: Connection['provider'], label: string): Connection => ({ id, provider, label, last4: '1234' });
 const OPENROUTER = conn('openrouter', 'openrouter', 'OpenRouter');
-const ALL_KEYS = [OPENROUTER, conn('subq', 'subq', 'SubQ'), conn('typesafe', 'typesafe', 'TypeSafe')];
+const LOCAL = conn('localhost', 'localhost', 'Local server');
+const ALL_KEYS = [LOCAL, OPENROUTER, conn('subq', 'subq', 'SubQ'), conn('typesafe', 'typesafe', 'TypeSafe')];
 
 async function render<T>(cmp: Type<T>, handlers: Record<string, unknown>, init?: (f: ComponentFixture<T>) => void) {
   const t: TauriMock = mockTauri(handlers);
@@ -40,9 +30,7 @@ async function render<T>(cmp: Type<T>, handlers: Record<string, unknown>, init?:
 
 describe('AiModelsPageComponent connections', () => {
   const handlers = {
-    list_models: [info('kev-4b', 'decision', true), info('chat-1', 'chat', true), info('big', 'decision', false)],
-    system_ram_gb: 16,
-    engine_status: { model_id: 'kev-4b', state: 'idle', error: null },
+    engine_status: { model_id: 'localhost:kev-4b', state: 'idle', error: null },
     provider_key_status: { has_key: false, last4: null },
     list_connections: [],
   };
@@ -50,25 +38,15 @@ describe('AiModelsPageComponent connections', () => {
   it('shows the local card first, then OpenRouter, SubQ, TypeSafe and Exa', async () => {
     const { el } = await render(AiModelsPageComponent, { ...handlers, get_research_model: null, list_remote_models: [] });
     const titles = [...el.querySelectorAll('[data-testid=connections] [data-testid=provider-title]')].map((e) => e.textContent?.trim());
-    expect(titles).toEqual(['Llama.cpp (local)', 'OpenRouter', 'SubQ', 'TypeSafe', 'Exa']);
+    expect(titles).toEqual(['Local server', 'OpenRouter', 'SubQ', 'TypeSafe', 'Exa']);
   });
 
-  it('summarizes the local runtime', async () => {
-    const { el } = await render(AiModelsPageComponent, { ...handlers, get_research_model: null, list_remote_models: [] });
-    const local = el.querySelector('[data-testid=local-provider]')!;
-    expect(local.textContent).toContain('16 GB RAM');
-    expect(local.textContent).toContain('2 models installed');
-    expect(local.textContent).toContain('ready');
-    expect(local.querySelector('a')!.getAttribute('href')).toBe('/ai/downloads');
-  });
 });
 
 describe('role options', () => {
-  const models = [info('chat-missing', 'chat', false), info('chat-installed', 'chat', true), info('kev-4b', 'decision', true)];
   const remote: ProviderModels[] = [
     { provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: null }], error: null },
   ];
-  const kev = info('kev-4b', 'decision', true);
 
   it('tells providers apart by id', () => {
     expect(providerOf('openrouter:a/b')).toBe('openrouter');
@@ -78,10 +56,6 @@ describe('role options', () => {
     expect(providerOf(null)).toBe('local');
   });
 
-  it('lists local models for the role, installed first', () => {
-    expect(localOptions('research', models).map((o) => o.id)).toEqual(['chat-installed', 'chat-missing']);
-    expect(localOptions('system-one', models).map((o) => o.id)).toEqual(['kev-4b']);
-  });
 
   it('prefixes online ids with the provider', () => {
     expect(onlineOptions(remote)[0]).toEqual({ id: 'openrouter:deepseek/x', label: 'DeepSeek X', installed: true, detail: '' });
@@ -93,25 +67,26 @@ describe('role options', () => {
   });
 
   it('derives status from the active model\'s own key', () => {
-    expect(roleStatus({ active: 'subq:subq-snap-preview', installed: [], keys: { openrouter: true, subq: false } })).toBe('needs-setup');
-    expect(roleStatus({ active: 'subq:subq-snap-preview', installed: [], keys: { openrouter: false, subq: true } })).toBe('ready');
-    expect(roleStatus({ active: 'typesafe:jev-latest', installed: [], keys: { openrouter: true } })).toBe('needs-setup');
-    expect(roleStatus({ active: 'typesafe:jev-latest', installed: [], keys: { typesafe: true } })).toBe('ready');
+    expect(roleStatus({ active: 'subq:subq-snap-preview', keys: { openrouter: true, subq: false } })).toBe('needs-setup');
+    expect(roleStatus({ active: 'subq:subq-snap-preview', keys: { openrouter: false, subq: true } })).toBe('ready');
+    expect(roleStatus({ active: 'typesafe:jev-latest', keys: { openrouter: true } })).toBe('needs-setup');
+    expect(roleStatus({ active: 'typesafe:jev-latest', keys: { typesafe: true } })).toBe('ready');
   });
 
   it('derives the role status', () => {
-    expect(roleStatus({ active: null, installed: [], keys: {} })).toBe('needs-setup');
-    expect(roleStatus({ active: 'openrouter:x', installed: [], keys: {} })).toBe('needs-setup');
-    expect(roleStatus({ active: 'openrouter:x', installed: [], keys: { openrouter: true } })).toBe('ready');
-    expect(roleStatus({ active: 'kev-4b', installed: [], keys: { openrouter: true } })).toBe('needs-setup');
-    expect(roleStatus({ active: 'kev-4b', installed: [kev], keys: {}, hasExaKey: false })).toBe('needs-setup');
-    expect(roleStatus({ active: 'kev-4b', installed: [kev], keys: {}, engineError: true })).toBe('error');
-    expect(roleStatus({ active: 'kev-4b', installed: [kev], keys: {} })).toBe('ready');
+    expect(roleStatus({ active: null, keys: {} })).toBe('needs-setup');
+    expect(roleStatus({ active: 'openrouter:x', keys: {} })).toBe('needs-setup');
+    expect(roleStatus({ active: 'openrouter:x', keys: { openrouter: true } })).toBe('ready');
+    expect(roleStatus({ active: 'kev-4b', keys: { openrouter: true } })).toBe('needs-setup');
+    expect(roleStatus({ active: 'kev-4b', keys: {}, hasExaKey: false })).toBe('needs-setup');
+    expect(roleStatus({ active: 'kev-4b', keys: {}, engineError: true })).toBe('error');
+    expect(roleStatus({ active: 'localhost:kev-4b', keys: { localhost: true } })).toBe('ready');
   });
 });
 
 describe('RoleCardComponent', () => {
   const remote = (error: string | null = null): ProviderModels[] => [
+    ...localLists,
     {
       provider: 'openrouter',
       models: error ? [] : [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }],
@@ -119,12 +94,10 @@ describe('RoleCardComponent', () => {
     },
   ];
   const base = (over: Record<string, unknown> = {}) => ({
-    list_models: [info('kev-4b', 'decision', true), info('clef', 'decision', true), info('big', 'decision', false), info('chat-1', 'chat', true)],
-    system_ram_gb: 16,
-    engine_status: { model_id: 'kev-4b', state: 'idle', error: null },
+    engine_status: { model_id: 'localhost:kev-4b', state: 'idle', error: null },
     provider_key_status: { has_key: true, last4: '1234' },
-    list_connections: [OPENROUTER],
-    get_research_model: 'chat-1',
+    list_connections: [LOCAL, OPENROUTER],
+    get_research_model: 'localhost:chat-1',
     list_remote_models: remote(),
     set_active_model: null,
     set_research_model: null,
@@ -190,6 +163,7 @@ describe('RoleCardComponent', () => {
   });
 
   const lists: ProviderModels[] = [
+    ...localLists,
     { provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }], error: null },
     { provider: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
     { provider: 'typesafe', models: [{ provider: 'typesafe', id: 'jev-latest', display_name: 'Jev (stable)', context_length: 64000, price_per_mtok_in: 0.042 }], error: null },
@@ -201,7 +175,7 @@ describe('RoleCardComponent', () => {
     expect(c.group('subq')!.querySelector('[data-id="subq:subq-snap-preview"]')).not.toBeNull();
     expect(c.group('typesafe')!.querySelector('[data-id="typesafe:jev-latest"]')).not.toBeNull();
     expect(c.group('openrouter')!.querySelector('[data-id="openrouter:deepseek/x"]')).not.toBeNull();
-    expect(c.group('local')!.querySelector('[data-id="kev-4b"]')).not.toBeNull();
+    expect(c.group('localhost')!.querySelector('[data-id="localhost:kev-4b"]')).not.toBeNull();
     expect(c.group('subq')!.querySelector('[data-id="openrouter:deepseek/x"]')).toBeNull();
   });
 
@@ -233,19 +207,7 @@ describe('RoleCardComponent', () => {
     expect(c.q('[data-testid=role-status]')!.textContent).toContain('Ready');
   });
 
-  it('needs setup when active local model is not installed', async () => {
-    const c = await card('system-one', { engine_status: { model_id: 'big', state: 'missing', error: null } });
-    expect(c.q('[data-testid=role-status]')!.textContent).toContain('Needs setup');
-  });
 
-  it('lists not-installed local models with a Download link', async () => {
-    const c = await card('system-one');
-    await c.openPicker();
-    expect(c.radio('big')!.disabled).toBe(true);
-    const row = c.radio('big')!.closest('div.flex')!;
-    expect(row.querySelector('a')!.getAttribute('href')).toBe('/ai/downloads');
-    expect(c.radio('chat-1')).toBeNull();
-  });
 
   it('filters the picker by search', async () => {
     const c = await card('system-one', { list_remote_models: lists, list_connections: ALL_KEYS });
@@ -256,23 +218,24 @@ describe('RoleCardComponent', () => {
     await c.settle();
     expect(c.radio('typesafe:jev-latest')).not.toBeNull();
     expect(c.radio('openrouter:deepseek/x')).toBeNull();
-    expect(c.radio('kev-4b')).toBeNull();
+    expect(c.radio('localhost:kev-4b')).toBeNull();
   });
 
   it('picking a local model calls set_active_model', async () => {
-    const c = await card('system-one');
+    const c = await card('system-one', { get_ui_setting: null });
     await c.openPicker();
-    c.radio('clef')!.click();
+    c.radio('localhost:clef')!.click();
     await c.settle();
-    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'clef' });
+    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'localhost:clef' });
+    expect(c.q('[role=alertdialog]')).toBeNull();
   });
 
   it('picking a local research model calls set_research_model', async () => {
-    const c = await card('research', { list_models: [info('chat-1', 'chat', true), info('chat-2', 'chat', true)] });
+    const c = await card('research');
     await c.openPicker();
-    c.radio('chat-2')!.click();
+    c.radio('localhost:chat-2')!.click();
     await c.settle();
-    expect(c.t.callsTo('set_research_model')[0]).toEqual({ id: 'chat-2' });
+    expect(c.t.callsTo('set_research_model')[0]).toEqual({ id: 'localhost:chat-2' });
   });
 
   it('asks for notice before first online pick', async () => {
@@ -297,10 +260,10 @@ describe('RoleCardComponent', () => {
       },
     });
     await c.openPicker();
-    c.radio('clef')!.click();
+    c.radio('localhost:clef')!.click();
     await c.settle();
-    expect(c.radio('kev-4b')!.checked).toBe(true);
-    expect(c.radio('clef')!.checked).toBe(false);
+    expect(c.radio('localhost:kev-4b')!.checked).toBe(true);
+    expect(c.radio('localhost:clef')!.checked).toBe(false);
   });
 
   it('shows an inline error in the provider group when its list fails, leaving local models usable', async () => {
@@ -309,7 +272,7 @@ describe('RoleCardComponent', () => {
     expect(c.group('openrouter')!.textContent).toContain('boom');
     const retry = [...c.group('openrouter')!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Retry');
     expect(retry).toBeTruthy();
-    expect(c.radio('kev-4b')).not.toBeNull();
+    expect(c.radio('localhost:kev-4b')).not.toBeNull();
   });
 
   it('research card asks for the Exa key inline', async () => {
@@ -321,34 +284,34 @@ describe('RoleCardComponent', () => {
   });
 
   it('follows the engine when the active model changes elsewhere', async () => {
-    let model = 'kev-4b';
+    let model = 'localhost:kev-4b';
     const c = await card('system-one', { engine_status: () => ({ model_id: model, state: 'idle', error: null }) });
     await c.openPicker();
-    expect(c.radio('kev-4b')!.checked).toBe(true);
-    model = 'clef';
+    expect(c.radio('localhost:kev-4b')!.checked).toBe(true);
+    model = 'localhost:clef';
     await c.t.emit('engine://status', {});
     await c.settle();
-    expect(c.radio('clef')!.checked).toBe(true);
-    const restart = [...c.el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Restart')!;
+    expect(c.radio('localhost:clef')!.checked).toBe(true);
+    const restart = [...c.el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reset connection')!;
     restart.click();
     await c.settle();
-    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'clef' });
+    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'localhost:clef' });
   });
 
   it('follows the research model set elsewhere', async () => {
-    const c = await card('research', { list_models: [info('chat-1', 'chat', true), info('chat-2', 'chat', true)] });
+    const c = await card('research');
     await c.openPicker();
-    TestBed.inject(ModelsStore).researchModel.set('chat-2');
+    TestBed.inject(ModelsStore).researchModel.set('localhost:chat-2');
     await c.settle();
-    expect(c.radio('chat-2')!.checked).toBe(true);
+    expect(c.radio('localhost:chat-2')!.checked).toBe(true);
   });
 
   it('ignores a second pick while one is in flight', async () => {
     const c = await card('system-one', { set_active_model: () => new Promise(() => undefined) });
     await c.openPicker();
-    c.radio('clef')!.click();
+    c.radio('localhost:clef')!.click();
     await c.settle();
-    c.radio('kev-4b')!.click();
+    c.radio('localhost:kev-4b')!.click();
     await c.settle();
     expect(c.t.callsTo('set_active_model')).toHaveLength(1);
   });
@@ -380,7 +343,7 @@ describe('RoleCardComponent', () => {
 
   it('needs setup when the key behind the active model was removed', async () => {
     const c = await card('system-one', {
-      list_connections: [OPENROUTER],
+      list_connections: [LOCAL, OPENROUTER],
       engine_status: { model_id: 'openrouter~2:deepseek/x', state: 'idle', error: null },
     });
     expect(c.q('[data-testid=role-status]')!.textContent).toContain('Needs setup');
@@ -388,11 +351,11 @@ describe('RoleCardComponent', () => {
 
   it('fast model card shows runtime and restart', async () => {
     const c = await card('system-one');
-    expect(c.el.textContent).toContain('llama.cpp on 127.0.0.1');
-    const restart = [...c.el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Restart')!;
+    expect(c.el.textContent).toContain('User-run local server');
+    const restart = [...c.el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reset connection')!;
     restart.click();
     await c.settle();
-    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'kev-4b' });
+    expect(c.t.callsTo('set_active_model')[0]).toEqual({ id: 'localhost:kev-4b' });
   });
 
   it('reports a remote runtime for online models', async () => {
@@ -402,45 +365,13 @@ describe('RoleCardComponent', () => {
       engine_status: { model_id: 'typesafe:jev-latest', state: 'idle', error: null },
     });
     expect(c.el.textContent).toContain('Online model');
-    expect(c.el.textContent).not.toContain('llama.cpp on 127.0.0.1');
-  });
-});
-
-describe('DownloadsPageComponent', () => {
-  const handlers = (over: Record<string, unknown> = {}) => ({
-    list_models: [info('kev-4b', 'decision', true), info('chat-1', 'chat', false)],
-    system_ram_gb: 16,
-    engine_status: { model_id: 'kev-4b', state: 'idle', error: null },
-    get_research_model: null,
-    download_model: null,
-    set_research_model: null,
-    set_active_model: null,
-    ...over,
-  });
-
-  it('lists the catalog with RAM info and no Use buttons', async () => {
-    const { el } = await render(DownloadsPageComponent, handlers());
-    expect(el.textContent).toContain('This computer has 16 GB of RAM.');
-    expect(el.querySelector('[data-testid=model-kev-4b]')!.textContent).toContain('Active');
-    expect(el.querySelector('[data-testid=model-chat-1]')).not.toBeNull();
-    const labels = [...el.querySelectorAll('button')].map((b) => b.textContent?.trim());
-    expect(labels).not.toContain('Use this model');
-    expect(labels).not.toContain('Use for research');
-  });
-
-  it('auto-selects a finished research download when none is set', async () => {
-    const { el, t } = await render(DownloadsPageComponent, handlers());
-    (el.querySelector('[data-testid=model-chat-1] button') as HTMLButtonElement).click();
-    await flush();
-    expect(t.callsTo('set_research_model')[0]).toEqual({ id: 'chat-1' });
+    expect(c.el.textContent).not.toContain('User-run local server');
   });
 });
 
 describe('provider connections', () => {
   const handlers = (over: Record<string, unknown> = {}) => ({
-    list_models: [info('kev-4b', 'decision', true)],
-    system_ram_gb: 16,
-    engine_status: { model_id: 'kev-4b', state: 'idle', error: null },
+    engine_status: { model_id: 'localhost:kev-4b', state: 'idle', error: null },
     provider_key_status: { has_key: false, last4: null },
     get_research_model: null,
     list_remote_models: [],
@@ -499,5 +430,52 @@ describe('EngineStore remote detection', () => {
     const engine = TestBed.inject(EngineStore);
     engine.status.set({ model_id: 'clef-flash', state: 'idle', error: null });
     expect(engine.remote()).toBe(false);
+  });
+});
+
+describe('Local server connection', () => {
+  const handlers = {
+    get_local_connection: { base_url: 'http://127.0.0.1:8080/v1', has_key: false },
+    list_connections: [],
+    save_local_connection: null,
+    list_remote_models: localLists,
+    test_local_connection: null,
+  };
+  const button = (el: HTMLElement, label: string) => [...el.querySelectorAll('button')].find(b => b.textContent?.trim() === label)!;
+
+  it('saves a URL without a key, discovers models, and tests the selected role', async () => {
+    const { el, t, f } = await render(LocalProviderComponent, handlers);
+    button(el, 'Save and discover models').click();
+    await flush(); f.detectChanges();
+    expect(t.callsTo('save_local_connection')[0]).toEqual({ baseUrl: 'http://127.0.0.1:8080/v1', key: null });
+    const select = el.querySelector('select')!;
+    select.value = 'chat-2'; select.dispatchEvent(new Event('change')); f.detectChanges();
+    button(el, 'Test Smart Model').click();
+    await flush(); f.detectChanges();
+    expect(t.callsTo('test_local_connection')[0]).toEqual({ model: 'chat-2', role: 'chat' });
+    expect(el.textContent).toContain('Smart Model test passed.');
+    expect(t.callsTo('download_model')).toHaveLength(0);
+  });
+
+  it('shows actionable errors and allows retrying', async () => {
+    const { el, t, f } = await render(LocalProviderComponent, { ...handlers, save_local_connection: () => { throw { kind: 'ProviderUnavailable', message: 'Nothing listening on 127.0.0.1:8080.' }; } });
+    button(el, 'Save and discover models').click();
+    await flush(); f.detectChanges();
+    expect(el.querySelector('[role=alert]')?.textContent).toContain('Nothing listening');
+    t.set('save_local_connection', null);
+    button(el, 'Save and discover models').click();
+    await flush(); f.detectChanges();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+    expect(el.querySelector('select')).not.toBeNull();
+  });
+
+  it('can clear a saved key without exposing it in the form', async () => {
+    const { el, t, f } = await render(LocalProviderComponent, { ...handlers, get_local_connection: { base_url: 'http://localhost:8080/v1', has_key: true } });
+    expect(el.querySelector<HTMLInputElement>('input[type=password]')!.value).toBe('');
+    const checkbox = el.querySelector<HTMLInputElement>('input[type=checkbox]')!;
+    checkbox.click(); f.detectChanges();
+    button(el, 'Save and discover models').click();
+    await flush(); f.detectChanges();
+    expect(t.callsTo('save_local_connection')[0]).toEqual({ baseUrl: 'http://localhost:8080/v1', key: '' });
   });
 });

@@ -700,3 +700,74 @@ async fn job_views_seed_one_and_keep_the_last() {
     assert!(s.delete_job_view(id).await.is_err(), "the last view stays");
     assert_eq!(s.list_job_views().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn migration_clears_legacy_selections_and_preserves_remote() {
+    let store = Store::open("sqlite::memory:").await.unwrap();
+    store
+        .set_setting(crate::state::ACTIVE_MODEL_KEY, "clef-flash")
+        .await
+        .unwrap();
+    store
+        .set_setting(crate::state::RESEARCH_MODEL_KEY, "openrouter:chat:free")
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/0009_local_server.sql"))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_setting(crate::state::ACTIVE_MODEL_KEY)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        store
+            .get_setting(crate::state::RESEARCH_MODEL_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("openrouter:chat:free")
+    );
+    assert_eq!(
+        store
+            .get_setting("ui.local_server_migration")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+    store
+        .set_setting("ui.local_server_migration", "0")
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/0009_local_server.sql"))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_setting("ui.local_server_migration")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("0")
+    );
+    store
+        .set_setting(crate::state::RESEARCH_MODEL_KEY, "lfm2.5-2.6b")
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../../migrations/0009_local_server.sql"))
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get_setting(crate::state::RESEARCH_MODEL_KEY)
+            .await
+            .unwrap(),
+        None
+    );
+}

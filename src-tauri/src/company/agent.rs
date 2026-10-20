@@ -294,10 +294,20 @@ pub async fn research_with(
     let mut l = Loop {
         ep,
         search,
-        http: reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("reqwest client"),
+        http: {
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(120));
+            let local = reqwest::Url::parse(&ep.base_url).ok().is_some_and(|u| {
+                u.host_str().is_some_and(|h| {
+                    h == "localhost"
+                        || h.trim_matches(['[', ']'])
+                            .parse::<std::net::IpAddr>()
+                            .is_ok_and(|ip| ip.is_loopback())
+                })
+            });
+            (if local { client.no_proxy() } else { client })
+                .build()
+                .expect("reqwest client")
+        },
         history: vec![Message::User(vec![UserContent::Text {
             text: prompt::user_message(&input),
         }])],

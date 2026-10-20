@@ -4,7 +4,7 @@ import { ShellComponent } from './shell/shell.component';
 
 /** Where an old `/models?tab=` link lands now. */
 export function modelsRedirect(tab: string | undefined): string {
-  return tab === 'engine' ? '/ai' : '/ai/downloads';
+  return '/ai';
 }
 
 export const routes: Routes = [
@@ -30,10 +30,10 @@ export const routes: Routes = [
       },
       { path: 'profile', loadComponent: () => import('./features/profile/profile-page.component').then((m) => m.ProfilePageComponent) },
       { path: 'ai', pathMatch: 'full', loadComponent: () => import('./features/ai/ai-models-page.component').then((m) => m.AiModelsPageComponent) },
-      { path: 'ai/downloads', loadComponent: () => import('./features/ai/downloads-page.component').then((m) => m.DownloadsPageComponent) },
+      { path: 'ai/downloads', redirectTo: 'ai' },
       { path: 'ai/roles', redirectTo: 'ai' },
       { path: 'ai/providers', redirectTo: 'ai' },
-      { path: 'ai/models', redirectTo: 'ai/downloads' },
+      { path: 'ai/models', redirectTo: 'ai' },
       { path: 'models', redirectTo: ({ queryParams }) => modelsRedirect(queryParams['tab']) },
       {
         path: 'settings',
