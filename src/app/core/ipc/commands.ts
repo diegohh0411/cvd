@@ -1,4 +1,4 @@
-// One typed wrapper per Tauri command (src-tauri/src/commands.rs `ipc`).
+// One typed wrapper per Tauri command (apps/desktop/crates/cvd-core/src/ipc.rs).
 // Argument names are camelCase: Tauri maps them to the snake_case parameters.
 import { invoke } from '@tauri-apps/api/core';
 

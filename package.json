@@ -6,7 +6,7 @@
     "start": "bun --bun ng serve",
     "build": "bun --bun ng build",
     "watch": "bun --bun ng build --watch --configuration development",
-    "tauri": "tauri",
+    "tauri": "cd apps/desktop && tauri",
     "test": "bun --bun ng test --watch=false",
     "bump": "bun scripts/bump-version.ts"
   },

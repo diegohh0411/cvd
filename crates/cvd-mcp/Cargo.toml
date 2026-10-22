@@ -1,0 +1,18 @@
+[package]
+name = "cvd-mcp"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+cvd-core = { path = "../cvd-core" }
+rmcp = { version = "3.5.1", features = ["server", "transport-io", "macros"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+dirs = "7.0.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+wiremock = "0.6.5"

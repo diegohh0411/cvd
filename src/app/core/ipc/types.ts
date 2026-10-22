@@ -1,4 +1,4 @@
-// Mirrors of the Rust types the webview sees (src-tauri/src/**). Field names
+// Mirrors of the Rust types the webview sees (crates/cvd-core/src/**). Field names
 // stay snake_case because serde serializes them as-is.
 
 export interface Profile {
@@ -332,7 +332,7 @@ export interface ResearchEvent {
 export type SkipMode = 'cancel' | 'background';
 export type ModelRole = 'decision' | 'chat';
 
-// ---- Gmail job updates (src-tauri/src/mail, store/email.rs) ----
+// ---- Gmail job updates (crates/cvd-core/src/mail, store/email.rs) ----
 
 /** The app password never reaches the webview; `has_password` only says one is stored. */
 export interface MailAccountView {
