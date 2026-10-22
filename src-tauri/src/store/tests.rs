@@ -1109,3 +1109,13 @@ async fn migration_clears_legacy_selections_and_preserves_remote() {
         None
     );
 }
+
+#[tokio::test]
+async fn writes_bump_change_versions() {
+    let s = store().await;
+    let before = s.change_versions().await.unwrap();
+    s.set_setting("k", "v").await.unwrap();
+    let after = s.change_versions().await.unwrap();
+    assert!(after["settings"] > before["settings"]);
+    assert_eq!(after["job_status"], before["job_status"]);
+}

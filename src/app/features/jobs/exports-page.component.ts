@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
@@ -7,6 +7,7 @@ import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { formatTimestamp } from '../../core/format';
 import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
+import { onTablesChanged, untilDestroyed } from '../../core/ipc/events';
 import type { Cv } from '../../core/ipc/types';
 import { jobLabel, JobsStore } from '../../core/stores/jobs.store';
 import { PageHeaderComponent } from '../../shell/page-header.component';
@@ -53,8 +54,16 @@ export class ExportsPageComponent implements OnInit {
     return this.cvs().map((cv) => ({ cv, job: byId.get(cv.jd_id) ?? `Job ${cv.jd_id}` }));
   });
 
+  constructor() {
+    void untilDestroyed(inject(DestroyRef), onTablesChanged(['cv'], () => void this.loadCvs())).catch(() => undefined);
+  }
+
   async ngOnInit(): Promise<void> {
     await this.jobs.load();
+    await this.loadCvs();
+  }
+
+  private async loadCvs(): Promise<void> {
     const all = await Promise.all(this.jobs.jobs().map((j) => api.listCvs(j.id).catch(() => [] as Cv[])));
     this.cvs.set(all.flat().sort((a, b) => b.id - a.id));
   }

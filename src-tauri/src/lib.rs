@@ -50,6 +50,7 @@ pub fn run() {
             tauri::async_runtime::block_on(state.reload_providers())?;
             app.manage(state);
             start_mail_watcher(app.handle());
+            start_change_feed(app.handle());
             app.manage(autofill::window::Sessions::default());
             // Dev hook: open an apply window on any supported posting, with no job attached.
             #[cfg(debug_assertions)]
@@ -141,6 +142,31 @@ pub fn run() {
 
 /// Runs the Gmail watcher for the life of the app. It connects right away
 /// when an account is saved, and otherwise waits for one.
+/// Polls the trigger-maintained change counters and tells the UI which tables changed.
+fn start_change_feed(handle: &tauri::AppHandle) {
+    let st = handle.state::<AppState>();
+    let store = st.store.clone();
+    let emit = st.emitter();
+    tauri::async_runtime::spawn(async move {
+        let mut seen = store.change_versions().await.unwrap_or_default();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let Ok(now) = store.change_versions().await else {
+                continue;
+            };
+            let tables: Vec<&String> = now
+                .iter()
+                .filter(|(t, v)| seen.get(*t) != Some(*v))
+                .map(|(t, _)| t)
+                .collect();
+            if !tables.is_empty() {
+                emit(state::DB_CHANGED_EVENT, serde_json::json!({ "tables": tables }));
+            }
+            seen = now;
+        }
+    });
+}
+
 fn start_mail_watcher(handle: &tauri::AppHandle) {
     let st = handle.state::<AppState>();
     let Some(rx) = st.watcher.take_receiver() else {

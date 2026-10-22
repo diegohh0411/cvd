@@ -2,7 +2,7 @@ import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { messageFor } from '../ipc/errors';
-import { onJobUpdated } from '../ipc/events';
+import { onJobUpdated, onTablesChanged } from '../ipc/events';
 import type { JobDescription, MatchRun } from '../ipc/types';
 
 export const RECENT_JOBS = 5;
@@ -23,9 +23,15 @@ export class JobsStore {
     void onJobUpdated(({ job_id, status_id }) =>
       this.jobs.update((js) => js.map((j) => (j.id === job_id ? { ...j, status_id } : j))),
     ).catch(() => undefined);
+    void onTablesChanged(['job_description', 'match_run', 'job_status'], () => {
+      if (this.loadedOnce) void this.load();
+    }).catch(() => undefined);
   }
 
+  private loadedOnce = false;
+
   async load(): Promise<void> {
+    this.loadedOnce = true;
     this.loading.set(true);
     try {
       const jobs = await api.listJobs();

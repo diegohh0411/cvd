@@ -2,6 +2,7 @@ import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { messageFor } from '../ipc/errors';
+import { onTablesChanged } from '../ipc/events';
 import type { Profile } from '../ipc/types';
 
 export const EMPTY_PROFILE: Profile = { name: '', headline: '', email: '', phone: '', location: '', links: [], summary: '' };
@@ -13,6 +14,12 @@ export class ProfileStore {
   readonly error = signal<string | null>(null);
   /** First run: no profile saved yet. */
   readonly isEmpty = computed(() => this.loaded() && !this.profile().name.trim());
+
+  constructor() {
+    void onTablesChanged(['profile'], () => {
+      if (this.loaded()) void this.load();
+    }).catch(() => undefined);
+  }
 
   async load(): Promise<void> {
     try {

@@ -2,6 +2,7 @@ import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { messageFor } from '../ipc/errors';
+import { onTablesChanged } from '../ipc/events';
 import type { Entry, EntryInput, EntryKind, Skill } from '../ipc/types';
 
 @Injectable({ providedIn: 'root' })
@@ -15,6 +16,12 @@ export class LibraryStore {
 
   readonly active = computed(() => this.entries().filter((e) => !e.archived));
   readonly isEmpty = computed(() => this.loaded() && this.active().length === 0);
+
+  constructor() {
+    void onTablesChanged(['entry', 'bullet', 'skill', 'entry_skill'], () => {
+      if (this.loaded()) void this.load();
+    }).catch(() => undefined);
+  }
 
   byKind(kind: EntryKind, includeArchived = false): Entry[] {
     return this.entries().filter((e) => e.kind === kind && (includeArchived || !e.archived));

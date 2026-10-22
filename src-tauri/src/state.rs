@@ -28,6 +28,9 @@ pub type Emitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 /// A job's tracking fields changed outside the main window.
 pub const JOB_UPDATED_EVENT: &str = "job://updated";
 
+/// Some tables were written (by the app or the MCP server); payload `{ "tables": [..] }`.
+pub const DB_CHANGED_EVENT: &str = "db://changed";
+
 /// Where the decision engine comes from.
 pub enum EngineSource {
     /// Production: HTTP connections owned by the user.

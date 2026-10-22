@@ -3,7 +3,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 
 import * as api from '../../core/ipc/commands';
 import { toAppError } from '../../core/ipc/errors';
-import { onAnyMatchProgress, onResearch } from '../../core/ipc/events';
+import { onAnyMatchProgress, onResearch, onTablesChanged, untilDestroyed } from '../../core/ipc/events';
 import { stepLine } from '../companies/research-progress.component';
 import type {
   AppError,
@@ -118,7 +118,10 @@ export class WorkspaceStore {
   });
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => {
+    const destroyRef = inject(DestroyRef);
+    void untilDestroyed(destroyRef, onTablesChanged(['job_description'], () => void this.reloadJob())).catch(() => undefined);
+    void untilDestroyed(destroyRef, onTablesChanged(['company', 'company_alias'], () => void this.loadCompany())).catch(() => undefined);
+    destroyRef.onDestroy(() => {
       if (this.fitTimer) clearTimeout(this.fitTimer);
       void this.unlisten?.then((u) => u());
       void this.unlistenResearch?.then((u) => u());
@@ -160,6 +163,14 @@ export class WorkspaceStore {
     } else {
       this.research.set({ ...r, log: [...r.log, stepLine(event.step)].slice(-LOG_LINES) });
     }
+  }
+
+  /** Picks up job edits made elsewhere (auto-apply, the jobs list, the MCP server). */
+  private async reloadJob(): Promise<void> {
+    const job = this.job();
+    if (!job) return;
+    const fresh = await api.getJob(job.id).catch(() => null);
+    if (fresh && this.job()?.id === fresh.id) this.job.set(fresh);
   }
 
   async loadCompany(): Promise<void> {

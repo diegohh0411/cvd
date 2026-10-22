@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
-import { onInboxChanged, onScanFinished, onWatcherStatus } from '../ipc/events';
+import { onInboxChanged, onScanFinished, onTablesChanged, onWatcherStatus } from '../ipc/events';
 import type { InboxFilter, ProcessedEmail, WatcherStatus } from '../ipc/types';
 
 /**
@@ -69,6 +69,7 @@ export class InboxStore {
       onWatcherStatus((s) => this.watcher.set(s)),
       onInboxChanged(refresh),
       onScanFinished(refresh),
+      onTablesChanged(['processed_email'], refresh),
     ]);
     const [status] = await Promise.all([api.getWatcherStatus().catch(() => null), this.refresh().catch(() => undefined)]);
     if (status && this.watcher() === null) this.watcher.set(status);

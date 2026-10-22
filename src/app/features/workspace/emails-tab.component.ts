@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { NgIcon, provideIcons } from '@ng-icons/core';
 import { lucideExternalLink } from '@ng-icons/lucide';
 
 import { formatTimestamp } from '../../core/format';
 import * as api from '../../core/ipc/commands';
+import { onTablesChanged, untilDestroyed } from '../../core/ipc/events';
 import type { JobStatus, ProcessedEmail } from '../../core/ipc/types';
 import { JobStatusesStore } from '../../core/stores/job-statuses.store';
 import { openJobUrl } from '../jobs/job-url';
@@ -53,8 +54,13 @@ export class EmailsTabComponent {
   protected readonly openUrl = openJobUrl;
   private readonly statuses = inject(JobStatusesStore);
 
+  /** Bumped when the table changes elsewhere. */
+  private readonly changes = signal(0);
+
   constructor() {
+    void untilDestroyed(inject(DestroyRef), onTablesChanged(['processed_email'], () => this.changes.update((n) => n + 1))).catch(() => undefined);
     effect(() => {
+      this.changes();
       const id = this.jobId();
       void api.listJobEmails(id).then((r) => this.emails.set(r), () => this.emails.set([]));
     });
