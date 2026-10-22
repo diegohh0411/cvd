@@ -4,10 +4,10 @@
   "version": "0.5.0",
   "identifier": "com.diego.cvd",
   "build": {
-    "beforeDevCommand": { "script": "bun run start", "cwd": "../../.." },
+    "beforeDevCommand": { "script": "bun run start", "cwd": "../../web" },
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": { "script": "bun run build", "cwd": "../../.." },
-    "frontendDist": "../../../dist/cvd/browser"
+    "beforeBuildCommand": { "script": "bun run build", "cwd": "../../web" },
+    "frontendDist": "../../web/dist/cvd/browser"
   },
   "app": {
     "windows": [

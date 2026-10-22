@@ -25,8 +25,12 @@ Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) and the [Tauri p
 bun install
 bun run tauri dev                              # run the desktop app
 bun run test                                   # Angular tests
+bun run build                                  # production web build
+bun run start                                  # web dev server (localhost:1420)
 cargo test --workspace
 ```
+
+The Bun workspace keeps the Angular app and its configuration in `apps/web`; root scripts forward web commands there. The Tauri shell lives in `apps/desktop`. Run `bun run bump <major|minor|patch|X.Y.Z>` from the root to keep package, Cargo, and Tauri versions in sync.
 
 The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 

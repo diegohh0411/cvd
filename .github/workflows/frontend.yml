@@ -3,13 +3,9 @@ name: Frontend
 on:
   pull_request:
     paths:
-      - "src/**"
+      - "apps/web/**"
       - "package.json"
       - "bun.lock"
-      - "angular.json"
-      - "components.json"
-      - ".postcssrc.json"
-      - "tsconfig*.json"
       - ".github/workflows/frontend.yml"
 
 concurrency:

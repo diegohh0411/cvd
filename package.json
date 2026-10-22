@@ -2,49 +2,20 @@
   "name": "cvd",
   "version": "0.5.0",
   "scripts": {
-    "ng": "ng",
-    "start": "bun --bun ng serve",
-    "build": "bun --bun ng build",
-    "watch": "bun --bun ng build --watch --configuration development",
+    "ng": "bun run --cwd apps/web ng",
+    "start": "bun run --cwd apps/web start",
+    "build": "bun run --cwd apps/web build",
+    "watch": "bun run --cwd apps/web watch",
+    "test": "bun run --cwd apps/web test",
     "tauri": "cd apps/desktop && tauri",
-    "test": "bun --bun ng test --watch=false",
     "bump": "bun scripts/bump-version.ts"
   },
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "dependencies": {
-    "@angular/cdk": "^22",
-    "@angular/common": "^22.0.1",
-    "@angular/compiler": "^22.0.1",
-    "@angular/core": "^22.0.1",
-    "@angular/forms": "^22.0.1",
-    "@angular/platform-browser": "^22.0.1",
-    "@angular/router": "^22.0.1",
-    "@ng-icons/core": "^36.1.0",
-    "@ng-icons/lucide": "^36.1.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-process": "^2",
-    "@tauri-apps/plugin-updater": "^2",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "ngx-sonner": "^3.1.0",
-    "rxjs": "~7.8.2",
-    "tailwind-merge": "^3.7.0",
-    "tailwindcss-animate": "^1.0.7",
-    "tslib": "^2.8.1"
-  },
   "devDependencies": {
-    "@angular/build": "^22.0.1",
-    "@angular/cli": "^22.0.1",
-    "@angular/compiler-cli": "^22.0.1",
-    "@tailwindcss/postcss": "^4",
-    "@tauri-apps/cli": "^2",
-    "happy-dom": "^20.14.5",
-    "postcss": "^8.5.29",
-    "tailwindcss": "^4",
-    "typescript": "~6.0.3",
-    "vitest": "^5.0.3"
-  }
+    "@tauri-apps/cli": "^2"
+  },
+  "workspaces": [
+    "apps/*"
+  ]
 }

@@ -8,6 +8,8 @@ const root = join(import.meta.dir, "..");
 // Group 1 is everything before the version, group 2 the version, group 3 what follows it.
 const files = [
   { path: "package.json", pattern: /("version": ")([^"]+)(")/ },
+  { path: "bun.lock", pattern: /("apps\/web": \{\n      "name": "@cvd\/web",\n      "version": ")([^"]+)(")/ },
+  { path: "apps/web/package.json", pattern: /("version": ")([^"]+)(")/ },
   { path: "apps/desktop/src-tauri/tauri.conf.json", pattern: /("version": ")([^"]+)(")/ },
   { path: "Cargo.toml", pattern: /(^version = ")([^"]+)(")/m },
   { path: "Cargo.lock", pattern: /(name = "cvd"\nversion = ")([^"]+)(")/ },
