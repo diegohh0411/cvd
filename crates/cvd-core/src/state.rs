@@ -15,7 +15,7 @@ use crate::providers::{
 };
 use crate::search::{ExaSearch, SearchProvider, EXA, EXA_BASE};
 use crate::services::AppError;
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 /// Settings key holding the active model id.
 pub const ACTIVE_MODEL_KEY: &str = "active_model";

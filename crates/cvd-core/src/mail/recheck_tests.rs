@@ -9,7 +9,7 @@ use crate::engine::FakeDecisionEngine;
 use crate::providers::ChatEndpoint;
 use crate::services::AppError;
 use crate::state::Emitter;
-use crate::store::{NewProcessed, Outcome, ScanSource, Store};
+use crate::store::{NewProcessed, Outcome, ScanSource, TenantStore as Store};
 
 async fn recheck(
     store: &Store,

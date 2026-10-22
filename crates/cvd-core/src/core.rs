@@ -5,7 +5,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use crate::mail::{cycle::AppWatchDeps, watch};
 use crate::services::AppError;
 use crate::state::{AppState, Emitter, EngineSource, DB_CHANGED_EVENT};
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 /// Opens the application's store, restores providers and starts background services.
 /// The caller owns the runtime and keeps it alive for the application's lifetime.

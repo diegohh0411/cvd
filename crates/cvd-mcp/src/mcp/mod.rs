@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use cvd_core::store::types::{
     Entry, EntryInput, JobDescription, JobStatus, Profile, Skill, StatusColor,
 };
-use cvd_core::store::{Store, StoreError};
+use cvd_core::store::{StoreError, TenantStore as Store};
 use cvd_core::web::{self, FetchPolicy};
 
 pub use validate::normalize_entry;

@@ -3,7 +3,7 @@
 //! and nothing already stored needs migrating; further keys are `<provider>~<n>`.
 use serde::{Deserialize, Serialize};
 
-use crate::store::{Store, StoreError};
+use crate::store::{StoreError, TenantStore as Store};
 
 pub const CONNECTIONS_KEY: &str = "connections";
 

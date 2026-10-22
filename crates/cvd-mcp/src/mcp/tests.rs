@@ -1,7 +1,7 @@
 use super::validate::normalize_entry;
 use super::CvServer;
 use cvd_core::store::types::{EntryInput, EntryKind};
-use cvd_core::store::Store;
+use cvd_core::store::TenantStore as Store;
 
 fn entry(start: &str, end: Option<&str>) -> EntryInput {
     EntryInput {

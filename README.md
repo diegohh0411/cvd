@@ -34,6 +34,35 @@ The Bun workspace keeps the Angular app and its configuration in `apps/web`; roo
 
 The browser-only build uses `bun run build --configuration web` (or `bun run ng serve --configuration web`). Angular replaces the platform runtime at build time, excluding the Tauri SDK. Desktop-only controls are hidden; the browser transport deliberately rejects commands until the HTTP/event transport in #65 is implemented. Browser file downloads are available through the platform API.
 
+The store exposes one `Store` API with an explicit `UserId` on every data operation.
+Shared services receive a `TenantStore` from `store.for_user(verified_user_id)`.
+Desktop and MCP bind `UserId::LOCAL` and continue using SQLite; SQLite rejects other
+identities. SQLite migrations live in `crates/cvd-core/migrations/sqlite` and retain
+their existing versions and checksums. `open_external` still never migrates an
+existing desktop database.
+
+For hosted deployments, run `Store::migrate_postgres` with the schema-owner URL
+against a database providing Supabase's `auth.users(id uuid)`, then connect with
+`Store::open_postgres` using a separate runtime role without superuser or BYPASSRLS
+privileges. Grant that role usage on `public` (and `extensions` when used),
+table CRUD, and sequence usage. Derive
+`UserId` from verified authentication before binding services. Every operation runs
+in a transaction with `app.user_id` set locally; queries explicitly scope tenants,
+and forced RLS plus composite foreign keys enforce isolation. Default statuses and
+the initial view are initialized once per user. Postgres has no SQLite polling
+change feed; `change_versions` returns an empty map pending the hosted event
+transport (#64).
+
+Run the shared store contracts on SQLite with `cargo test --workspace`. With a
+running Podman machine, run `scripts/test-postgres.sh` to create an isolated
+Postgres 17 database, bootstrap an auth stub and restricted runtime role, and run
+`cargo test --workspace --features cvd-core/postgres-tests`. The container is removed
+on exit. This also checks unfiltered RLS reads/writes, tenant context cleanup,
+cross-tenant foreign keys, and rejection of unsafe runtime roles. The Postgres CI
+job uses the same script. To use an existing **disposable** database, bootstrap the
+auth table/roles as in the script, set `CVD_TEST_POSTGRES_ADMIN_URL` and
+`CVD_TEST_POSTGRES_URL`, and run that Cargo command directly.
+
 The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 
 ### Local inference

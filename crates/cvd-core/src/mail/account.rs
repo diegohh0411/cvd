@@ -1,4 +1,4 @@
-use crate::store::{Store, StoreError};
+use crate::store::{StoreError, TenantStore as Store};
 
 const HOST_KEY: &str = "mail.host";
 const PORT_KEY: &str = "mail.port";

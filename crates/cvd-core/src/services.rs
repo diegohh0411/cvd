@@ -33,7 +33,7 @@ use crate::state::{EngineSource, ACTIVE_MODEL_KEY};
 use crate::store::types::*;
 use crate::store::types::{Company, CompanyProfile};
 use crate::store::StoreError;
-use crate::store::{InboxFilter, ProcessedEmail, ScanSource, Store};
+use crate::store::{InboxFilter, ProcessedEmail, ScanSource, TenantStore as Store};
 use crate::web::{self, FetchPolicy};
 use tokio_util::sync::CancellationToken;
 
@@ -106,9 +106,7 @@ impl From<crate::mail::imap::MailError> for AppError {
 impl From<StoreError> for AppError {
     fn from(e: StoreError) -> Self {
         match &e {
-            StoreError::Db(sqlx::Error::RowNotFound) | StoreError::NotFound => {
-                Self::NotFound("Not found.".into())
-            }
+            _ if e.is_not_found() => Self::NotFound("Not found.".into()),
             StoreError::Invalid(m) if m.starts_with("no ") => Self::NotFound(m.clone()),
             StoreError::Invalid(m) => Self::Io(m.clone()),
             _ => Self::Io(e.to_string()),

@@ -6,7 +6,7 @@ use super::*;
 use crate::engine::{Answer, FakeDecisionEngine, Question};
 use crate::render::fit::Selection;
 use crate::store::types::{EntryInput, EntryKind, RunStatus};
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 fn fake() -> FakeDecisionEngine {
     FakeDecisionEngine::new(|_state, _name, q| match q {

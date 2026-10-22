@@ -10,7 +10,7 @@ use crate::engine::{Answer, DecisionEngine, EngineError, FakeDecisionEngine, Que
 use crate::providers::ChatEndpoint;
 use crate::services::AppError;
 use crate::store::types::{JobStatus, StatusColor};
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 use super::account::{self, MailAccount};
 use super::classify::{

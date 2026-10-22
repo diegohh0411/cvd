@@ -3,7 +3,7 @@
 
 mod mcp;
 
-use cvd_core::store::Store;
+use cvd_core::store::TenantStore as Store;
 use mcp::{db_path_from, CvServer};
 use rmcp::ServiceExt;
 
