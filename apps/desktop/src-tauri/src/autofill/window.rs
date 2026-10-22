@@ -104,7 +104,7 @@ pub struct Sessions(Mutex<HashMap<String, Session>>);
 /// comes from cvd's own database, never from the page.
 async fn load_resume(st: &AppState, job_id: i64) -> Option<Resume> {
     for cv in st.store.list_cvs(job_id).await.ok()? {
-        let Some(path) = cv.pdf_path else { continue };
+        let Some(path) = cv.file_ref else { continue };
         let path = std::path::PathBuf::from(path);
         let Ok(meta) = tokio::fs::metadata(&path).await else {
             continue;

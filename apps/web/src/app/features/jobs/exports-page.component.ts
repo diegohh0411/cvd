@@ -29,11 +29,11 @@ export function fileName(path: string | null): string {
             <div class="min-w-0">
               <a class="font-medium hover:underline" [routerLink]="['/jobs', c.cv.jd_id]" [queryParams]="{ tab: 'exports' }">{{ c.job }}</a>
               <div class="text-muted-foreground truncate text-xs">
-                {{ date(c.cv.created_at) }} · {{ c.cv.page_budget }} page{{ c.cv.page_budget === 1 ? '' : 's' }} · {{ file(c.cv.pdf_path) }}
+                {{ date(c.cv.created_at) }} · {{ c.cv.page_budget }} page{{ c.cv.page_budget === 1 ? '' : 's' }} · {{ file(c.cv.file_ref) }}
               </div>
             </div>
-            @if (capabilities.revealInFolder && c.cv.pdf_path) {
-              <button z-button zType="outline" zSize="sm" (click)="reveal(c.cv.pdf_path)">Show in folder</button>
+            @if (capabilities.revealInFolder && c.cv.file_ref) {
+              <button z-button zType="outline" zSize="sm" (click)="reveal(c.cv.file_ref)">Show in folder</button>
             }
           </li>
         } @empty {

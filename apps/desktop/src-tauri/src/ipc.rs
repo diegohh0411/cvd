@@ -233,7 +233,15 @@ pub async fn fit_cv(
 }
 #[tauri::command]
 pub async fn export_cv(st: S<'_>, run_id: i64, selection: Selection, path: String) -> Res<i64> {
-    cvd_core::services::export_cv(&st, run_id, selection, path).await
+    use cvd_core::services::{delete_cv, export_cv, set_cv_file_ref, validate_export_path};
+    validate_export_path(&path)?;
+    let cv = export_cv(&st, run_id, selection).await?;
+    if let Err(e) = tokio::fs::write(&path, &cv.pdf).await {
+        delete_cv(&st, cv.id).await?;
+        return Err(e.into());
+    }
+    set_cv_file_ref(&st, cv.id, &path).await?;
+    Ok(cv.id)
 }
 #[tauri::command]
 pub async fn set_active_model(st: S<'_>, id: String) -> Res<()> {

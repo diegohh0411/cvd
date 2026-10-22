@@ -200,7 +200,7 @@ export interface Cv {
   template: string;
   page_budget: number;
   selection_json: string;
-  pdf_path: string | null;
+  file_ref: string | null;
   created_at: string;
 }
 

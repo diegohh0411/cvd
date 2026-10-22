@@ -138,24 +138,24 @@ async fn match_then_fit_then_export() {
     assert!(!fitted.pdf_base64.is_empty());
     assert!(!fitted.selection.entries.is_empty());
 
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("cv.pdf");
-    let cv_id = export_cv(
-        &st,
-        run_id,
-        fitted.selection.clone(),
-        path.to_string_lossy().into(),
-    )
-    .await
-    .unwrap();
-    let bytes = std::fs::read(&path).unwrap();
-    assert!(bytes.starts_with(b"%PDF"));
+    let cv = export_cv(&st, run_id, fitted.selection.clone())
+        .await
+        .unwrap();
+    assert!(cv.pdf.starts_with(b"%PDF"));
 
     let cvs = st.store.list_cvs(jd).await.unwrap();
     assert_eq!(cvs.len(), 1);
-    assert_eq!(cvs[0].id, cv_id);
+    assert_eq!(cvs[0].id, cv.id);
+    assert_eq!(cvs[0].file_ref, None);
     let back: Selection = serde_json::from_str(&cvs[0].selection_json).unwrap();
     assert_eq!(back, fitted.selection);
+
+    set_cv_file_ref(&st, cv.id, "cvs/1.pdf").await.unwrap();
+    let cvs = list_cvs(&st, jd).await.unwrap();
+    assert_eq!(cvs[0].file_ref.as_deref(), Some("cvs/1.pdf"));
+
+    delete_cv(&st, cv.id).await.unwrap();
+    assert!(list_cvs(&st, jd).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -166,13 +166,8 @@ async fn cancel_unknown_run_is_not_found() {
 
 #[tokio::test]
 async fn export_rejects_unsafe_paths() {
-    let (st, _) = state().await;
-    let sel = Selection {
-        entries: vec![],
-        skills: vec![],
-    };
     for p in ["cv.pdf", "/tmp/cv.txt", "/tmp/cv", "../cv.pdf"] {
-        let e = export_cv(&st, 1, sel.clone(), p.into()).await.unwrap_err();
+        let e = validate_export_path(p).unwrap_err();
         assert_eq!(e.kind(), "Io", "{p}");
     }
     assert!(validate_export_path("/tmp/CV.PDF").is_ok());
