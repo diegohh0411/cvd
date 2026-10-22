@@ -1166,7 +1166,7 @@ pub async fn start_scan(st: &AppState) -> Res<i64> {
         CycleError::Failed(e) => e,
     })?;
     let run_id = scan::begin_run(&prepared.store, ScanSource::Manual).await?;
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         // The outcome reaches the UI through `scan://finished`.
         let _ = cycle::run_cycle(prepared, ScanSource::Manual, run_id).await;
     });
@@ -1287,7 +1287,7 @@ pub mod ipc {
 
     use super::*;
 
-    type S<'a> = State<'a, AppState>;
+    type S<'a> = State<'a, std::sync::Arc<AppState>>;
 
     #[tauri::command]
     pub async fn get_local_connection(st: S<'_>) -> Res<LocalConnectionView> {

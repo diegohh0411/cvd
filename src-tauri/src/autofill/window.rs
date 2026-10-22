@@ -665,7 +665,7 @@ impl Sessions {
 #[tauri::command]
 pub async fn autofill_bridge(
     window: WebviewWindow,
-    st: tauri::State<'_, AppState>,
+    st: tauri::State<'_, Arc<AppState>>,
     sessions: tauri::State<'_, Sessions>,
     msg: Value,
 ) -> Result<(), AppError> {

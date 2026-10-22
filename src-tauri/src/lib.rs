@@ -1,6 +1,7 @@
 mod autofill;
 mod commands;
 mod company;
+mod core;
 mod job_search;
 #[allow(dead_code)]
 mod mail;
@@ -19,12 +20,10 @@ mod state;
 pub mod store;
 mod web;
 
-use std::sync::Arc;
-
 use tauri::{Emitter as _, Manager};
 
 use commands::ipc;
-use state::{AppState, EngineSource};
+use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,22 +34,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
-            let url = format!("sqlite://{}", dir.join("cv.db").display());
-            let store = tauri::async_runtime::block_on(store::Store::open(&url))?;
-            let handle = app.handle().clone();
-            let emit_handle = handle.clone();
-            let state = AppState::new(
-                store,
-                EngineSource::Http,
+            let emit_handle = app.handle().clone();
+            let state = tauri::async_runtime::block_on(core::bootstrap(
+                &dir,
                 Arc::new(move |event: &str, payload: serde_json::Value| {
                     let _ = emit_handle.emit(event, payload);
                 }),
-            );
-            tauri::async_runtime::block_on(state.reload_providers())?;
+            ))?;
             app.manage(state);
-            start_mail_watcher(app.handle());
-            start_change_feed(app.handle());
             app.manage(autofill::window::Sessions::default());
             // Dev hook: open an apply window on any supported posting, with no job attached.
             #[cfg(debug_assertions)]
@@ -138,48 +129,4 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_, _| {});
-}
-
-/// Runs the Gmail watcher for the life of the app. It connects right away
-/// when an account is saved, and otherwise waits for one.
-/// Polls the trigger-maintained change counters and tells the UI which tables changed.
-fn start_change_feed(handle: &tauri::AppHandle) {
-    let st = handle.state::<AppState>();
-    let store = st.store.clone();
-    let emit = st.emitter();
-    tauri::async_runtime::spawn(async move {
-        let mut seen = store.change_versions().await.unwrap_or_default();
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let Ok(now) = store.change_versions().await else {
-                continue;
-            };
-            let tables: Vec<&String> = now
-                .iter()
-                .filter(|(t, v)| seen.get(*t) != Some(*v))
-                .map(|(t, _)| t)
-                .collect();
-            if !tables.is_empty() {
-                emit(state::DB_CHANGED_EVENT, serde_json::json!({ "tables": tables }));
-            }
-            seen = now;
-        }
-    });
-}
-
-fn start_mail_watcher(handle: &tauri::AppHandle) {
-    let st = handle.state::<AppState>();
-    let Some(rx) = st.watcher.take_receiver() else {
-        return;
-    };
-    let deps = Arc::new(mail::cycle::AppWatchDeps {
-        handle: handle.clone(),
-    });
-    tauri::async_runtime::spawn(mail::watch::run_watcher(
-        deps,
-        rx,
-        st.watcher.status_handle(),
-        st.emitter(),
-    ));
-    st.watcher.send(mail::watch::Control::Restart);
 }

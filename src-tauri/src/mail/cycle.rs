@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use super::account::{self, MailAccount};
-use tauri::Manager;
 use tokio::sync::Notify;
 
 use super::imap::{ImapSource, MailError};
@@ -105,13 +104,13 @@ pub async fn run_cycle(
 
 /// The watcher's view of the running app.
 pub struct AppWatchDeps {
-    pub handle: tauri::AppHandle,
+    pub state: Arc<AppState>,
 }
 
 #[async_trait::async_trait]
 impl WatchDeps for AppWatchDeps {
     async fn connect(&self) -> Result<Option<Box<dyn IdleConn>>, MailError> {
-        let st = self.handle.state::<AppState>();
+        let st = &self.state;
         let stored = |e: crate::store::StoreError| MailError::Connection(e.to_string());
         let Some(account) = account::load(&st.store).await.map_err(stored)? else {
             return Ok(None);
@@ -122,7 +121,7 @@ impl WatchDeps for AppWatchDeps {
     }
 
     async fn cycle(&self) -> Result<(), CycleError> {
-        let st = self.handle.state::<AppState>();
+        let st = &self.state;
         let prepared = prepare(&st).await?;
         let run_id = scan::begin_run(&prepared.store, ScanSource::Watch).await?;
         run_cycle(prepared, ScanSource::Watch, run_id).await?;
@@ -130,6 +129,6 @@ impl WatchDeps for AppWatchDeps {
     }
 
     fn scan_freed(&self) -> Arc<Notify> {
-        self.handle.state::<AppState>().scan_freed()
+        self.state.scan_freed()
     }
 }
