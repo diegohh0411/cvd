@@ -183,3 +183,38 @@ async fn all_tenant_tables_force_rls_and_unsafe_runtime_roles_are_rejected() {
     assert!(unprotected.is_empty(), "{unprotected:?}");
     pool.close().await;
 }
+
+#[tokio::test]
+async fn defaults_are_explicit_and_normal_operations_never_recreate_them() {
+    let user = postgres_store().await;
+    // A duplicate provisioning attempt fails atomically, without adding another view.
+    assert!(user
+        .store
+        .create_user_defaults(user.user_id())
+        .await
+        .is_err());
+    assert_eq!(user.list_job_views().await.unwrap().len(), 1);
+    let statuses = user.list_job_statuses().await.unwrap();
+    for status in statuses {
+        user.delete_job_status(status.id).await.unwrap();
+    }
+    user.set_setting("preference", "saved").await.unwrap();
+    assert!(user.list_job_statuses().await.unwrap().is_empty());
+
+    let admin = sqlx::PgPool::connect(&std::env::var("CVD_TEST_POSTGRES_ADMIN_URL").unwrap())
+        .await
+        .unwrap();
+    let new_user = UserId(uuid::Uuid::new_v4());
+    sqlx::query("INSERT INTO auth.users(id) VALUES ($1)")
+        .bind(new_user.0)
+        .execute(&admin)
+        .await
+        .unwrap();
+    admin.close().await;
+    let unprovisioned = user.store.for_user(new_user);
+    assert!(unprovisioned.list_job_statuses().await.unwrap().is_empty());
+    assert!(unprovisioned.list_job_views().await.unwrap().is_empty());
+    user.store.create_user_defaults(new_user).await.unwrap();
+    assert_eq!(unprovisioned.list_job_statuses().await.unwrap().len(), 4);
+    assert_eq!(unprovisioned.list_job_views().await.unwrap().len(), 1);
+}

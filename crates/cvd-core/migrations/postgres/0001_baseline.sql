@@ -2,10 +2,6 @@
 -- Supabase may already install citext in its extensions schema.
 SET LOCAL search_path = public, extensions;
 CREATE EXTENSION IF NOT EXISTS citext;
--- A marker prevents deleted defaults from being re-created on later requests.
-CREATE TABLE store_user (
-    user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE
-);
 CREATE TABLE profile (
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     id bigint,
@@ -244,11 +240,6 @@ ALTER TABLE processed_email ADD FOREIGN KEY (user_id, suggested_status_id) REFER
 ALTER TABLE processed_email ADD FOREIGN KEY (user_id, previous_status_id) REFERENCES job_status(user_id, id) ON DELETE SET NULL (previous_status_id);
 ALTER TABLE processed_email ADD FOREIGN KEY (user_id, matched_job_id) REFERENCES job_description(user_id, id) ON DELETE SET NULL (matched_job_id);
 ALTER TABLE processed_email ADD FOREIGN KEY (user_id, run_id) REFERENCES scan_run(user_id, id) ON DELETE CASCADE;
-ALTER TABLE store_user ENABLE ROW LEVEL SECURITY;
-ALTER TABLE store_user FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant ON store_user
-    USING (user_id = nullif(current_setting('app.user_id', true), '')::uuid)
-    WITH CHECK (user_id = nullif(current_setting('app.user_id', true), '')::uuid);
 ALTER TABLE profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant ON profile

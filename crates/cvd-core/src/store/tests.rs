@@ -819,12 +819,13 @@ pub(super) async fn postgres_store() -> Store {
         .await
         .unwrap();
     admin.close().await;
-    Database::open_postgres(
+    let database = Database::open_postgres(
         &std::env::var("CVD_TEST_POSTGRES_URL").expect("set CVD_TEST_POSTGRES_URL"),
     )
     .await
-    .unwrap()
-    .for_user(user)
+    .unwrap();
+    database.create_user_defaults(user).await.unwrap();
+    database.for_user(user)
 }
 
 #[tokio::test]

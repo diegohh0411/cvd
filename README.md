@@ -48,8 +48,10 @@ privileges. Grant that role usage on `public` (and `extensions` when used),
 table CRUD, and sequence usage. Derive
 `UserId` from verified authentication before binding services. Every operation runs
 in a transaction with `app.user_id` set locally; queries explicitly scope tenants,
-and forced RLS plus composite foreign keys enforce isolation. Default statuses and
-the initial view are initialized once per user. Postgres has no SQLite polling
+and forced RLS plus composite foreign keys enforce isolation. The provisioning flow must call
+`store.create_user_defaults(user_id)` once after creating a new auth user and
+before exposing their services. It creates the initial statuses and view in one
+transaction. Ordinary store operations never seed or repair defaults. Postgres has no SQLite polling
 change feed; `change_versions` returns an empty map pending the hosted event
 transport (#64).
 

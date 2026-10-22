@@ -67,6 +67,19 @@ impl Store {
     pub async fn migrate_postgres(url: &str) -> Result<()> {
         pg::Store::migrate(url).await
     }
+    /// Create the initial statuses and view during new-user provisioning.
+    /// Call once after creating the auth user, before exposing their services.
+    /// This is atomic, not an idempotent repair operation: duplicate defaults fail.
+    /// SQLite already creates its local defaults through migrations.
+    pub async fn create_user_defaults(&self, user: UserId) -> Result<()> {
+        match &self.backend {
+            Backend::Postgres(s) => s.create_user_defaults(user).await,
+            Backend::Sqlite(_) if user == UserId::LOCAL => Ok(()),
+            Backend::Sqlite(_) => Err(StoreError::Invalid(
+                "SQLite only accepts the local user".into(),
+            )),
+        }
+    }
     /// Bind a verified identity once when constructing request/application services.
     pub fn for_user(&self, user: UserId) -> TenantStore {
         TenantStore {

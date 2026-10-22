@@ -38,6 +38,21 @@ impl Store {
         result?;
         Ok(())
     }
+    pub(in crate::store) async fn create_user_defaults(&self, user: UserId) -> Result<()> {
+        let mut tx = self.begin(user).await?;
+        sqlx::query(
+            "INSERT INTO job_status(user_id, name, color, position) VALUES
+            ($1, 'Bookmarked', 'blue', 0), ($1, 'Applied', 'yellow', 1),
+            ($1, 'Interviewing', 'purple', 2), ($1, 'Offer', 'green', 3)",
+        )
+        .bind(user.0)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("INSERT INTO job_view(user_id, name, layout, position) VALUES ($1, 'All jobs', 'table', 0)")
+            .bind(user.0).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(())
+    }
     pub(in crate::store) async fn begin(&self, user: UserId) -> Result<Transaction<'_, Postgres>> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET LOCAL search_path = public, extensions")
@@ -50,24 +65,6 @@ impl Store {
             .bind(user.0.to_string())
             .execute(&mut *tx)
             .await?;
-        let fresh: Option<uuid::Uuid> = sqlx::query_scalar(
-            "INSERT INTO store_user(user_id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING user_id",
-        )
-        .bind(user.0)
-        .fetch_optional(&mut *tx)
-        .await?;
-        if fresh.is_some() {
-            sqlx::query(
-                "INSERT INTO job_status(user_id, name, color, position) VALUES
-                ($1, 'Bookmarked', 'blue', 0), ($1, 'Applied', 'yellow', 1),
-                ($1, 'Interviewing', 'purple', 2), ($1, 'Offer', 'green', 3)",
-            )
-            .bind(user.0)
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("INSERT INTO job_view(user_id, name, layout, position) VALUES ($1, 'All jobs', 'table', 0)")
-                .bind(user.0).execute(&mut *tx).await?;
-        }
         Ok(tx)
     }
 }
