@@ -41,6 +41,7 @@ pub fn encode(img: DynamicImage) -> String {
 }
 
 /// Captures `window`'s page as base64 PNG.
+#[cfg(not(target_os = "linux"))]
 pub fn capture(window: &WebviewWindow) -> Result<String, String> {
     let title = window.title().map_err(|e| e.to_string())?;
     let pid = std::process::id();
@@ -71,7 +72,14 @@ pub fn capture(window: &WebviewWindow) -> Result<String, String> {
     Ok(encode(page))
 }
 
+/// Linux builds don't link `xcap`; the agent hands off to the DOM path.
+#[cfg(target_os = "linux")]
+pub fn capture(_window: &WebviewWindow) -> Result<String, String> {
+    Err("Screen capture isn't supported on Linux yet.".into())
+}
+
 /// Without permission some platforms return an all-black or transparent image.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn is_blank(img: &DynamicImage) -> bool {
     let rgba = img.to_rgba8();
     let mut px = rgba.pixels().step_by(97);
