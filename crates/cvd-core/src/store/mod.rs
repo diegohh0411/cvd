@@ -215,7 +215,7 @@ fn cv_from_row(r: &SqliteRow) -> Cv {
         template: r.get("template"),
         page_budget: r.get("page_budget"),
         selection_json: r.get("selection_json"),
-        pdf_path: r.get("pdf_path"),
+        file_ref: r.get("file_ref"),
         created_at: r.get("created_at"),
     }
 }
@@ -900,7 +900,7 @@ impl Store {
 
     pub async fn save_cv(&self, cv: &CvInput) -> Result<i64> {
         Ok(sqlx::query(
-            "INSERT INTO cv (jd_id, run_id, template, page_budget, selection_json, pdf_path)
+            "INSERT INTO cv (jd_id, run_id, template, page_budget, selection_json, file_ref)
              VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(cv.jd_id)
@@ -908,10 +908,27 @@ impl Store {
         .bind(&cv.template)
         .bind(cv.page_budget)
         .bind(&cv.selection_json)
-        .bind(&cv.pdf_path)
+        .bind(&cv.file_ref)
         .execute(&self.pool)
         .await?
         .last_insert_rowid())
+    }
+
+    pub async fn set_cv_file_ref(&self, id: i64, file_ref: &str) -> Result<()> {
+        sqlx::query("UPDATE cv SET file_ref = ? WHERE id = ?")
+            .bind(file_ref)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_cv(&self, id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM cv WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn list_cvs(&self, jd_id: i64) -> Result<Vec<Cv>> {

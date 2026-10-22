@@ -17,13 +17,13 @@ import { fileName } from '../jobs/exports-page.component';
       @for (c of cvs(); track c.id) {
         <li class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
           <div class="min-w-0 text-sm">
-            <div class="truncate font-medium">{{ file(c.pdf_path) }}</div>
+            <div class="truncate font-medium">{{ file(c.file_ref) }}</div>
             <div class="text-muted-foreground text-xs">{{ date(c.created_at) }} · {{ c.page_budget }} page{{ c.page_budget === 1 ? '' : 's' }}</div>
           </div>
           <div class="flex gap-2">
             <button z-button zType="ghost" zSize="sm" (click)="restore.emit(parse(c))">Restore selection</button>
-            @if (capabilities.revealInFolder && c.pdf_path) {
-              <button z-button zType="outline" zSize="sm" (click)="reveal(c.pdf_path)">Show in folder</button>
+            @if (capabilities.revealInFolder && c.file_ref) {
+              <button z-button zType="outline" zSize="sm" (click)="reveal(c.file_ref)">Show in folder</button>
             }
           </div>
         </li>

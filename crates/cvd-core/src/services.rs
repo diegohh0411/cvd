@@ -632,7 +632,7 @@ pub async fn fit_cv(
 }
 
 /// The webview supplies the path, so only absolute `.pdf` targets are allowed.
-fn validate_export_path(path: &str) -> Res<()> {
+pub fn validate_export_path(path: &str) -> Res<()> {
     let p = std::path::Path::new(path);
     let pdf = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
     if !p.is_absolute() || !pdf {
@@ -643,15 +643,21 @@ fn validate_export_path(path: &str) -> Res<()> {
     Ok(())
 }
 
+/// An exported CV: its `cv` row and the rendered PDF.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportedCv {
+    pub id: i64,
+    pub pdf: Vec<u8>,
+}
+
 /// Compiles `selection` at the loosest style that needs no more pages than
-/// the tightest one, writes the PDF to `path` and records the CV.
-pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: String) -> Res<i64> {
-    validate_export_path(&path)?;
+/// the tightest one and records the CV. Where the bytes are stored is up to
+/// the caller, which can attach a reference with [`set_cv_file_ref`].
+pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection) -> Res<ExportedCv> {
     let run = st.store.get_run(run_id).await?;
     let entries = st.store.list_entries(true).await?;
     let profile = get_profile(st).await?;
     let sel = selection.clone();
-    let out = path.clone();
     let compiled = tokio::task::spawn_blocking(move || -> Res<Compiled> {
         let doc = |s| fit::selection_doc(&entries, &profile, &sel, StyleStep(s));
         let tight = render::compile(&doc(2))?;
@@ -662,14 +668,13 @@ pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: S
                 best = c;
             }
         }
-        std::fs::write(&out, &best.pdf)?;
         Ok(best)
     })
     .await
     .map_err(join_err)??;
     let selection_json =
         serde_json::to_string(&selection).map_err(|e| AppError::Io(e.to_string()))?;
-    Ok(st
+    let id = st
         .store
         .save_cv(&CvInput {
             jd_id: run.jd_id,
@@ -677,9 +682,24 @@ pub async fn export_cv(st: &AppState, run_id: i64, selection: Selection, path: S
             template: TEMPLATE.into(),
             page_budget: compiled.pages as i64,
             selection_json,
-            pdf_path: Some(path),
+            file_ref: None,
         })
-        .await?)
+        .await?;
+    Ok(ExportedCv {
+        id,
+        pdf: compiled.pdf,
+    })
+}
+
+/// Records where an exported CV's bytes live (a path on desktop, an object
+/// key on web).
+pub async fn set_cv_file_ref(st: &AppState, id: i64, file_ref: &str) -> Res<()> {
+    Ok(st.store.set_cv_file_ref(id, file_ref).await?)
+}
+
+/// Forgets a CV whose bytes could not be stored.
+pub async fn delete_cv(st: &AppState, id: i64) -> Res<()> {
+    Ok(st.store.delete_cv(id).await?)
 }
 
 pub async fn list_cvs(st: &AppState, jd_id: i64) -> Res<Vec<Cv>> {
