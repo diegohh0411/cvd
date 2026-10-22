@@ -47,7 +47,9 @@ fn kind_name(kind: &str) -> &str {
 fn missing_key(provider: &str) -> ProviderError {
     let provider = kind_of(provider);
     if provider == super::LOCAL_SERVER {
-        return ProviderError::Missing("Set up your Local server connection in AI → Models.".into());
+        return ProviderError::Missing(
+            "Set up your Local server connection in AI → Models.".into(),
+        );
     }
     let name = match provider {
         OPENROUTER => "OpenRouter",
