@@ -8,11 +8,15 @@ fn mark(n: u32, kind: MarkKind, label: &str) -> Mark {
         submit: false,
         field: None,
         filled: false,
+        origin: None,
     }
 }
 
 fn ids(marks: &[Mark], skipped: &[String]) -> Vec<String> {
-    options(marks, skipped).into_iter().map(|(a, _)| a.id()).collect()
+    options(marks, skipped)
+        .into_iter()
+        .map(|(a, _)| a.id())
+        .collect()
 }
 
 fn choice(c: &str, p: f64) -> Answer {
@@ -66,7 +70,10 @@ fn skipped_options_are_removed_and_explained() {
         image: "img",
     });
     assert!(state.contains("click:1: skipped, low confidence"));
-    let Question::Choice { options, criteria, .. } = &qs[QUESTION_ID] else {
+    let Question::Choice {
+        options, criteria, ..
+    } = &qs[QUESTION_ID]
+    else {
         panic!("choice question")
     };
     assert!(!options.contains(&"click:1".to_string()));
@@ -91,12 +98,27 @@ fn state_carries_screenshot_placeholder_and_recent_history() {
 
 #[test]
 fn thresholds() {
-    assert_eq!(outcome(Some(&choice("click:4", 0.6))), Outcome::Act(Action::Click(4)));
-    assert_eq!(outcome(Some(&choice("click:4", 0.59))), Outcome::Skip("click:4".into()));
-    assert_eq!(outcome(Some(&choice("click:4", 0.25))), Outcome::Skip("click:4".into()));
-    assert!(matches!(outcome(Some(&choice("click:4", 0.24))), Outcome::Stop(_)));
+    assert_eq!(
+        outcome(Some(&choice("click:4", 0.6))),
+        Outcome::Act(Action::Click(4))
+    );
+    assert_eq!(
+        outcome(Some(&choice("click:4", 0.59))),
+        Outcome::Skip("click:4".into())
+    );
+    assert_eq!(
+        outcome(Some(&choice("click:4", 0.25))),
+        Outcome::Skip("click:4".into())
+    );
+    assert!(matches!(
+        outcome(Some(&choice("click:4", 0.24))),
+        Outcome::Stop(_)
+    ));
     assert!(matches!(outcome(None), Outcome::Stop(_)));
-    assert!(matches!(outcome(Some(&choice("dance", 0.9))), Outcome::Stop(_)));
+    assert!(matches!(
+        outcome(Some(&choice("dance", 0.9))),
+        Outcome::Stop(_)
+    ));
 }
 
 #[test]

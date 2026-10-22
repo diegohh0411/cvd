@@ -33,7 +33,10 @@ pub async fn supports_images(st: &AppState, model_id: &str, engine: &dyn Decisio
     };
     match result {
         Ok(v) => {
-            let _ = st.store.set_setting(&key, if v { "true" } else { "false" }).await;
+            let _ = st
+                .store
+                .set_setting(&key, if v { "true" } else { "false" })
+                .await;
             v
         }
         Err(_) => false,
@@ -79,7 +82,10 @@ pub async fn probe(engine: &dyn DecisionEngine, digits: [u8; 2]) -> Result<bool,
             png_base64: digit_png(d),
         };
         let state = format!("An image: {PLACEHOLDER}");
-        let answers = match engine.decide_with_images(&state, &questions, &[image]).await {
+        let answers = match engine
+            .decide_with_images(&state, &questions, &[image])
+            .await
+        {
             Err(EngineError::ImagesUnsupported) => return Ok(false),
             r => r?,
         };
@@ -122,13 +128,13 @@ pub fn digit_png(d: u8) -> String {
     let bottom = mid + len + t;
     // (x, y, width, height) for a..g.
     let segs = [
-        (x0 + t, y0, len, t),               // a: top
-        (x0 + len + t, y0 + t, t, len),     // b: top right
-        (x0 + len + t, mid + t, t, len),    // c: bottom right
-        (x0 + t, bottom, len, t),           // d: bottom
-        (x0, mid + t, t, len),              // e: bottom left
-        (x0, y0 + t, t, len),               // f: top left
-        (x0 + t, mid, len, t),              // g: middle
+        (x0 + t, y0, len, t),            // a: top
+        (x0 + len + t, y0 + t, t, len),  // b: top right
+        (x0 + len + t, mid + t, t, len), // c: bottom right
+        (x0 + t, bottom, len, t),        // d: bottom
+        (x0, mid + t, t, len),           // e: bottom left
+        (x0, y0 + t, t, len),            // f: top left
+        (x0 + t, mid, len, t),           // g: middle
     ];
     let mask = SEGMENTS[(d % 10) as usize];
     for (i, (x, y, sw, sh)) in segs.into_iter().enumerate() {

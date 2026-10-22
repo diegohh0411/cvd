@@ -1,7 +1,8 @@
 // Injected into cvd's apply windows (autofill/window.rs). Describes the form to
 // cvd, applies the fills cvd sends back, and shows what still needs the user.
 // It never clicks submit: the only clicks are on radio buttons and combobox
-// options it is filling.
+// options it is filling, and on the elements cvd's vision agent picks (never
+// submit buttons; see the agent section).
 //
 // It runs in every frame. Only the top frame talks to cvd and draws the
 // overlay; child frames (an embedded ATS form, often cross-origin) relay
@@ -202,62 +203,74 @@
     return el.value != null && String(el.value).trim() !== '';
   };
 
-  const extract = () => {
+  const specOf = (el, kind, key) => ({
+    key,
+    kind,
+    label: labelOf(el),
+    placeholder: cap(el.getAttribute('placeholder'), 200),
+    autocomplete: cap(el.getAttribute('autocomplete'), 100),
+    name_attr: cap(el.getAttribute('name'), 200),
+    help: byIds(el.getAttribute('aria-describedby'), el),
+    section: sectionOf(el),
+    required: el.required || el.getAttribute('aria-required') === 'true',
+    options:
+      kind === 'select'
+        ? [...el.options].filter((o) => !o.disabled).map((o) => cap(o.text, 200))
+        : kind === 'combobox'
+          ? comboOptions(el)
+          : [],
+  });
+
+  const radioGroupOf = (el) => el.closest('[role="radiogroup"],fieldset');
+
+  const radioSpecOf = (radios, key) => {
+    const group = radioGroupOf(radios[0]);
+    const groupLabel =
+      (group && (byIds(group.getAttribute('aria-labelledby'), group) || cap(group.getAttribute('aria-label')))) ||
+      (group && group.querySelector('legend') && textWithoutControls(group.querySelector('legend'))) ||
+      precedingText(radios[0], 'label:not(:has(input)),legend,[class*="label" i]', 5);
+    return {
+      key,
+      kind: 'radio',
+      label: groupLabel,
+      name_attr: cap(radios[0].name, 200),
+      section: sectionOf(radios[0]),
+      required: radios.some((r) => r.required),
+      options: radios.map((r) => labelOf(r)),
+    };
+  };
+
+  /** Every fillable control: `{ el, kind, key }` per control, radios as groups. */
+  const controls = () => {
     const out = [];
     const groups = new Map();
     for (const el of deepAll('input,select,textarea')) {
       if (skip(el)) continue;
       const kind = kindOf(el);
       if (kind === 'radio') {
-        const gid = el.name || (el.closest('[role="radiogroup"],fieldset') || el.parentElement).id || 'anon';
+        const gid = el.name || (radioGroupOf(el) || el.parentElement).id || 'anon';
         if (!groups.has(gid)) groups.set(gid, []);
         groups.get(gid).push(el);
         continue;
       }
-      const key = stamp(el);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (hasValue(el)) continue;
-      out.push({
-        key,
-        kind,
-        label: labelOf(el),
-        placeholder: cap(el.getAttribute('placeholder'), 200),
-        autocomplete: cap(el.getAttribute('autocomplete'), 100),
-        name_attr: cap(el.getAttribute('name'), 200),
-        help: byIds(el.getAttribute('aria-describedby'), el),
-        section: sectionOf(el),
-        required: el.required || el.getAttribute('aria-required') === 'true',
-        options:
-          kind === 'select'
-            ? [...el.options].filter((o) => !o.disabled).map((o) => cap(o.text, 200))
-            : kind === 'combobox'
-              ? comboOptions(el)
-              : [],
-      });
-      watch(el, key);
+      out.push({ el, kind, key: stamp(el) });
     }
     for (const radios of groups.values()) {
       const key = stamp(radios[0], radios[0].dataset.cvdKey || 'g' + ++counter);
       radios.forEach((r) => stamp(r, key));
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (radios.some((r) => r.checked)) continue;
-      const group = radios[0].closest('[role="radiogroup"],fieldset');
-      const groupLabel =
-        (group && (byIds(group.getAttribute('aria-labelledby'), group) || cap(group.getAttribute('aria-label')))) ||
-        (group && group.querySelector('legend') && textWithoutControls(group.querySelector('legend'))) ||
-        precedingText(radios[0], 'label:not(:has(input)),legend,[class*="label" i]', 5);
-      out.push({
-        key,
-        kind: 'radio',
-        label: groupLabel,
-        name_attr: cap(radios[0].name, 200),
-        section: sectionOf(radios[0]),
-        required: radios.some((r) => r.required),
-        options: radios.map((r) => labelOf(r)),
-      });
-      radios.forEach((r) => watch(r, key));
+      out.push({ el: radios[0], radios, kind: 'radio', key });
+    }
+    return out;
+  };
+
+  const extract = () => {
+    const out = [];
+    for (const c of controls()) {
+      if (seen.has(c.key)) continue;
+      seen.add(c.key);
+      if (c.radios ? c.radios.some((r) => r.checked) : hasValue(c.el)) continue;
+      out.push(c.radios ? radioSpecOf(c.radios, c.key) : specOf(c.el, c.kind, c.key));
+      (c.radios || [c.el]).forEach((el) => watch(el, c.key));
     }
     return out.slice(0, 300);
   };
@@ -470,6 +483,8 @@
     if (!/^https:\/\//.test(e.origin)) return; // sandboxed or insecure frames get nothing
     let f = frames.get(e.source);
     if (!f) frames.set(e.source, (f = { id: ++frameCounter, origin: e.origin }));
+    if (d.hello) return;
+    if (d.agent && typeof d.agent.req === 'number') return onFrameReply(f, d.agent);
     if (d.mark && typeof d.mark.key === 'string') {
       const k = prefixed(f, d.mark.key);
       results.set(k, { status: d.mark.status, reason: cap(d.mark.reason, 200), label: cap(d.mark.label, 200) || 'Embedded field' });
@@ -492,6 +507,8 @@
     if (e.source !== window.top || !d || d.__cvd !== DOWN) return;
     if (d.kind === 'apply') apply(d.actions);
     else if (d.kind === 'focus') focusKey(d.key);
+    else if (d.kind === 'agent') onAgentDown(d);
+    else if (d.kind === 'rescan') rescan();
   };
 
   const focusKey = (key) => {
@@ -674,7 +691,12 @@
   let debounce;
   let started = false;
   const observer = new MutationObserver((records) => {
-    if (records.every((r) => host && host.contains(r.target))) return;
+    // cvd's own panel, badges and lock don't count as page changes.
+    const ours = (n) => n.nodeType === 1 && /^cvd-(autofill-host|agent-)/.test(n.id);
+    const own = (r) =>
+      (host && host.contains(r.target)) ||
+      (r.addedNodes.length + r.removedNodes.length > 0 && [...r.addedNodes, ...r.removedNodes].every(ours));
+    if (records.every(own)) return;
     lastMutation = Date.now();
     if (started) {
       clearTimeout(debounce);
@@ -686,6 +708,13 @@
   });
 
   const start = () => {
+    if (!isTop) {
+      try {
+        window.top.postMessage({ __cvd: UP, hello: true }, '*');
+      } catch {
+        /* detached frame */
+      }
+    }
     checkConfirmation();
     observer.observe(document.documentElement, { childList: true, subtree: true });
     const t0 = Date.now();
@@ -695,6 +724,7 @@
       if ((count >= 3 && quiet) || Date.now() - t0 > 20000) {
         clearInterval(poll);
         started = true;
+        if (isTop) send({ type: 'ready', url: location.href });
         scan();
       }
     }, 250);
@@ -747,7 +777,7 @@
     },
     true,
   );
-  document.addEventListener('submit', (e) => e.isTrusted && noteSubmit(), true);
+  document.addEventListener('submit', (e) => e.isTrusted && !acting && noteSubmit(), true);
 
   const checkConfirmation = () => {
     if (store.get(DONE_KEY)) return;
@@ -759,8 +789,281 @@
     send({ type: 'submitted', url: location.href });
   };
 
+
+  // ---- vision agent ----
+  // cvd's vision agent (autofill/agent) sees a screenshot with numbered
+  // badges this section draws, and picks one element at a time. Every frame
+  // marks and acts on its own elements; frame n numbers from n * 100 + 1. The
+  // top frame collects the marks, routes actions and replies to cvd. While the
+  // agent runs, the window is locked: the user's input is swallowed except on
+  // the Stop button.
+  const MARK_SPAN = 100;
+  const SUBMIT_TEXT = /\b(submit|send (my )?application|complete (my )?application|finish (my )?application|confirm application)\b/i;
+  const SUBMIT_BUTTON_TEXT = /\b(apply|send|finish|complete|done)\b/i;
+  const CLICKABLE =
+    'a[href],button,[role="button"],[role="link"],[role="tab"],[role="menuitem"],input[type="submit"],input[type="button"],summary';
+  const markEls = new Map();
+  let locked = false;
+  let acting = 0;
+  let blocked = false;
+  let badgeHost = null;
+
+  const inView = (r) => r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth && r.width > 0 && r.height > 0;
+  const inCvd = (el) => !!(el.closest && el.closest('#cvd-autofill-host,#cvd-agent-badges,#cvd-agent-lock'));
+
+  /** Guard A: a control that would send the application. */
+  const isSubmitEl = (el) => {
+    const text = cap(el.textContent || el.value || el.getAttribute('aria-label'), 100);
+    if (SUBMIT_TEXT.test(text)) return true;
+    const t = (el.getAttribute('type') || '').toLowerCase();
+    const submits = (el.tagName === 'INPUT' && t === 'submit') || (el.tagName === 'BUTTON' && el.form && (t === '' || t === 'submit'));
+    return submits && SUBMIT_BUTTON_TEXT.test(text);
+  };
+
+  const clearBadges = () => {
+    if (badgeHost) badgeHost.remove();
+    badgeHost = null;
+  };
+
+  const drawBadges = () => {
+    clearBadges();
+    if (!document.body || !markEls.size) return;
+    badgeHost = document.createElement('div');
+    badgeHost.id = 'cvd-agent-badges';
+    badgeHost.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483646;';
+    const root = badgeHost.attachShadow({ mode: 'closed' });
+    const css =
+      'position:fixed;font:bold 12px/1 -apple-system,system-ui,sans-serif;padding:2px 4px;border-radius:4px;' +
+      'background:#facc15;color:#111;border:1px solid #111;box-shadow:0 1px 2px rgba(0,0,0,.4);';
+    for (const [n, el] of markEls) {
+      const r = el.getBoundingClientRect();
+      const b = document.createElement('span');
+      b.textContent = String(n);
+      b.style.cssText = css + `left:${Math.max(0, r.left - 4)}px;top:${Math.max(0, r.top - 8)}px;`;
+      const box = document.createElement('span');
+      box.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;outline:2px solid #facc15;`;
+      root.append(box, b);
+    }
+    document.body.appendChild(badgeHost);
+  };
+
+  /** Numbers the visible controls in view, from `base + 1`. */
+  const collectMarks = (base) => {
+    clearBadges();
+    markEls.clear();
+    const out = [];
+    let n = base;
+    const full = () => n >= base + MARK_SPAN - 1;
+    const taken = new Set();
+    for (const c of controls()) {
+      if (full()) break;
+      const target = c.radios ? radioGroupOf(c.el) || c.el.parentElement : c.el;
+      const shown = c.radios || c.kind === 'file' || c.kind === 'checkbox' ? target : c.el;
+      if (!shown || !inView(shown.getBoundingClientRect())) continue;
+      const spec = c.radios ? radioSpecOf(c.radios, c.key) : specOf(c.el, c.kind, c.key);
+      const filled = c.radios ? c.radios.some((r) => r.checked) : hasValue(c.el);
+      out.push({ n: ++n, kind: 'field', label: cap(spec.label || spec.placeholder || spec.name_attr, 200), field: spec, filled });
+      markEls.set(n, shown);
+      (c.radios || [c.el]).forEach((el) => {
+        taken.add(el);
+        watch(el, c.key);
+      });
+    }
+    for (const el of deepAll(CLICKABLE)) {
+      if (full()) break;
+      if (taken.has(el) || inCvd(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      if (!isVisible(el) || !inView(el.getBoundingClientRect())) continue;
+      const label = cap(el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || el.getAttribute('title'), 200);
+      out.push({ n: ++n, kind: el.matches('a[href],[role="link"]') ? 'link' : 'button', label, submit: isSubmitEl(el) });
+      markEls.set(n, el);
+    }
+    drawBadges();
+    return out;
+  };
+
+  /** Resolves once the DOM has been quiet for 300 ms (5 s at most). */
+  const settle = async () => {
+    const t0 = Date.now();
+    while (Date.now() - lastMutation < 300 && Date.now() - t0 < 5000) await later(100);
+  };
+
+  const scroll = (dir) => window.scrollBy({ top: dir * innerHeight * 0.8, behavior: 'instant' });
+
+  /** Runs one action in this frame. */
+  const act = async (cmd) => {
+    if (cmd.do === 'scroll_down' || cmd.do === 'scroll_up') {
+      scroll(cmd.do === 'scroll_down' ? 1 : -1);
+      return { result: 'ok' };
+    }
+    if (cmd.do === 'back') {
+      history.back();
+      return { result: 'ok' };
+    }
+    const el = markEls.get(cmd.n);
+    if (!el || !el.isConnected) return { result: 'missing' };
+    if (isSubmitEl(el)) return { result: 'submit_blocked' };
+    clearBadges();
+    blocked = false;
+    acting++;
+    try {
+      // Links that open a new window stay in this one.
+      if (el.tagName === 'A' && el.target && el.target !== '_self') el.target = '_self';
+      el.focus({ preventScroll: true });
+      el.click();
+      await later(200);
+    } finally {
+      setTimeout(() => acting--, 1500);
+    }
+    return { result: blocked ? 'submit_blocked' : 'ok' };
+  };
+
+  // Guard B: while the agent acts, a form submit the page doesn't handle
+  // itself (a real post), or one from a submit-worded button, is cancelled.
+  document.addEventListener(
+    'submit',
+    (e) => {
+      if (!acting || !(e.submitter && isSubmitEl(e.submitter))) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      blocked = true;
+    },
+    true,
+  );
+  window.addEventListener('submit', (e) => {
+    if (!acting || e.defaultPrevented) return;
+    e.preventDefault();
+    blocked = true;
+  });
+
+  // The lock: the user's input never reaches the page while the agent works.
+  const LOCKED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'keydown', 'keypress', 'keyup', 'wheel', 'touchstart', 'touchmove', 'paste', 'drop'];
+  const swallow = (e) => {
+    if (!locked || !e.isTrusted) return;
+    if (e.composedPath().some((n) => n && n.id === 'cvd-agent-lock')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  LOCKED_EVENTS.forEach((t) => window.addEventListener(t, swallow, { capture: true, passive: false }));
+
+  let lockHost = null;
+  const renderLock = () => {
+    if (!isTop || !document.body) return;
+    if (!locked) {
+      if (lockHost) lockHost.remove();
+      lockHost = null;
+      return;
+    }
+    if (lockHost && lockHost.isConnected) return;
+    lockHost = document.createElement('div');
+    lockHost.id = 'cvd-agent-lock';
+    lockHost.style.cssText = 'position:fixed;inset:0;z-index:2147483647;cursor:progress;background:transparent;';
+    const root = lockHost.attachShadow({ mode: 'closed' });
+    root.innerHTML = `
+      <style>
+        .bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;
+             font:13px/1.4 -apple-system,system-ui,sans-serif;background:#111;color:#fff;padding:6px 6px 6px 12px;
+             border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.3);cursor:default}
+        button{font:inherit;border:0;border-radius:999px;padding:4px 12px;background:#ef4444;color:#fff;cursor:pointer}
+      </style>
+      <div class="bar"><span>cvd is filling this form…</span><button type="button">Stop</button></div>`;
+    root.querySelector('button').onclick = () => {
+      root.querySelector('span').textContent = 'Stopping…';
+      invoke({ type: 'agent_stop' });
+    };
+    document.body.appendChild(lockHost);
+  };
+
+  const setLock = (on) => {
+    locked = !!on;
+    if (!locked) clearBadges();
+    renderLock();
+  };
+
+  // Top frame: requests to child frames, answered through onFrameReply.
+  let frameReq = 0;
+  const waiting = new Map();
+  const askFrame = (id, payload, ms) =>
+    new Promise((resolve) => {
+      const req = ++frameReq;
+      const timer = setTimeout(() => {
+        waiting.delete(req);
+        resolve(null);
+      }, ms);
+      waiting.set(req, (data) => {
+        clearTimeout(timer);
+        resolve(data);
+      });
+      postDown(id, { kind: 'agent', req, ...payload });
+    });
+  const onFrameReply = (f, msg) => {
+    const done = waiting.get(msg.req);
+    if (!done) return;
+    waiting.delete(msg.req);
+    const data = msg.data || {};
+    if (Array.isArray(data.marks)) {
+      data.marks = data.marks
+        .slice(0, MARK_SPAN)
+        .filter((m) => m && Number(m.n) > f.id * MARK_SPAN && Number(m.n) < (f.id + 1) * MARK_SPAN)
+        .map((m) => ({ ...m, origin: f.origin, field: m.field ? { ...m.field, key: prefixed(f, cap(m.field.key, 200)) } : undefined }));
+    }
+    done(data);
+  };
+
+  // Child frames: requests from the top frame.
+  const onAgentDown = async (d) => {
+    const reply = (data) => {
+      try {
+        window.top.postMessage({ __cvd: UP, agent: { req: d.req, data } }, '*');
+      } catch {
+        /* detached frame */
+      }
+    };
+    if (d.op === 'lock') return setLock(d.on);
+    if (d.op === 'marks') {
+      await settle();
+      return reply({ marks: collectMarks(Number(d.base) || 0) });
+    }
+    if (d.op === 'act') return reply(await act(d));
+  };
+
+  const eachFrame = (fn) => frames.forEach((f) => fn(f));
+
+  /** Commands from cvd (top frame only); answers go back as `agent_reply`. */
+  const agent = async (cmd) => {
+    if (!isTop || !cmd) return;
+    const reply = (data) => typeof cmd.id === 'number' && invoke({ type: 'agent_reply', id: cmd.id, data });
+    if (cmd.op === 'lock') {
+      setLock(cmd.on);
+      eachFrame((f) => postDown(f.id, { kind: 'agent', op: 'lock', on: !!cmd.on }));
+      return;
+    }
+    if (cmd.op === 'marks') {
+      await settle();
+      const marks = collectMarks(0);
+      const replies = await Promise.all([...frames.values()].map((f) => askFrame(f.id, { op: 'marks', base: f.id * MARK_SPAN }, 6000)));
+      replies.forEach((r) => r && Array.isArray(r.marks) && marks.push(...r.marks));
+      return reply({ url: location.href, title: cap(document.title, 200), marks });
+    }
+    if (cmd.op === 'act') {
+      if (cmd.do === 'scroll_down' || cmd.do === 'scroll_up') {
+        eachFrame((f) => postDown(f.id, { kind: 'agent', op: 'act', do: cmd.do }));
+        return reply(await act(cmd));
+      }
+      const owner = Math.floor(Number(cmd.n) / MARK_SPAN);
+      if (!owner) return reply(await act(cmd));
+      return reply((await askFrame(owner, { op: 'act', do: cmd.do, n: cmd.n }, 4000)) || { result: 'ok' });
+    }
+  };
+
+  /** Scans again from scratch: the DOM path takes over after the agent. */
+  const rescan = () => {
+    seen.clear();
+    if (isTop) eachFrame((f) => postDown(f.id, { kind: 'rescan' }));
+    scan();
+  };
+
   window.addEventListener('message', isTop ? onChildMessage : onParentMessage);
-  window.__cvdAutofill = { apply, notice };
+  window.__cvdAutofill = { apply, notice, agent, rescan };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })();

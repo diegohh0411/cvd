@@ -75,7 +75,7 @@ pub fn host_decision(session: &Session, host: &str) -> HostDecision {
     }
 }
 
-fn job_id_of(label: &str) -> Option<i64> {
+pub(crate) fn job_id_of(label: &str) -> Option<i64> {
     label.strip_prefix(LABEL_PREFIX)?.parse().ok()
 }
 
@@ -117,6 +117,7 @@ pub fn open_window(app: &AppHandle, job_id: i64, url: &str, title: &str) -> Resu
         .initialization_script_for_all_frames(INIT_SCRIPT)
         .build()
         .map_err(|e| AppError::Io(e.to_string()))?;
+    super::agent::live::check_vision(app, &format!("{LABEL_PREFIX}{job_id}"));
     Ok(())
 }
 
@@ -142,6 +143,16 @@ enum PageMessage {
         filled: usize,
         needs: Vec<Value>,
     },
+    /// The top frame loaded and settled; the vision agent may start.
+    Ready,
+    /// An answer to a vision agent request.
+    AgentReply {
+        id: u64,
+        #[serde(default)]
+        data: Value,
+    },
+    /// The user pressed Stop on the agent's lock.
+    AgentStop,
     #[serde(other)]
     Other,
 }
@@ -307,7 +318,7 @@ async fn load_resume(st: &AppState, job_id: i64) -> Option<Resume> {
     None
 }
 
-async fn active_engine(st: &AppState) -> Option<Arc<dyn DecisionEngine>> {
+pub(crate) async fn active_engine(st: &AppState) -> Option<Arc<dyn DecisionEngine>> {
     let model = st.active_model().await.ok()?;
     st.engine_for(&model).ok()
 }
@@ -344,8 +355,15 @@ pub async fn handle_bridge(
             .iter()
             .all(|h| host_decision(s, h) == HostDecision::Allowed)
     };
+    let agents = window.try_state::<super::agent::live::Agents>();
     let fields = match serde_json::from_value(msg) {
         Ok(PageMessage::Fields { fields }) => {
+            // The vision agent fills this window's fields itself.
+            if let Some(a) = &agents {
+                if a.mode(&label).await == super::agent::live::Mode::Vision {
+                    return Ok(());
+                }
+            }
             if !consent(window, sessions, &label, &hosts).await {
                 return Ok(());
             }
@@ -410,8 +428,41 @@ pub async fn handle_bridge(
             let _ = (filled, needs);
             return Ok(());
         }
+        Ok(PageMessage::Ready) => {
+            super::agent::live::on_ready(window);
+            return Ok(());
+        }
+        Ok(PageMessage::AgentReply { id, data }) => {
+            if let Some(a) = &agents {
+                a.reply(id, data);
+            }
+            return Ok(());
+        }
+        Ok(PageMessage::AgentStop) => {
+            if let Some(a) = &agents {
+                a.stop(&label);
+            }
+            return Ok(());
+        }
         _ => return Ok(()),
     };
+    fill_fields(window, st, sessions, job_id, fields)
+        .await
+        .map(|_| ())
+}
+
+/// Plans fills for `fields` (rules, memory, then the Fast Model) and sends
+/// them to the page. Callers check consent first.
+pub(crate) async fn fill_fields(
+    window: &WebviewWindow,
+    st: &AppState,
+    sessions: &Sessions,
+    job_id: i64,
+    fields: Vec<FieldSpec>,
+) -> Result<Vec<FillAction>, AppError> {
+    let label = window.label().to_string();
+    #[cfg(debug_assertions)]
+    let url = window.url().map_err(|e| AppError::Io(e.to_string()))?;
     #[cfg(debug_assertions)]
     if let Ok(dir) = std::env::var("CVD_AUTOFILL_DUMP") {
         let file = format!(
@@ -458,13 +509,14 @@ pub async fn handle_bridge(
             }
         }
     }
-    send(window, &actions)
+    send(window, &actions)?;
+    Ok(actions)
 }
 
 /// Asks the user, in a native dialog the page can't draw or answer, before a
 /// new host receives any profile data. `false` means don't fill (declined, or
 /// a dialog is already open).
-async fn consent(
+pub(crate) async fn consent(
     window: &WebviewWindow,
     sessions: &Sessions,
     label: &str,
@@ -617,7 +669,7 @@ pub(crate) async fn mark_applied(st: &AppState, job_id: i64) -> String {
     format!("Submitted. Marked as {} in cvd.", applied.name)
 }
 
-fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
+pub(crate) fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
     let json = serde_json::to_string(text).map_err(|e| AppError::Io(e.to_string()))?;
     window
         .eval(format!(
@@ -626,7 +678,7 @@ fn notice(window: &WebviewWindow, text: &str) -> Result<(), AppError> {
         .map_err(|e| AppError::Io(e.to_string()))
 }
 
-fn send(window: &WebviewWindow, actions: &[FillAction]) -> Result<(), AppError> {
+pub(crate) fn send(window: &WebviewWindow, actions: &[FillAction]) -> Result<(), AppError> {
     let json = serde_json::to_string(actions).map_err(|e| AppError::Io(e.to_string()))?;
     window
         .eval(format!(

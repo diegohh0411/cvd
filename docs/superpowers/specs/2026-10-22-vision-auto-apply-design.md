@@ -42,10 +42,14 @@ Models without vision keep today's DOM-only autofill unchanged.
   - `< STOP_THRESHOLD` (0.25): stop the run.
   - At most `MAX_REASKS` (3) re-asks per screen; `MAX_STEPS` (40) per run.
 - Submission is the human's. Two guards:
-  - A: marks classified as submit (`type=submit`, or text like "Submit",
-    "Send application", "Submit application") are never offered.
-  - B: while the agent acts, `submit` events are cancelled and the run ends
-    with "Ready for you to review and submit".
+  - A: marks classified as submit are never offered and never clicked:
+    text like "Submit" or "Send application", or a submit button worded
+    apply/send/finish/complete/done. A plain "Next" submit button stays
+    clickable, since multi-step forms use them.
+  - B: while the agent acts, a `submit` event from a submit-worded button, or
+    one the page doesn't handle itself (a real form post), is cancelled and
+    the run ends with "Ready for you to review and submit". A page that
+    handles a "Next"-worded submit in script is trusted to move pages.
 - Locking: only the apply window. A full-window transparent layer swallows
   pointer and keyboard input in every frame and shows a small banner
   ("cvd is filling this form…") with a Stop button. Every ending unlocks.
@@ -93,6 +97,8 @@ before a fill reaches a frame's host.
 - Page reply timeout (navigation): re-mark on the next step.
 - Window closed: the run ends.
 - Any exit, including panic: a guard unlocks the window.
+- After a run ends, later pages in that window use the DOM path: the user
+  has taken over.
 
 ## Testing
 

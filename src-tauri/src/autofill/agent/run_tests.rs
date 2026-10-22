@@ -12,6 +12,7 @@ fn mark(n: u32, kind: MarkKind, label: &str) -> Mark {
         submit: false,
         field: None,
         filled: false,
+        origin: None,
     }
 }
 

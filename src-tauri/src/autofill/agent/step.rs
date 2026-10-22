@@ -45,6 +45,9 @@ pub struct Mark {
     /// Fields only: it already has a value.
     #[serde(default)]
     pub filled: bool,
+    /// The frame's origin, for marks from a child frame (set by the top frame).
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 const SUBMIT_WORDS: &[&str] = &[
@@ -129,7 +132,10 @@ pub fn options(marks: &[Mark], skipped: &[String]) -> Vec<(Action, String)> {
                 let state = if m.filled { "has a value" } else { "empty" };
                 (
                     Action::Fill(m.n),
-                    format!("Fill field [{}] \"{}\" ({state}) from the profile", m.n, m.label),
+                    format!(
+                        "Fill field [{}] \"{}\" ({state}) from the profile",
+                        m.n, m.label
+                    ),
                 )
             }
             MarkKind::Button => (
@@ -143,7 +149,10 @@ pub fn options(marks: &[Mark], skipped: &[String]) -> Vec<(Action, String)> {
         })
         .collect();
     out.extend([
-        (Action::ScrollDown, "Scroll down to see more of the page".into()),
+        (
+            Action::ScrollDown,
+            "Scroll down to see more of the page".into(),
+        ),
         (Action::ScrollUp, "Scroll up".into()),
         (Action::Back, "Go back to the previous page".into()),
         (

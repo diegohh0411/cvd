@@ -28,7 +28,10 @@ async fn probe_passes_when_both_digits_are_named() {
 
 #[tokio::test]
 async fn probe_fails_on_a_wrong_or_unsure_digit() {
-    assert_eq!(probe(&answering(&[("3", 0.9), ("2", 0.9)]), [3, 8]).await, Ok(false));
+    assert_eq!(
+        probe(&answering(&[("3", 0.9), ("2", 0.9)]), [3, 8]).await,
+        Ok(false)
+    );
     assert_eq!(probe(&answering(&[("3", 0.3)]), [3, 8]).await, Ok(false));
 }
 
@@ -69,12 +72,15 @@ async fn result_is_cached_per_model() {
     assert_eq!(e.calls(), 1);
     assert!(!supports_images(&st, "typesafe:jev-latest", &e).await);
     assert_eq!(e.calls(), 1);
-    st.store.set_setting(&cache_key("typesafe:jev-preview"), "true").await.unwrap();
+    st.store
+        .set_setting(&cache_key("typesafe:jev-preview"), "true")
+        .await
+        .unwrap();
     assert!(supports_images(&st, "typesafe:jev-preview", &e).await);
 }
 
 pub(crate) async fn test_state() -> AppState {
-    use crate::state::{EngineSource, Emitter};
+    use crate::state::{Emitter, EngineSource};
     let store = crate::store::Store::open("sqlite::memory:").await.unwrap();
     let emit: Emitter = Arc::new(|_: &str, _: serde_json::Value| {});
     let fake = FakeDecisionEngine::new(|_, _, _| Answer::Noul { p: 0.5 });

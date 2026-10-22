@@ -52,6 +52,7 @@ pub fn run() {
             start_mail_watcher(app.handle());
             start_change_feed(app.handle());
             app.manage(autofill::window::Sessions::default());
+            app.manage(autofill::agent::live::Agents::default());
             // Dev hook: open an apply window on any supported posting, with no job attached.
             #[cfg(debug_assertions)]
             if let Ok(url) = std::env::var("CVD_APPLY_URL") {

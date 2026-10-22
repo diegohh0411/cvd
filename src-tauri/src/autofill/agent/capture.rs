@@ -52,7 +52,9 @@ pub fn capture(window: &WebviewWindow) -> Result<String, String> {
     let shot = target.capture_image().map_err(|e| {
         format!("Screen capture failed ({e}). On macOS, allow cvd in System Settings → Privacy & Security → Screen Recording.")
     })?;
-    let rect = |p: tauri::PhysicalPosition<i32>, s: tauri::PhysicalSize<u32>| (p.x, p.y, s.width, s.height);
+    let rect = |p: tauri::PhysicalPosition<i32>, s: tauri::PhysicalSize<u32>| {
+        (p.x, p.y, s.width, s.height)
+    };
     let outer = rect(
         window.outer_position().map_err(|e| e.to_string())?,
         window.outer_size().map_err(|e| e.to_string())?,
@@ -99,7 +101,10 @@ mod tests {
     fn odd_geometry_stays_inside_the_image() {
         let (x, y, w, h) = content_rect(800, 600, (0, 0, 800, 600), (900, 700, 800, 600));
         assert!(x as u32 + w <= 800 && y as u32 + h <= 600 && w >= 1 && h >= 1);
-        assert_eq!(content_rect(10, 10, (0, 0, 0, 0), (0, 0, 5, 5)), (0, 0, 10, 10));
+        assert_eq!(
+            content_rect(10, 10, (0, 0, 0, 0), (0, 0, 5, 5)),
+            (0, 0, 10, 10)
+        );
     }
 
     #[test]
