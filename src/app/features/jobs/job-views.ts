@@ -3,6 +3,7 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
+import { onTablesChanged } from '../../core/ipc/events';
 import type { FieldKey, FilterOp, JobDescription, JobFilter, JobStatus, JobView, JobViewInput, ViewLayout } from '../../core/ipc/types';
 
 export type { FieldKey, FilterOp, JobFilter, JobSort, JobView, ViewLayout } from '../../core/ipc/types';
@@ -127,6 +128,13 @@ export class JobViewsStore {
   readonly views = signal<JobView[]>([]);
   readonly activeId = signal<number | null>(null);
   readonly active = computed<JobView | null>(() => this.views().find((v) => v.id === this.activeId()) ?? this.views().at(0) ?? null);
+
+  constructor() {
+    // Skip while edits are in flight so a reload can't undo an optimistic change.
+    void onTablesChanged(['job_view'], () => {
+      if (this.loaded && this.saving.size === 0) void this.reload();
+    }).catch(() => undefined);
+  }
 
   /** Loads once; later calls reuse the first load. */
   ensureLoaded(): Promise<void> {

@@ -922,3 +922,13 @@ impl Store {
         Ok(rows.iter().map(cv_from_row).collect())
     }
 }
+
+impl Store {
+    /// Each table's write counter, bumped by triggers on every insert, update and delete.
+    pub async fn change_versions(&self) -> Result<BTreeMap<String, i64>> {
+        let rows: Vec<(String, i64)> = sqlx::query_as("SELECT tbl, version FROM data_change")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter().collect())
+    }
+}

@@ -2,6 +2,7 @@ import { computed, inject, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
 import { messageFor } from '../ipc/errors';
+import { onTablesChanged } from '../ipc/events';
 import { STATUS_COLORS, type JobStatus, type StatusColor } from '../ipc/types';
 import { JobsStore } from './jobs.store';
 
@@ -14,6 +15,12 @@ export class JobStatusesStore {
   readonly statuses = signal<JobStatus[]>([]);
   readonly error = signal<string | null>(null);
   readonly byId = computed(() => new Map(this.statuses().map((s) => [s.id, s])));
+
+  constructor() {
+    void onTablesChanged(['job_status'], () => {
+      if (this.loaded) void this.reload();
+    }).catch(() => undefined);
+  }
 
   /** Loads once; later calls reuse the first load. */
   ensureLoaded(): Promise<void> {

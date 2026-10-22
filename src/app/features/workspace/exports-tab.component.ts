@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { formatTimestamp } from '../../core/format';
 import * as api from '../../core/ipc/commands';
+import { onTablesChanged, untilDestroyed } from '../../core/ipc/events';
 import type { Cv, Selection } from '../../core/ipc/types';
 import { fileName } from '../jobs/exports-page.component';
 
@@ -41,8 +42,13 @@ export class ExportsTabComponent {
   protected readonly date = formatTimestamp;
   protected readonly file = fileName;
 
+  /** Bumped when the table changes elsewhere. */
+  private readonly changes = signal(0);
+
   constructor() {
+    void untilDestroyed(inject(DestroyRef), onTablesChanged(['cv'], () => this.changes.update((n) => n + 1))).catch(() => undefined);
     effect(() => {
+      this.changes();
       const id = this.jobId();
       this.version();
       void api.listCvs(id).then((c) => this.cvs.set(c), () => this.cvs.set([]));

@@ -1,6 +1,7 @@
 import { computed, Injectable, signal } from '@angular/core';
 
 import * as api from '../ipc/commands';
+import { onTablesChanged } from '../ipc/events';
 import type { Connection, ProviderId } from '../ipc/types';
 
 /** Saved model-provider keys, shared by the model pickers and the Connections list. */
@@ -11,7 +12,16 @@ export class ConnectionsStore {
   /** Connection ids, for "does this model's key exist". */
   readonly ids = computed(() => new Set(this.list().map((c) => c.id)));
 
+  private loadedOnce = false;
+
+  constructor() {
+    void onTablesChanged(['secrets'], () => {
+      if (this.loadedOnce) void this.load();
+    }).catch(() => undefined);
+  }
+
   async load(): Promise<void> {
+    this.loadedOnce = true;
     try {
       this.list.set(await api.listConnections());
       this.revision.update(n => n + 1);
