@@ -67,6 +67,16 @@ pub struct RemoteModel {
     pub context_length: Option<u32>,
     /// USD per million input tokens.
     pub price_per_mtok_in: Option<f64>,
+    /// Whether the model reads images, when the provider says. `None` means
+    /// unknown: cvd probes it (autofill/agent/vision.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vision: Option<bool>,
+}
+
+/// `architecture.input_modalities` as OpenRouter and llama.cpp servers report it.
+pub fn vision_from_architecture(m: &serde_json::Value) -> Option<bool> {
+    let list = m.pointer("/architecture/input_modalities")?.as_array()?;
+    Some(list.iter().any(|x| x.as_str() == Some("image")))
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

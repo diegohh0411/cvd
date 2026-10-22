@@ -94,6 +94,7 @@ impl Provider for SubQProvider {
                 },
                 context_length: Some(SNAP_CONTEXT_LENGTH),
                 price_per_mtok_in: Some(SNAP_PRICE_PER_MTOK_IN),
+                vision: None,
             })
             .collect())
     }

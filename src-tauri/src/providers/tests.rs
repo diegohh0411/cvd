@@ -45,6 +45,9 @@ async fn openrouter_lists_decision_models() {
         .list_models()
         .await
         .unwrap();
+    let vision = |id: &str| models.iter().find(|m| m.id == id).unwrap().vision;
+    assert_eq!(vision("openai/gpt-6-luna-decisions"), Some(true));
+    assert_eq!(vision("liquid/d1"), Some(false));
     let jev = models.iter().find(|m| m.id == "typesafe/jev-1.13").unwrap();
     assert_eq!(jev.provider, "openrouter");
     assert_eq!(jev.context_length, Some(64000));

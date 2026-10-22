@@ -91,6 +91,7 @@ impl Provider for TypeSafeProvider {
                 display_name: display_name(name),
                 context_length: Some(JEV_CONTEXT_LENGTH),
                 price_per_mtok_in: Some(JEV_PRICE_PER_MTOK_IN),
+                vision: None,
             })
             .collect())
     }

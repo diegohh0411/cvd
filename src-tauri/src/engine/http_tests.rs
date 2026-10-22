@@ -158,3 +158,60 @@ async fn overloaded_529_is_retried_once_then_rate_limited() {
     assert_eq!(err, EngineError::RateLimited);
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
+
+fn image() -> Vec<crate::engine::Image> {
+    vec![crate::engine::Image {
+        placeholder: "img-1".into(),
+        png_base64: "AAAA".into(),
+    }]
+}
+
+#[tokio::test]
+async fn image_requests_send_assets_and_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .and(header("TypeSafe-Danger-Zone-Images", "true"))
+        .and(body_partial_json(serde_json::json!({
+            "assets": {"img-1": {"type": "image", "format": "png", "data_base64": "AAAA"}}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixture()))
+        .mount(&server)
+        .await;
+    let got = engine(&server)
+        .decide_with_images("s img-1", &questions(), &image())
+        .await
+        .unwrap();
+    assert_eq!(got, parse_wire_response(fixture()).unwrap());
+}
+
+#[tokio::test]
+async fn text_requests_have_no_assets_or_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(fixture()))
+        .mount(&server)
+        .await;
+    engine(&server).decide("s", &questions()).await.unwrap();
+    let req = &server.received_requests().await.unwrap()[0];
+    assert!(req.headers.get("TypeSafe-Danger-Zone-Images").is_none());
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+    assert!(body.get("assets").is_none());
+}
+
+#[tokio::test]
+async fn rejected_images_mean_no_vision() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(serde_json::json!({"error": {"message": "images not supported"}})),
+        )
+        .mount(&server)
+        .await;
+    let err = engine(&server)
+        .decide_with_images("s", &questions(), &image())
+        .await
+        .unwrap_err();
+    assert_eq!(err, EngineError::ImagesUnsupported);
+}

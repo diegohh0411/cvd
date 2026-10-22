@@ -82,6 +82,7 @@ fn to_model(m: &Value) -> Option<RemoteModel> {
             .and_then(Value::as_str)
             .and_then(|p| p.parse::<f64>().ok())
             .map(|p| p * 1e6),
+        vision: super::vision_from_architecture(m),
         id,
     })
 }

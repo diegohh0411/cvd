@@ -1,5 +1,5 @@
 //! Mapping between the public types and the llama.cpp `POST /v1/systemone` JSON.
-use super::types::{Answer, EngineError, Question};
+use super::types::{Answer, EngineError, Image, Question};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -9,6 +9,23 @@ pub fn wire_request(state: &str, questions: &BTreeMap<String, Question>) -> Valu
         .map(|(id, q)| (id.clone(), wire_question(q)))
         .collect();
     json!({ "state": state, "questions": qs })
+}
+
+/// Adds `images` as System One `assets`, keyed by their placeholders.
+pub fn add_assets(body: &mut Value, images: &[Image]) {
+    if images.is_empty() {
+        return;
+    }
+    let assets: Map<String, Value> = images
+        .iter()
+        .map(|i| {
+            (
+                i.placeholder.clone(),
+                json!({"type": "image", "format": "png", "data_base64": i.png_base64}),
+            )
+        })
+        .collect();
+    body["assets"] = Value::Object(assets);
 }
 
 fn wire_question(q: &Question) -> Value {

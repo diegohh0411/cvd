@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 pub use fake::FakeDecisionEngine;
 #[allow(unused_imports)]
 pub use http::HttpSystemOneEngine;
-pub use types::{Answer, EngineError, Question};
+pub use types::{Answer, EngineError, Image, Question};
 #[allow(unused_imports)]
-pub use wire::{parse_wire_response, wire_request};
+pub use wire::{add_assets, parse_wire_response, wire_request};
 
 pub const MAX_QUESTIONS: usize = 128;
 
@@ -28,6 +28,17 @@ pub trait DecisionEngine: Send + Sync {
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<BTreeMap<String, Answer>, EngineError>;
+
+    /// Like [`decide`](Self::decide), with images the state refers to by
+    /// placeholder. Engines that can't send images answer `ImagesUnsupported`.
+    async fn decide_with_images(
+        &self,
+        _state: &str,
+        _questions: &BTreeMap<String, Question>,
+        _images: &[Image],
+    ) -> Result<BTreeMap<String, Answer>, EngineError> {
+        Err(EngineError::ImagesUnsupported)
+    }
 }
 
 /// Enforces the engine's question cap before calling it.

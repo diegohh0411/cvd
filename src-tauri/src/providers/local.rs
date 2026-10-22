@@ -188,6 +188,7 @@ impl Provider for LocalProvider {
                     display_name: id.into(),
                     context_length: None,
                     price_per_mtok_in: None,
+                    vision: super::vision_from_architecture(m),
                 })
             })
             .collect()

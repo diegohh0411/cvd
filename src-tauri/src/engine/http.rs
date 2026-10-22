@@ -6,14 +6,16 @@ use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde_json::Value;
 
-use super::types::{Answer, EngineError, Question};
-use super::wire::{parse_wire_response, wire_request};
+use super::types::{Answer, EngineError, Image, Question};
+use super::wire::{add_assets, parse_wire_response, wire_request};
 use super::{DecisionEngine, MAX_QUESTIONS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(10);
 /// TypeSafe answers 529 when overloaded; like 429 it is retried once.
 const STATUS_OVERLOADED: u16 = 529;
+/// System One requires this header on requests that carry image assets.
+const IMAGES_HEADER: &str = "TypeSafe-Danger-Zone-Images";
 
 pub struct HttpSystemOneEngine {
     /// Display name for user-facing errors, e.g. "OpenRouter".
@@ -56,7 +58,7 @@ impl HttpSystemOneEngine {
         self
     }
 
-    async fn send(&self, body: &Value) -> Result<reqwest::Response, EngineError> {
+    async fn send(&self, body: &Value, images: bool) -> Result<reqwest::Response, EngineError> {
         let mut request = self
             .http
             .post(format!(
@@ -64,6 +66,9 @@ impl HttpSystemOneEngine {
                 self.base_url.trim_end_matches('/')
             ))
             .json(body);
+        if images {
+            request = request.header(IMAGES_HEADER, "true");
+        }
         if !self.api_key.is_empty() {
             request = request.bearer_auth(&self.api_key);
         }
@@ -106,15 +111,37 @@ impl DecisionEngine for HttpSystemOneEngine {
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<BTreeMap<String, Answer>, EngineError> {
+        self.request(state, questions, &[]).await
+    }
+
+    async fn decide_with_images(
+        &self,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+        images: &[Image],
+    ) -> Result<BTreeMap<String, Answer>, EngineError> {
+        self.request(state, questions, images).await
+    }
+}
+
+impl HttpSystemOneEngine {
+    async fn request(
+        &self,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+        images: &[Image],
+    ) -> Result<BTreeMap<String, Answer>, EngineError> {
         let mut body = wire_request(state, questions);
         body["model"] = Value::String(self.model.clone());
+        add_assets(&mut body, images);
+        let with_images = !images.is_empty();
 
-        let mut resp = self.send(&body).await?;
+        let mut resp = self.send(&body, with_images).await?;
         if resp.status() == StatusCode::TOO_MANY_REQUESTS
             || resp.status().as_u16() == STATUS_OVERLOADED
         {
             tokio::time::sleep(retry_after(&resp)).await;
-            resp = self.send(&body).await?;
+            resp = self.send(&body, with_images).await?;
         }
         let status = resp.status();
         let bytes = resp
@@ -140,6 +167,7 @@ impl DecisionEngine for HttpSystemOneEngine {
             {
                 Err(EngineError::ContextOverflow)
             }
+            400 | 415 | 422 if with_images => Err(EngineError::ImagesUnsupported),
             _ if !status.is_success() => Err(EngineError::BadResponse(format!(
                 "HTTP {status}: {}",
                 msg()

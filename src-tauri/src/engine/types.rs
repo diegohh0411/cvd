@@ -36,6 +36,14 @@ pub enum Answer {
     },
 }
 
+/// A PNG sent with a request. `placeholder` is written into `state` where the
+/// model should see the image (System One `assets`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub placeholder: String,
+    pub png_base64: String,
+}
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum EngineError {
     #[error("decision engine unavailable: {0}")]
@@ -54,6 +62,8 @@ pub enum EngineError {
     RateLimited,
     #[error("Network error: {0}")]
     Network(String),
+    #[error("This model can't read images")]
+    ImagesUnsupported,
     #[error("Model no longer available: {0}")]
     ModelUnavailable(String),
 }

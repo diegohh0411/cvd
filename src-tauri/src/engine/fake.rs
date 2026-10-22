@@ -1,4 +1,4 @@
-use super::types::{Answer, EngineError, Question};
+use super::types::{Answer, EngineError, Image, Question};
 use super::DecisionEngine;
 use async_trait::async_trait;
 use std::collections::BTreeMap;
@@ -11,6 +11,8 @@ pub struct FakeDecisionEngine {
     calls: AtomicUsize,
     /// 1-based index of the call that fails; 0 means never.
     fail_on: AtomicUsize,
+    /// Accepts image requests (answered like text ones) when set.
+    sees: bool,
 }
 
 impl FakeDecisionEngine {
@@ -19,7 +21,14 @@ impl FakeDecisionEngine {
             f: Box::new(f),
             calls: AtomicUsize::new(0),
             fail_on: AtomicUsize::new(0),
+            sees: false,
         }
+    }
+
+    /// Makes the fake accept `decide_with_images`.
+    pub fn seeing(mut self) -> Self {
+        self.sees = true;
+        self
     }
 
     pub fn calls(&self) -> usize {
@@ -49,5 +58,17 @@ impl DecisionEngine for FakeDecisionEngine {
             out.insert(name.clone(), (self.f)(state, name, q));
         }
         Ok(out)
+    }
+
+    async fn decide_with_images(
+        &self,
+        state: &str,
+        questions: &BTreeMap<String, Question>,
+        _images: &[Image],
+    ) -> Result<BTreeMap<String, Answer>, EngineError> {
+        if !self.sees {
+            return Err(EngineError::ImagesUnsupported);
+        }
+        self.decide(state, questions).await
     }
 }
