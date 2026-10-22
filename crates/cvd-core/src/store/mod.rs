@@ -181,6 +181,8 @@ operations! {
     fn set_secret(provider: &str, api_key: &str) -> ();
     fn delete_secret(provider: &str) -> ();
     fn save_cv(cv: &CvInput) -> i64;
+    fn set_cv_file_ref(id: i64, file_ref: &str) -> ();
+    fn delete_cv(id: i64) -> ();
     fn list_cvs(jd_id: i64) -> Vec<Cv>;
     fn change_versions() -> BTreeMap<String, i64>;
     fn find_company(domain: Option<&str>, normalized: &str) -> Option<Company>;

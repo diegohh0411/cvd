@@ -186,7 +186,7 @@ pub struct Cv {
     pub template: String,
     pub page_budget: i64,
     pub selection_json: String,
-    pub pdf_path: Option<String>,
+    pub file_ref: Option<String>,
     pub created_at: String,
 }
 
@@ -197,7 +197,7 @@ pub struct CvInput {
     pub template: String,
     pub page_budget: i64,
     pub selection_json: String,
-    pub pdf_path: Option<String>,
+    pub file_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

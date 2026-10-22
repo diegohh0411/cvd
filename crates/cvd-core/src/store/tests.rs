@@ -848,18 +848,25 @@ async fn profile_and_cv_preserve_json_contracts() {
         template: "Classic ATS".into(),
         page_budget: 1,
         selection_json: r#"{"entries":[1,2]}"#.into(),
-        pdf_path: Some("cv.pdf".into()),
+        file_ref: Some("cv.pdf".into()),
     };
     let id = s.save_cv(&cv).await.unwrap();
     let rows = s.list_cvs(jd).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].id, id);
     assert_eq!(rows[0].run_id, Some(run));
-    assert_eq!(rows[0].pdf_path, cv.pdf_path);
+    assert_eq!(rows[0].file_ref, cv.file_ref);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&rows[0].selection_json).unwrap(),
         serde_json::from_str::<serde_json::Value>(&cv.selection_json).unwrap()
     );
+    s.set_cv_file_ref(id, "cvs/export.pdf").await.unwrap();
+    assert_eq!(
+        s.list_cvs(jd).await.unwrap()[0].file_ref.as_deref(),
+        Some("cvs/export.pdf")
+    );
+    s.delete_cv(id).await.unwrap();
+    assert!(s.list_cvs(jd).await.unwrap().is_empty());
 }
 
 #[tokio::test]

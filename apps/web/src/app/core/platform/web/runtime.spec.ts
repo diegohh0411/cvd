@@ -12,6 +12,15 @@ describe('web platform', () => {
     expect(() => unlisten()).not.toThrow();
   });
 
+  it('exports by downloading the PDF bytes the backend returns', async () => {
+    const call = vi.spyOn(transport, 'call').mockResolvedValue({ id: 1, pdf: [37, 80, 68, 70] });
+    const save = vi.spyOn(platform, 'saveFile').mockResolvedValue('CV.pdf');
+    const selection = { entries: [], skills: [] };
+    expect(await platform.exportCv(3, selection, 'CV.pdf')).toBe('CV.pdf');
+    expect(call).toHaveBeenCalledWith('export_cv', { runId: 3, selection });
+    expect(save).toHaveBeenCalledWith(new Uint8Array([37, 80, 68, 70]), 'CV.pdf');
+  });
+
   it('downloads bytes with the suggested filename and releases the object URL', async () => {
     vi.useFakeTimers();
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');

@@ -25,5 +25,8 @@ export const platform: Platform = {
   async version() { return 'web'; },
   async checkForUpdates() { return null; },
   async relaunch() { window.location.reload(); },
-  async exportCv() { throw new Error('Web PDF export requires the web transport (#65)'); },
+  async exportCv(runId, selection, suggestedName) {
+    const cv = await transport.call<{ id: number; pdf: number[] }>('export_cv', { runId, selection });
+    return platform.saveFile(new Uint8Array(cv.pdf), suggestedName);
+  },
 };

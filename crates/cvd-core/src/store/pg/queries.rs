@@ -182,7 +182,7 @@ fn cv_from_row(r: &PgRow) -> Cv {
             .get::<sqlx::types::Json<serde_json::Value>, _>("selection_json")
             .0
             .to_string(),
-        pdf_path: r.get("pdf_path"),
+        file_ref: r.get("file_ref"),
         created_at: timestamp(r, "created_at"),
     }
 }
@@ -995,7 +995,7 @@ pub(in crate::store) async fn save_cv(
     cv: &CvInput,
 ) -> Result<i64> {
     Ok(sqlx::query_scalar(
-        "INSERT INTO cv (user_id, jd_id, run_id, template, page_budget, selection_json, pdf_path)
+        "INSERT INTO cv (user_id, jd_id, run_id, template, page_budget, selection_json, file_ref)
              VALUES ($1, $2, $3, $4, $5, $6::text::jsonb, $7) RETURNING id",
     )
     .bind(user.0)
@@ -1004,9 +1004,36 @@ pub(in crate::store) async fn save_cv(
     .bind(&cv.template)
     .bind(cv.page_budget)
     .bind(&cv.selection_json)
-    .bind(&cv.pdf_path)
+    .bind(&cv.file_ref)
     .fetch_one(&mut *conn)
     .await?)
+}
+
+pub(in crate::store) async fn set_cv_file_ref(
+    conn: &mut PgConnection,
+    user: UserId,
+    id: i64,
+    file_ref: &str,
+) -> Result<()> {
+    sqlx::query("UPDATE cv SET file_ref = $3 WHERE user_id = $1 AND id = $2")
+        .bind(user.0)
+        .bind(id)
+        .bind(file_ref)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+pub(in crate::store) async fn delete_cv(
+    conn: &mut PgConnection,
+    user: UserId,
+    id: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM cv WHERE user_id = $1 AND id = $2")
+        .bind(user.0)
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 pub(in crate::store) async fn list_cvs(

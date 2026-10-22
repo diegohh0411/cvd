@@ -101,7 +101,7 @@ CREATE TABLE cv (
     template text NOT NULL,
     page_budget bigint NOT NULL,
     selection_json jsonb NOT NULL,
-    pdf_path text,
+    file_ref text,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (user_id, id)
 );

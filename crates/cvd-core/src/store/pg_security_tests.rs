@@ -15,6 +15,23 @@ async fn tenants_cannot_read_mutate_or_link_each_others_rows() {
     b.remember_label("same", "b-fact").await.unwrap();
     let aj = a.create_jd("A", "same", "a-text", "", None).await.unwrap();
     let bj = b.create_jd("B", "same", "b-text", "", None).await.unwrap();
+    let bcv = b
+        .save_cv(&CvInput {
+            jd_id: bj,
+            run_id: None,
+            template: "Classic ATS".into(),
+            page_budget: 1,
+            selection_json: "{}".into(),
+            file_ref: Some("b/original.pdf".into()),
+        })
+        .await
+        .unwrap();
+    a.set_cv_file_ref(bcv, "stolen.pdf").await.unwrap();
+    a.delete_cv(bcv).await.unwrap();
+    assert_eq!(
+        b.list_cvs(bj).await.unwrap()[0].file_ref.as_deref(),
+        Some("b/original.pdf")
+    );
     let ac = a
         .create_company("same", "same", Some("same.example"))
         .await
