@@ -2,13 +2,13 @@
 // current selection and the user's overrides. No Angular, so it is unit-tested directly.
 import type { EntryKind, Override, Ranked, Selection, Target } from '../../core/ipc/types';
 
-/** Mirrors `MatchConfig::default().score_floor` in src-tauri/src/matcher/mod.rs. */
+/** Mirrors `MatchConfig::default().score_floor` in crates/cvd-core/src/matcher/mod.rs. */
 export const SCORE_FLOOR = 1.5;
 export const SCORE_MAX = 4;
 
 export type Section = 'Experience' | 'Projects' | 'Education';
 
-/** Mirrors `section_of` in src-tauri/src/render/fit.rs. */
+/** Mirrors `section_of` in crates/cvd-core/src/render/fit.rs. */
 export function sectionOf(kind: EntryKind): Section {
   return kind === 'project' ? 'Projects' : kind === 'education' ? 'Education' : 'Experience';
 }

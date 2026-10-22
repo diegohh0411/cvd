@@ -49,7 +49,10 @@ Thumbs.db
 .superpowers/
 
 # Old local inference binaries (no longer bundled)
-src-tauri/binaries
+apps/desktop/src-tauri/binaries
 
 # Worktrees
 .worktrees/
+
+# Cargo workspace build output
+/target/

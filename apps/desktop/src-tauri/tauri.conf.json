@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "cvd",
+  "version": "0.5.0",
+  "identifier": "com.diego.cvd",
+  "build": {
+    "beforeDevCommand": { "script": "bun run start", "cwd": "../../.." },
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": { "script": "bun run build", "cwd": "../../.." },
+    "frontendDist": "../../../dist/cvd/browser"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CVD",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'self' blob:",
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBQjBFNDNGRjZENTZDNjcKUldSbmJOWDJQK1N3Nmxob01MNm14VDEwRjFReTc0ZStoVVpBZjUzOExTTkc5dDhveUZaREk3RDkK",
+      "endpoints": [
+        "https://github.com/diegohh0411/cvd/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

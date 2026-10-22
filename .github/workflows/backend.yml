@@ -3,7 +3,10 @@ name: Backend
 on:
   pull_request:
     paths:
-      - "src-tauri/**"
+      - "crates/**"
+      - "apps/desktop/src-tauri/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/backend.yml"
 
 concurrency:
@@ -20,9 +23,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cargo check --all-targets
-        working-directory: src-tauri
+        run: cargo check --workspace --all-targets
 
       - name: Test
-        run: cargo test
-        working-directory: src-tauri
+        run: cargo test --workspace

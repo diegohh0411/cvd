@@ -8,9 +8,11 @@ const root = join(import.meta.dir, "..");
 // Group 1 is everything before the version, group 2 the version, group 3 what follows it.
 const files = [
   { path: "package.json", pattern: /("version": ")([^"]+)(")/ },
-  { path: "src-tauri/tauri.conf.json", pattern: /("version": ")([^"]+)(")/ },
-  { path: "src-tauri/Cargo.toml", pattern: /(^version = ")([^"]+)(")/m },
-  { path: "src-tauri/Cargo.lock", pattern: /(name = "cvd"\nversion = ")([^"]+)(")/ },
+  { path: "apps/desktop/src-tauri/tauri.conf.json", pattern: /("version": ")([^"]+)(")/ },
+  { path: "Cargo.toml", pattern: /(^version = ")([^"]+)(")/m },
+  { path: "Cargo.lock", pattern: /(name = "cvd"\nversion = ")([^"]+)(")/ },
+  { path: "Cargo.lock", pattern: /(name = "cvd-core"\nversion = ")([^"]+)(")/ },
+  { path: "Cargo.lock", pattern: /(name = "cvd-mcp"\nversion = ")([^"]+)(")/ },
 ];
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
@@ -51,8 +53,12 @@ for (const entry of entries) {
   }
 }
 
+const updatedFiles = new Map<string, string>();
 for (const entry of entries) {
-  const updated = entry.text.replace(entry.pattern, (_, before, _old, after) => `${before}${next}${after}`);
-  await Bun.write(join(root, entry.path), updated);
+  const updated = (updatedFiles.get(entry.path) ?? entry.text).replace(entry.pattern, (_, before, _old, after) => `${before}${next}${after}`);
+  updatedFiles.set(entry.path, updated);
   console.log(`${entry.path}: ${entry.current} -> ${next}`);
+}
+for (const [path, text] of updatedFiles) {
+  await Bun.write(join(root, path), text);
 }

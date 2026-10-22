@@ -25,8 +25,10 @@ Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) and the [Tauri p
 bun install
 bun run tauri dev                              # run the desktop app
 bun run test                                   # Angular tests
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --workspace
 ```
+
+The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 
 ### Local inference
 
@@ -53,19 +55,19 @@ Tools: `list_entries`, `list_skills`, `get_profile`, `upsert_profile`, `upsert_e
 The MCP server never migrates an existing database, so open the updated desktop app once before using the job tools.
 
 ```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml --bin cvd-mcp
+cargo build --release -p cvd-mcp
 ```
 
 Claude Code:
 
 ```bash
-claude mcp add cvd -- "$PWD/src-tauri/target/release/cvd-mcp"
+claude mcp add cvd -- "$PWD/target/release/cvd-mcp"
 ```
 
 OpenCode (`opencode.json`):
 
 ```json
-{ "mcp": { "cvd": { "type": "local", "command": ["/abs/path/src-tauri/target/release/cvd-mcp"] } } }
+{ "mcp": { "cvd": { "type": "local", "command": ["/abs/path/target/release/cvd-mcp"] } } }
 ```
 
 Example prompt: "Read my Notion page *Projects* and add each one via cvd. Check list_entries and list_skills first."
