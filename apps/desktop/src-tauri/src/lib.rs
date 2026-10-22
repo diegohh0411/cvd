@@ -70,6 +70,7 @@ pub fn run() {
             ipc::get_ranked,
             ipc::fit_cv,
             ipc::export_cv,
+            ipc::save_file_bytes,
             ipc::set_active_model,
             ipc::set_research_model,
             ipc::skip_research,

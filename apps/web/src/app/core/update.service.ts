@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
-import { relaunch } from '@tauri-apps/plugin-process';
-import { check } from '@tauri-apps/plugin-updater';
+import { platform } from './platform/runtime';
+import type { PlatformUpdate } from './platform/platform';
 
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
 import { messageFor } from './ipc/errors';
@@ -12,8 +12,9 @@ export class UpdateService {
 
   /** Silent on "up to date" and on network errors, so startup never nags offline users. */
   async checkOnStartup(): Promise<void> {
+    if (!platform.capabilities.updater) return;
     try {
-      const update = await check();
+      const update = await platform.checkForUpdates();
       if (!update) return;
       this.toast.info(`Update available: v${update.version}`, {
         description: 'Download and restart to install.',
@@ -25,11 +26,11 @@ export class UpdateService {
     }
   }
 
-  private async install(update: NonNullable<Awaited<ReturnType<typeof check>>>): Promise<void> {
+  private async install(update: PlatformUpdate): Promise<void> {
     const id = this.toast.loading('Downloading update…');
     try {
       await update.downloadAndInstall();
-      await relaunch();
+      await platform.relaunch();
     } catch (e) {
       this.toast.error('Update failed', { id, description: messageFor(e) });
     }

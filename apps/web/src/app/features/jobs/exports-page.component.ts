@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { platform } from '../../core/platform/runtime';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
@@ -32,7 +32,7 @@ export function fileName(path: string | null): string {
                 {{ date(c.cv.created_at) }} · {{ c.cv.page_budget }} page{{ c.cv.page_budget === 1 ? '' : 's' }} · {{ file(c.cv.pdf_path) }}
               </div>
             </div>
-            @if (c.cv.pdf_path) {
+            @if (capabilities.revealInFolder && c.cv.pdf_path) {
               <button z-button zType="outline" zSize="sm" (click)="reveal(c.cv.pdf_path)">Show in folder</button>
             }
           </li>
@@ -47,6 +47,7 @@ export class ExportsPageComponent implements OnInit {
   private readonly jobs = inject(JobsStore);
   private readonly toast = inject(ZardSonnerService);
   private readonly cvs = signal<Cv[]>([]);
+  protected readonly capabilities = platform.capabilities;
   protected readonly date = formatTimestamp;
   protected readonly file = fileName;
   protected readonly rows = computed(() => {
@@ -70,7 +71,7 @@ export class ExportsPageComponent implements OnInit {
 
   async reveal(path: string): Promise<void> {
     try {
-      await revealItemInDir(path);
+      await platform.reveal(path);
     } catch (e) {
       this.toast.error('Could not open the folder', { description: messageFor(e) });
     }

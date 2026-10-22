@@ -1,3 +1,4 @@
+import { platform } from '../../core/platform/runtime';
 import { ChangeDetectionStrategy, Component, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgIcon, provideIcons } from '@ng-icons/core';
@@ -39,7 +40,7 @@ import { StatusPickerComponent } from './status-picker.component';
             <ng-icon name="lucideExternalLink" />
           </button>
         }
-        @if (autofillable(job().url)) {
+        @if (capabilities.autoApply && autofillable(job().url)) {
           <button z-button zType="outline" zSize="xs" type="button" (click)="autofill()" [zLoading]="starting()">
             <ng-icon name="lucideWandSparkles" /> Autofill
           </button>
@@ -49,6 +50,7 @@ import { StatusPickerComponent } from './status-picker.component';
   `,
 })
 export class JobPropertiesComponent {
+  protected readonly capabilities = platform.capabilities;
   private readonly jobs = inject(JobsStore);
   private readonly toast = inject(ZardSonnerService);
 

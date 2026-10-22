@@ -1,5 +1,7 @@
 import { DestroyRef } from '@angular/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { transport } from '../platform/runtime';
+import type { Unlisten as UnlistenFn } from '../platform/transport';
+const listen: typeof transport.listen = (event, cb) => transport.listen(event, cb);
 
 import type {
   MatchProgressEvent,

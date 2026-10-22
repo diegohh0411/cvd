@@ -1,5 +1,5 @@
 import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
-import type { UnlistenFn } from '@tauri-apps/api/event';
+import type { Unlisten as UnlistenFn } from '../../core/platform/transport';
 
 import * as api from '../../core/ipc/commands';
 import { toAppError } from '../../core/ipc/errors';

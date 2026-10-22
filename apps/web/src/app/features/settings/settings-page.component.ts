@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 
-import { getVersion } from '@tauri-apps/api/app';
+import { platform } from '../../core/platform/runtime';
 
 import { type DarkModeOptions, ZardDarkMode } from '@/shared/services/dark-mode';
 import * as api from '../../core/ipc/commands';
@@ -51,7 +51,7 @@ export class SettingsPageComponent implements OnInit {
   protected readonly version = signal('…');
 
   ngOnInit(): void {
-    void getVersion().then((v) => this.version.set(v), () => this.version.set('unknown'));
+    void platform.version().then((v) => this.version.set(v), () => this.version.set('unknown'));
     void api.getUiSetting(BUDGET_SETTING).then((v) => this.budget.set(v === '2' ? '2' : '1'), () => undefined);
   }
 

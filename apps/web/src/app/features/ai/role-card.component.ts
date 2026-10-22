@@ -1,3 +1,4 @@
+import { platform } from '../../core/platform/runtime';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
 
 import { ZardBadgeComponent } from '@/shared/components/badge/badge.component';
@@ -219,7 +220,7 @@ export class RoleCardComponent implements OnInit {
   protected readonly groups = computed<Group[]>(() => {
     const q = this.query().trim().toLowerCase();
     const match = (o: RoleOption) => !q || o.label.toLowerCase().includes(q);
-    const remote = modelProviders(this.role()).flatMap<Group>((p) => {
+    const remote = modelProviders(this.role()).filter((p) => platform.capabilities.localServer || p.id !== 'localhost').flatMap<Group>((p) => {
       const mine = this.connections.forProvider(p.id);
       if (!mine.length) return [{ id: p.id, provider: p.id, name: p.name, options: [], locked: true, error: null }];
       return mine.map<Group>((c) => {

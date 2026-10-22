@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { platform } from '../../core/platform/runtime';
 
 import { ZardButtonComponent } from '@/shared/components/button/button.component';
 import { formatTimestamp } from '../../core/format';
@@ -22,7 +22,7 @@ import { fileName } from '../jobs/exports-page.component';
           </div>
           <div class="flex gap-2">
             <button z-button zType="ghost" zSize="sm" (click)="restore.emit(parse(c))">Restore selection</button>
-            @if (c.pdf_path) {
+            @if (capabilities.revealInFolder && c.pdf_path) {
               <button z-button zType="outline" zSize="sm" (click)="reveal(c.pdf_path)">Show in folder</button>
             }
           </div>
@@ -39,6 +39,7 @@ export class ExportsTabComponent {
   readonly version = input(0);
   readonly restore = output<Selection>();
   protected readonly cvs = signal<Cv[]>([]);
+  protected readonly capabilities = platform.capabilities;
   protected readonly date = formatTimestamp;
   protected readonly file = fileName;
 
@@ -60,6 +61,6 @@ export class ExportsTabComponent {
   }
 
   reveal(path: string): void {
-    void revealItemInDir(path).catch(() => undefined);
+    void platform.reveal(path).catch(() => undefined);
   }
 }

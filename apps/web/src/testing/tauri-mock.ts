@@ -1,6 +1,6 @@
 // Test double for the Tauri bridge: commands are answered by `handlers`,
 // and `emit()` delivers events to `listen()` subscribers.
-import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+import { transport } from '../app/core/platform/runtime';
 
 export type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -18,25 +18,27 @@ export function mockTauri(handlers: Record<string, Handler | unknown> = {}): Tau
   };
   Object.entries(handlers).forEach(([k, v]) => set(k, v));
   const calls: TauriMock['calls'] = [];
-  clearMocks();
-  mockIPC(
-    (cmd, payload) => {
-      const args = (payload ?? {}) as Record<string, unknown>;
-      if (cmd.startsWith('plugin:event|')) return undefined;
-      calls.push({ cmd, args });
-      const h = table[cmd];
-      if (!h) throw new Error(`unmocked command ${cmd}`);
-      return h(args);
-    },
-    { shouldMockEvents: true },
-  );
+  const listeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
+  transport.call = async <T>(cmd: string, payload?: Record<string, unknown>): Promise<T> => {
+    const args = payload ?? {};
+    calls.push({ cmd, args });
+    const h = table[cmd];
+    if (!h) throw new Error(`unmocked command ${cmd}`);
+    return await h(args) as T;
+  };
+  transport.listen = async <T>(event: string, cb: (event: { payload: T }) => void) => {
+    const callbacks = listeners.get(event) ?? new Set();
+    listeners.set(event, callbacks);
+    const callback = cb as (event: { payload: unknown }) => void;
+    callbacks.add(callback);
+    return () => { callbacks.delete(callback); };
+  };
   return {
     calls,
     set,
     callsTo: (cmd) => calls.filter((c) => c.cmd === cmd).map((c) => c.args),
     async emit(event, payload) {
-      const { emit } = await import('@tauri-apps/api/event');
-      await emit(event, payload);
+      for (const cb of listeners.get(event) ?? []) cb({ payload });
       await flush();
     },
   };

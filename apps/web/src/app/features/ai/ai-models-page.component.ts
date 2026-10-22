@@ -1,3 +1,4 @@
+import { platform } from '../../core/platform/runtime';
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 
 import { PageHeaderComponent } from '../../shell/page-header.component';
@@ -26,7 +27,7 @@ import { RoleCardComponent } from './role-card.component';
         <p class="text-muted-foreground text-sm">Where models run, and the keys for online services.</p>
       </div>
       <div class="grid gap-3" data-testid="connections">
-        <div class="rounded-lg border p-4"><app-local-provider /></div>
+        @if (capabilities.localServer) { <div class="rounded-lg border p-4"><app-local-provider /></div> }
         @for (p of modelProviders; track p.id) {
           <div class="rounded-lg border p-4"><app-provider-connections [provider]="p.id" /></div>
         }
@@ -36,5 +37,6 @@ import { RoleCardComponent } from './role-card.component';
   `,
 })
 export class AiModelsPageComponent {
+  protected readonly capabilities = platform.capabilities;
   protected readonly modelProviders = PROVIDERS.filter((p) => p.roles.length > 0 && p.id !== 'localhost');
 }
