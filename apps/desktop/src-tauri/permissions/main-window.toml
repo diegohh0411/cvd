@@ -41,6 +41,7 @@ permissions = [
   "allow-get-ranked",
   "allow-fit-cv",
   "allow-export-cv",
+  "allow-save-file-bytes",
   "allow-set-active-model",
   "allow-set-research-model",
   "allow-skip-research",

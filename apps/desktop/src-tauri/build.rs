@@ -40,6 +40,7 @@ const COMMANDS: &[&str] = &[
     "get_ranked",
     "fit_cv",
     "export_cv",
+    "save_file_bytes",
     "set_active_model",
     "set_research_model",
     "skip_research",

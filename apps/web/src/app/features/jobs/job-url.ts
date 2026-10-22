@@ -1,4 +1,4 @@
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { platform } from '../../core/platform/runtime';
 
 /** Adds https:// to bare hosts ("acme.com/jobs/1"); '' stays ''. */
 export function normalizeUrl(raw: string): string {
@@ -13,7 +13,7 @@ export function isOpenableUrl(url: string): boolean {
 }
 
 export function openJobUrl(url: string): void {
-  if (isOpenableUrl(url)) void openUrl(url.trim());
+  if (isOpenableUrl(url)) void platform.openUrl(url.trim());
 }
 
 export function urlHost(url: string): string {

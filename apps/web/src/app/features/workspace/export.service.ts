@@ -1,9 +1,7 @@
 import { inject, Injectable } from '@angular/core';
-import { save } from '@tauri-apps/plugin-dialog';
-import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { platform } from '../../core/platform/runtime';
 
 import { ZardSonnerService } from '@/shared/components/sonner/sonner.service';
-import * as api from '../../core/ipc/commands';
 import { messageFor } from '../../core/ipc/errors';
 import type { JobDescription, Selection } from '../../core/ipc/types';
 
@@ -24,14 +22,12 @@ export class ExportService {
 
   /** Asks for a path and exports; resolves to the path, or null if cancelled or failed. */
   async export(runId: number, selection: Selection, suggested: string): Promise<string | null> {
-    const picked = await save({ defaultPath: suggested, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
-    if (!picked) return null;
-    const path = ensurePdf(picked);
     try {
-      await api.exportCv(runId, selection, path);
+      const path = await platform.exportCv(runId, selection, suggested);
+      if (!path) return null;
       this.toast.success('CV exported', {
         description: path,
-        action: { label: 'Open', onClick: () => void openPath(path).catch(() => revealItemInDir(path)) },
+        ...(platform.capabilities.revealInFolder ? { action: { label: 'Open', onClick: () => void platform.openFile(path) } } : {}),
       });
       return path;
     } catch (e) {

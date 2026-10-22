@@ -1,6 +1,6 @@
 // One typed wrapper per Tauri command (apps/desktop/crates/cvd-core/src/ipc.rs).
 // Argument names are camelCase: Tauri maps them to the snake_case parameters.
-import { invoke } from '@tauri-apps/api/core';
+import { transport } from '../platform/runtime';
 
 import { toAppError } from './errors';
 import type {
@@ -40,7 +40,7 @@ import type {
 
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   try {
-    return await invoke<T>(cmd, args);
+    return await transport.call<T>(cmd, args);
   } catch (e) {
     throw toAppError(e);
   }

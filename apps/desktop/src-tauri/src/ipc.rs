@@ -361,3 +361,28 @@ pub async fn mark_all_read(st: S<'_>) -> Res<()> {
 pub async fn undo_applied(st: S<'_>, message_id: String) -> Res<ProcessedEmailView> {
     cvd_core::services::undo_applied(&st, &message_id).await
 }
+
+/// The native save dialog owns the destination; callers cannot write an arbitrary path.
+#[tauri::command]
+pub async fn save_file_bytes(
+    app: tauri::AppHandle,
+    bytes: Vec<u8>,
+    suggested_name: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_file_name(&suggested_name)
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|e| e.to_string())?;
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

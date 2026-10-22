@@ -32,6 +32,8 @@ cargo test --workspace
 
 The Bun workspace keeps the Angular app and its configuration in `apps/web`; root scripts forward web commands there. The Tauri shell lives in `apps/desktop`. Run `bun run bump <major|minor|patch|X.Y.Z>` from the root to keep package, Cargo, and Tauri versions in sync.
 
+The browser-only build uses `bun run build --configuration web` (or `bun run ng serve --configuration web`). Angular replaces the platform runtime at build time, excluding the Tauri SDK. Desktop-only controls are hidden; the browser transport deliberately rejects commands until the HTTP/event transport in #65 is implemented. Browser file downloads are available through the platform API.
+
 The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 
 ### Local inference
