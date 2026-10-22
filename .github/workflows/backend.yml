@@ -5,6 +5,9 @@ on:
     paths:
       - "crates/**"
       - "apps/desktop/src-tauri/**"
+      - "apps/web/**"
+      - "package.json"
+      - "bun.lock"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/backend.yml"
