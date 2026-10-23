@@ -55,7 +55,7 @@ async fn rpc(app: &Router, cmd: &str, body: Option<Value>) -> (StatusCode, Value
 
 #[tokio::test]
 async fn calls_commands_with_camel_case_args() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, statuses) = rpc(&app, "list_job_statuses", None).await;
     assert_eq!(status, StatusCode::OK);
     let status_id = statuses[0]["id"].clone();
@@ -80,10 +80,10 @@ async fn calls_commands_with_camel_case_args() {
 
 #[tokio::test]
 async fn errors_use_the_app_error_shape() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, body) = rpc(&app, "get_job", Some(json!({ "id": 999 }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["kind"], "NotFound");
+    assert_eq!(body["kind"], "NotFound", "{body}");
     assert!(body["message"].is_string());
 
     let (status, body) = rpc(&app, "get_job", Some(json!({ "id": "x" }))).await;
@@ -97,7 +97,7 @@ async fn errors_use_the_app_error_shape() {
 
 #[tokio::test]
 async fn rejects_cross_site_and_form_posts() {
-    let (app, state, ..) = app(None).await;
+    let (app, state, _events, _dir) = app(None).await;
     cvd_core::services::set_ui_setting(&state, "ui.k", "kept")
         .await
         .unwrap();
@@ -139,7 +139,7 @@ async fn rejects_cross_site_and_form_posts() {
 
 #[tokio::test]
 async fn desktop_only_commands_explain_themselves() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     for cmd in rpc::DESKTOP_ONLY {
         let (status, body) = rpc(&app, cmd, Some(json!({ "jobId": 1 }))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{cmd}");
@@ -155,7 +155,7 @@ async fn desktop_only_commands_explain_themselves() {
 
 #[tokio::test]
 async fn export_returns_pdf_bytes_without_a_path() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, body) = rpc(
         &app,
         "export_cv",
@@ -218,7 +218,7 @@ async fn serves_the_web_build_with_spa_fallback() {
     let web = tempfile::tempdir().unwrap();
     std::fs::write(web.path().join("index.html"), "<app-root>").unwrap();
     std::fs::write(web.path().join("main.js"), "boot()").unwrap();
-    let (app, ..) = app(Some(web.path())).await;
+    let (app, _state, _events, _dir) = app(Some(web.path())).await;
     for (path, expected) in [
         ("/main.js", "boot()"),
         ("/", "<app-root>"),
@@ -305,7 +305,7 @@ fn frontend_matches_the_command_registry() {
 /// Every shared and per-transport command routes; none falls through to 404.
 #[tokio::test]
 async fn every_registered_command_is_routable() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     for cmd in rpc::commands() {
         // Commands with arguments stop at argument parsing; skip the arg-less ones with side effects.
         if matches!(cmd, "start_scan" | "retry_watcher") {
@@ -321,7 +321,7 @@ async fn every_registered_command_is_routable() {
 /// The server takes the desktop's arguments for per-transport commands.
 #[tokio::test]
 async fn per_transport_commands_accept_the_desktop_arguments() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (_, body) = rpc(
         &app,
         "export_cv",
