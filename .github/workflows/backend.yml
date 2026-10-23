@@ -21,7 +21,7 @@ concurrency:
 jobs:
   checks:
     name: Rust checks
-    runs-on: self-hosted
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
 
   postgres:
     name: Postgres store contracts
-    runs-on: self-hosted
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
