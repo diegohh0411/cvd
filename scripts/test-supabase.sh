@@ -4,10 +4,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo="$PWD"
-if command -v podman >/dev/null; then
-  engine=podman
-else
+# Use the runtime the Supabase CLI talks to: Docker when its daemon is up (CI runners
+# also ship Podman, which can't see Docker's containers), otherwise Podman via DOCKER_HOST.
+if docker info >/dev/null 2>&1; then
   engine=docker
+else
+  engine=podman
 fi
 workdir=$(mktemp -d)
 cleanup() {
