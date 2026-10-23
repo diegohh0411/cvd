@@ -76,6 +76,22 @@ describe('WorkspaceStore', () => {
     expect(ws.runError()?.kind).toBe('EngineUnavailable');
   });
 
+  it('catches up from the run row when the final progress event was missed', async () => {
+    const { ws, t } = setup({ list_runs: [run('running')] });
+    await ws.init(7, false);
+    expect(ws.phase()).toBe('matching');
+    // A change elsewhere doesn't touch a still-running run.
+    await t.emit('db://changed', { tables: ['match_run'] });
+    await flush();
+    expect(ws.phase()).toBe('matching');
+    t.set('list_runs', [run('done')]);
+    await t.emit('db://changed', { tables: ['match_run'] });
+    await new Promise((r) => setTimeout(r, 200));
+    await flush();
+    expect(ws.phase()).toBe('review');
+    expect(ws.ranked()).toEqual(RANKED);
+  });
+
   it('debounces refits and ignores stale responses', async () => {
     const pending: ((v: unknown) => void)[] = [];
     const { ws, t } = setup({ list_runs: [run('done')] });

@@ -38,8 +38,9 @@ async fn main() -> Result<(), Error> {
     });
     let store = Store::open_postgres(&url).await?;
     let tenant = store.for_user(user);
-    // Dev stand-in for sign-up provisioning: a fresh user has no statuses yet.
-    if tenant.list_job_statuses().await?.is_empty() {
+    // Dev stand-in for sign-up provisioning. Users can delete every status later, so only a
+    // user with neither statuses nor views is fresh; defaults are inserted all-or-nothing.
+    if tenant.list_job_statuses().await?.is_empty() && tenant.list_job_views().await?.is_empty() {
         store.create_user_defaults(user).await?;
     }
 

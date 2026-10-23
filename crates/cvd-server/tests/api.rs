@@ -33,7 +33,12 @@ async fn rpc(app: &Router, cmd: &str, body: Option<Value>) -> (StatusCode, Value
     let body = body.map_or_else(Body::empty, |b| Body::from(b.to_string()));
     let res = app
         .clone()
-        .oneshot(Request::post(format!("/api/rpc/{cmd}")).body(body).unwrap())
+        .oneshot(
+            Request::post(format!("/api/rpc/{cmd}"))
+                .header("content-type", "application/json")
+                .body(body)
+                .unwrap(),
+        )
         .await
         .unwrap();
     let status = res.status();
@@ -87,6 +92,48 @@ async fn errors_use_the_app_error_shape() {
 }
 
 #[tokio::test]
+async fn rejects_cross_site_and_form_posts() {
+    let (app, state, ..) = app(None).await;
+    cvd_core::services::set_ui_setting(&state, "ui.k", "kept")
+        .await
+        .unwrap();
+    let cases = [
+        // An HTML form: no preflight, so it must not reach the command.
+        ("application/x-www-form-urlencoded", None),
+        ("text/plain", None),
+        ("application/json", Some("cross-site")),
+        ("application/json", Some("same-site")),
+    ];
+    for (content_type, site) in cases {
+        let mut req = Request::post("/api/rpc/set_ui_setting").header("content-type", content_type);
+        if let Some(site) = site {
+            req = req.header("sec-fetch-site", site);
+        }
+        let body = Body::from(json!({ "key": "ui.k", "value": "overwritten" }).to_string());
+        let res = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::FORBIDDEN,
+            "{content_type} {site:?}"
+        );
+    }
+    let kept = cvd_core::services::get_ui_setting(&state, "ui.k")
+        .await
+        .unwrap();
+    assert_eq!(kept.as_deref(), Some("kept"));
+
+    let req = Request::post("/api/rpc/get_ui_setting")
+        .header("content-type", "application/json; charset=utf-8")
+        .header("sec-fetch-site", "same-origin")
+        .body(Body::from(json!({ "key": "ui.k" }).to_string()))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn desktop_only_commands_explain_themselves() {
     let (app, ..) = app(None).await;
     for cmd in rpc::DESKTOP_ONLY {
@@ -129,7 +176,7 @@ async fn events_stream_carries_emitted_events() {
     (events.emitter())("db://changed", json!({ "tables": ["job_description"] }));
     let text = tokio::time::timeout(Duration::from_secs(5), async {
         let mut text = String::new();
-        while !text.contains("\n\n") {
+        while text.matches("\n\n").count() < 2 {
             let frame = body.frame().await.unwrap().unwrap();
             if let Ok(data) = frame.into_data() {
                 text.push_str(std::str::from_utf8(&data).unwrap());
@@ -139,7 +186,23 @@ async fn events_stream_carries_emitted_events() {
     })
     .await
     .unwrap();
-    let data = text.lines().find_map(|l| l.strip_prefix("data: ")).unwrap();
+    let mut frames = text.split("\n\n");
+    let ready = frames.next().unwrap();
+    assert!(ready.lines().any(|l| l == "event: ready"), "{ready}");
+    let tables = ready
+        .lines()
+        .find_map(|l| l.strip_prefix("data: "))
+        .unwrap();
+    assert!(serde_json::from_str::<Value>(tables).unwrap()["tables"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("match_run")));
+    let data = frames
+        .next()
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix("data: "))
+        .unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(data).unwrap(),
         json!({ "event": "db://changed", "payload": { "tables": ["job_description"] } })

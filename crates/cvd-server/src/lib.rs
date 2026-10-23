@@ -6,7 +6,7 @@ use std::{convert::Infallible, path::Path, sync::Arc};
 use axum::{
     body::Bytes,
     extract::{Path as UrlPath, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -73,7 +73,32 @@ pub fn router(state: Arc<AppState>, events: Events, static_dir: Option<&Path>) -
     }
 }
 
-async fn call(State(ctx): State<Ctx>, UrlPath(command): UrlPath<String>, body: Bytes) -> Response {
+/// Browsers can't send `application/json` cross-site without a CORS preflight, which this
+/// server never grants, and `Sec-Fetch-Site` flags the rest. Forms and no-cors fetches fail here.
+fn same_origin_json(headers: &HeaderMap) -> bool {
+    let json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(';').next().unwrap_or("").trim() == "application/json");
+    let site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+    json && matches!(site, None | Some("same-origin") | Some("none"))
+}
+
+async fn call(
+    State(ctx): State<Ctx>,
+    UrlPath(command): UrlPath<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if !same_origin_json(&headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(AppError::Io(
+                "RPC needs a same-origin application/json request.".into(),
+            )),
+        )
+            .into_response();
+    }
     let args = if body.is_empty() {
         Ok(Value::Null)
     } else {
@@ -98,13 +123,24 @@ async fn call(State(ctx): State<Ctx>, UrlPath(command): UrlPath<String>, body: B
 async fn events_stream(
     State(ctx): State<Ctx>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(ctx.events.0.subscribe()).filter_map(|m| match m {
+    // Subscribe before `ready` so anything the client starts afterwards is delivered.
+    let events = BroadcastStream::new(ctx.events.0.subscribe());
+    // Lists every table so a reconnecting client can refetch what it missed while away.
+    let ready = Event::default()
+        .event("ready")
+        .json_data(json!({ "tables": CHANGE_TABLES }))
+        .ok()
+        .map(Ok);
+    let stream =
+        tokio_stream::iter(ready).chain(events.filter_map(|m| {
+            match m {
         Ok(m) => Event::default().json_data(m).ok().map(Ok),
         // A slow client missed events; tell it to refetch everything.
         Err(_) => Event::default()
             .json_data(json!({ "event": DB_CHANGED_EVENT, "payload": { "tables": CHANGE_TABLES } }))
             .ok()
             .map(Ok),
-    });
+    }
+        }));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

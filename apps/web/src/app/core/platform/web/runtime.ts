@@ -4,15 +4,34 @@ import type { Platform } from '../platform';
 type Handler = (event: { payload: unknown }) => void;
 const handlers = new Map<string, Set<Handler>>();
 let source: EventSource | null = null;
+let ready: Promise<void> | null = null;
 
-/** One `EventSource` for all listeners; frames are `{ event, payload }`. */
-function connect(): void {
-  if (source) return;
+function dispatch(event: string, payload: unknown): void {
+  handlers.get(event)?.forEach((cb) => cb({ payload }));
+}
+
+/**
+ * One `EventSource` for all listeners; frames are `{ event, payload }`. Resolves once the
+ * server has subscribed us (its `ready` frame), so callers can start work without losing events.
+ * Events sent while disconnected are gone, so every reconnect refreshes all tables.
+ */
+function connect(): Promise<void> {
+  if (ready) return ready;
   source = new EventSource('/api/events');
+  let opened = false;
+  ready = new Promise((resolve) => {
+    source!.addEventListener('ready', (msg) => {
+      const { tables } = JSON.parse((msg as MessageEvent<string>).data) as { tables: string[] };
+      if (opened) dispatch('db://changed', { tables });
+      opened = true;
+      resolve();
+    });
+  });
   source.onmessage = (msg) => {
     const { event, payload } = JSON.parse(msg.data) as { event: string; payload: unknown };
-    handlers.get(event)?.forEach((cb) => cb({ payload }));
+    dispatch(event, payload);
   };
+  return ready;
 }
 
 /** Talks to cvd-server: `POST /api/rpc/:command` and server-sent events on `/api/events`. */
@@ -30,7 +49,7 @@ export const transport: Transport = {
     return value as T;
   },
   async listen<T>(event: string, cb: (event: { payload: T }) => void) {
-    connect();
+    await connect();
     const set = handlers.get(event) ?? new Set<Handler>();
     handlers.set(event, set);
     set.add(cb as Handler);

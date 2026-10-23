@@ -23,21 +23,40 @@ describe('web platform', () => {
     await expect(transport.call('get_job', { id: 9 })).rejects.toEqual(error);
   });
 
-  it('demuxes one event stream to listeners by event name', async () => {
-    const sources: { onmessage: ((m: { data: string }) => void) | null }[] = [];
-    vi.stubGlobal('EventSource', class { onmessage = null; constructor() { sources.push(this); } });
+  it('waits for the server to subscribe, demuxes by event, and refreshes after a reconnect', async () => {
+    type Listener = (m: { data: string }) => void;
+    const sources: { onmessage: Listener | null; ready: Listener[] }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: Listener | null = null;
+      ready: Listener[] = [];
+      constructor() { sources.push(this); }
+      addEventListener(type: string, cb: Listener) { if (type === 'ready') this.ready.push(cb); }
+    });
     try {
       const changed = vi.fn();
       const progress = vi.fn();
-      const unlisten = await transport.listen('db://changed', changed);
+      let subscribed = false;
+      const pending = transport.listen('db://changed', changed).then((u) => { subscribed = true; return u; });
+      await Promise.resolve();
+      expect(subscribed).toBe(false);
+      const ready = (tables: string[]) => sources[0].ready.forEach((cb) => cb({ data: JSON.stringify({ tables }) }));
+      ready(['entry', 'match_run']);
+      const unlisten = await pending;
       await transport.listen('match://progress', progress);
       expect(sources).toHaveLength(1);
+      // The first `ready` is the initial connection, not a reconnect.
+      expect(changed).not.toHaveBeenCalled();
+
       sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: ['entry'] } }) });
       expect(changed).toHaveBeenCalledWith({ payload: { tables: ['entry'] } });
       expect(progress).not.toHaveBeenCalled();
+
+      ready(['entry', 'match_run']);
+      expect(changed).toHaveBeenLastCalledWith({ payload: { tables: ['entry', 'match_run'] } });
+
       unlisten();
       sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: [] } }) });
-      expect(changed).toHaveBeenCalledOnce();
+      expect(changed).toHaveBeenCalledTimes(2);
     } finally {
       vi.unstubAllGlobals();
     }
