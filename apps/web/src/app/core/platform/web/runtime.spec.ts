@@ -38,8 +38,11 @@ describe('web platform', () => {
   it('waits for the server to subscribe, demuxes by event, and refreshes after a reconnect', async () => {
     type Listener = (m: { data: string }) => void;
     const sources: { onmessage: Listener | null; ready: Listener[] }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(server('null'));
     vi.stubGlobal('EventSource', class {
+      static CLOSED = 2;
       onmessage: Listener | null = null;
+      onerror: (() => void) | null = null;
       ready: Listener[] = [];
       constructor() { sources.push(this); }
       addEventListener(type: string, cb: Listener) { if (type === 'ready') this.ready.push(cb); }
@@ -49,7 +52,7 @@ describe('web platform', () => {
       const progress = vi.fn();
       let subscribed = false;
       const pending = transport.listen('db://changed', changed).then((u) => { subscribed = true; return u; });
-      await Promise.resolve();
+      await vi.waitFor(() => expect(sources).toHaveLength(1));
       expect(subscribed).toBe(false);
       const ready = (tables: string[]) => sources[0].ready.forEach((cb) => cb({ data: JSON.stringify({ tables }) }));
       ready(['entry', 'match_run']);
@@ -69,7 +72,17 @@ describe('web platform', () => {
       unlisten();
       sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: [] } }) });
       expect(changed).toHaveBeenCalledTimes(2);
+
+      // An error response (e.g. 401) closes the source for good; we open a fresh one.
+      vi.useFakeTimers();
+      const closed = sources[0] as unknown as { readyState: number; onerror: (this: unknown) => void };
+      closed.readyState = 2;
+      closed.onerror.call(closed);
+      await vi.advanceTimersByTimeAsync(3000);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(sources).toHaveLength(2));
     } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

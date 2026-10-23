@@ -364,9 +364,12 @@ mod accounts {
     }
 
     fn token(user: uuid::Uuid) -> String {
+        token_expiring(user, chrono::Utc::now().timestamp() + 600)
+    }
+
+    fn token_expiring(user: uuid::Uuid, exp: i64) -> String {
         let mut header = Header::new(Algorithm::HS256);
         header.kid = Some("k1".into());
-        let exp = chrono::Utc::now().timestamp() + 600;
         let claims = json!({ "sub": user, "aud": "authenticated", "iss": ISSUER, "exp": exp });
         encode(&header, &claims, &EncodingKey::from_secret(SECRET)).unwrap()
     }
@@ -414,6 +417,28 @@ mod accounts {
             .body(Body::empty())
             .unwrap();
         assert_eq!(send(&app, cookie_call).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn the_event_stream_ends_when_its_token_expires() {
+        let (app, _dir) = app().await;
+        // Inside the verifier's clock-skew leeway, so accepted, but already past `exp`.
+        let t = token_expiring(UserId::LOCAL.0, chrono::Utc::now().timestamp() - 5);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/events")
+                    .header("authorization", format!("Bearer {t}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = tokio::time::timeout(Duration::from_secs(5), res.into_body().collect())
+            .await
+            .expect("stream should close at the token's expiry");
+        assert!(body.is_ok());
     }
 
     #[tokio::test]

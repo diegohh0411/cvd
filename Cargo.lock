@@ -1421,6 +1421,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cvd-core",
+ "futures-util",
  "http-body-util",
  "jsonwebtoken",
  "reqwest",

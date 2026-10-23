@@ -3,7 +3,7 @@ pub mod auth;
 pub mod rpc;
 pub mod tenants;
 
-use std::{convert::Infallible, path::Path, sync::Arc};
+use std::{convert::Infallible, path::Path, sync::Arc, time::SystemTime};
 
 use axum::{
     body::Bytes,
@@ -89,9 +89,9 @@ impl Access {
         &self,
         headers: &HeaderMap,
         allow_cookie: bool,
-    ) -> Result<Arc<Tenant>, Response> {
+    ) -> Result<(Arc<Tenant>, Option<SystemTime>), Response> {
         let (verifier, tenants) = match self {
-            Access::Open(t) => return Ok(t.clone()),
+            Access::Open(t) => return Ok((t.clone(), None)),
             Access::Accounts {
                 verifier, tenants, ..
             } => (verifier, tenants),
@@ -101,21 +101,22 @@ impl Access {
                 .then(|| cookie(headers, TOKEN_COOKIE))
                 .flatten()
         });
-        let user = match token {
+        let session = match token {
             None => Err(AuthError::Missing),
             Some(t) => verifier.verify(t).await,
         };
-        let user = user.map_err(|e| {
+        let session = session.map_err(|e| {
             let status = match e {
                 AuthError::Keys(_) => StatusCode::SERVICE_UNAVAILABLE,
                 _ => StatusCode::UNAUTHORIZED,
             };
             (status, Json(AppError::Io(e.to_string()))).into_response()
         })?;
-        tenants.get(user).await.map_err(|e| {
-            tracing::error!(user = %user.0, error = %e, "couldn't start user services");
+        let tenant = tenants.get(session.user).await.map_err(|e| {
+            tracing::error!(user = %session.user.0, error = %e, "couldn't start user services");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response()
-        })
+        })?;
+        Ok((tenant, Some(session.expires_at)))
     }
 }
 
@@ -201,7 +202,7 @@ async fn call(
             .into_response();
     }
     let tenant = match ctx.access.tenant(&headers, false).await {
-        Ok(t) => t,
+        Ok((t, _)) => t,
         Err(res) => return res,
     };
     let args = if body.is_empty() {
@@ -227,12 +228,16 @@ async fn call(
 
 async fn events_stream(State(ctx): State<Ctx>, headers: HeaderMap) -> Response {
     match ctx.access.tenant(&headers, true).await {
-        Ok(tenant) => stream(&tenant.events).into_response(),
+        Ok((tenant, expires_at)) => stream(&tenant.events, expires_at).into_response(),
         Err(res) => res,
     }
 }
 
-fn stream(events: &Events) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+/// Ends when the token expires; `EventSource` reconnects with the refreshed cookie.
+fn stream(
+    events: &Events,
+    expires_at: Option<SystemTime>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     // Subscribe before `ready` so anything the client starts afterwards is delivered.
     let events = BroadcastStream::new(events.0.subscribe());
     // Lists every table so a reconnecting client can refetch what it missed while away.
@@ -252,5 +257,15 @@ fn stream(events: &Events) -> Sse<impl Stream<Item = Result<Event, Infallible>>>
             .map(Ok),
     }
         }));
+    let deadline = async move {
+        match expires_at {
+            Some(t) => {
+                let left = t.duration_since(SystemTime::now()).unwrap_or_default();
+                tokio::time::sleep(left).await
+            }
+            None => std::future::pending().await,
+        }
+    };
+    let stream = futures_util::StreamExt::take_until(stream, Box::pin(deadline));
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

@@ -10,6 +10,8 @@ interface ServerConfig {
 }
 
 let client: Promise<SupabaseClient | null> | null = null;
+/** Whose data this page loaded; `undefined` until the session is first restored. */
+let loadedFor: string | null | undefined;
 
 /** `null` when the server runs without accounts (local dev). */
 function supabase(): Promise<SupabaseClient | null> {
@@ -18,7 +20,12 @@ function supabase(): Promise<SupabaseClient | null> {
     .then(({ auth }) => {
       if (!auth) return null;
       const sb = createClient(auth.supabaseUrl, auth.supabaseAnonKey);
-      sb.auth.onAuthStateChange((_event, session) => setCookie(session));
+      sb.auth.onAuthStateChange((_event, session) => {
+        setCookie(session);
+        // Another tab signed out or into a different account: this page's stores, open
+        // forms and event stream belong to the old one, so start over.
+        if (loadedFor !== undefined && (session?.user.id ?? null) !== loadedFor) location.reload();
+      });
       return sb;
     })
     .catch((e: unknown) => {
@@ -34,6 +41,14 @@ function setCookie(session: Session | null): void {
   document.cookie = session
     ? `${TOKEN_COOKIE}=${session.access_token}; Path=/api/events; SameSite=Strict${secure}`
     : `${TOKEN_COOKIE}=; Path=/api/events; Max-Age=0; SameSite=Strict${secure}`;
+}
+
+/** Writes the current session to the event-stream cookie; call before connecting. */
+export async function syncSession(): Promise<void> {
+  const sb = await supabase();
+  if (!sb) return;
+  const { data } = await sb.auth.getSession();
+  setCookie(data.session);
 }
 
 /** The current access token, refreshed first if it has expired. */
@@ -59,6 +74,7 @@ export const auth: PlatformAuth = {
     if (!sb) return null;
     const { data } = await sb.auth.getSession();
     setCookie(data.session);
+    loadedFor ??= data.session?.user.id ?? null;
     return { signedIn: data.session !== null, email: data.session?.user.email ?? null };
   },
   async signInWithGoogle() {
