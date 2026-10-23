@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { platform, transport } from './runtime';
 
+/** Answers `/api/config` as a server without accounts, everything else with `body`. */
+const server = (body: string, init?: ResponseInit) => async (url: unknown) =>
+  url === '/api/config' ? new Response('{"auth":null}') : new Response(body, init);
+
 afterEach(() => vi.restoreAllMocks());
 
 describe('web platform', () => {
@@ -10,16 +14,24 @@ describe('web platform', () => {
   });
 
   it('posts camelCase args to the RPC route and returns the JSON result', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[1,2]'));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(server('[1,2]'));
     expect(await transport.call('list_runs', { jdId: 3 })).toEqual([1, 2]);
     expect(fetch).toHaveBeenCalledWith('/api/rpc/list_runs', expect.objectContaining({ method: 'POST', body: '{"jdId":3}' }));
-    fetch.mockResolvedValue(new Response(''));
+    fetch.mockImplementation(server(''));
     expect(await transport.call('mark_all_read')).toBeNull();
+  });
+
+  it('asks the server whether it has accounts before calling', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(server('null'));
+    await transport.call('list_jobs');
+    // No accounts: no Authorization header.
+    const rpc = fetch.mock.calls.find(([url]) => url === '/api/rpc/list_jobs');
+    expect(rpc?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' });
   });
 
   it('rejects with the AppError body the server returns', async () => {
     const error = { kind: 'NotFound', message: 'Job not found.' };
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(error), { status: 400 }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(server(JSON.stringify(error), { status: 400 }));
     await expect(transport.call('get_job', { id: 9 })).rejects.toEqual(error);
   });
 

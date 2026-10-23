@@ -1,5 +1,6 @@
 import type { Transport } from '../transport';
 import type { Platform } from '../platform';
+import { accessToken, auth } from './auth';
 
 type Handler = (event: { payload: unknown }) => void;
 const handlers = new Map<string, Set<Handler>>();
@@ -37,9 +38,10 @@ function connect(): Promise<void> {
 /** Talks to cvd-server: `POST /api/rpc/:command` and server-sent events on `/api/events`. */
 export const transport: Transport = {
   async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    const token = await accessToken();
     const res = await fetch(`/api/rpc/${cmd}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(args ?? {}),
     });
     const body = await res.text();
@@ -58,6 +60,7 @@ export const transport: Transport = {
 };
 export const platform: Platform = {
   capabilities: { autoApply: false, updater: false, revealInFolder: false, localServer: false },
+  auth,
   async openUrl(url) { window.open(url, '_blank', 'noopener,noreferrer'); },
   async saveFile(bytes, suggestedName) {
     const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }));

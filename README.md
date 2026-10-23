@@ -84,8 +84,10 @@ The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio
 
 ### Web server (dev)
 
-`crates/cvd-server` serves the same commands over HTTP for the browser build. It
-runs as one fixed user until auth lands (#67) and binds to 127.0.0.1.
+`crates/cvd-server` serves the same commands over HTTP for the browser build. With
+`SUPABASE_URL` and `SUPABASE_ANON_KEY` set it requires Supabase Auth (Google or email
+magic link); without them it runs as one fixed dev user. It binds to 127.0.0.1
+unless `CVD_HOST` says otherwise.
 
 ```sh
 bun run build:web
@@ -100,6 +102,15 @@ connection (the change feed needs `LISTEN`). `CVD_MIGRATE_URL` is optional and r
 migrations at startup. `CVD_DEV_USER_ID` defaults to the nil UUID and must exist in
 `auth.users`; its default statuses and view are created on first start.
 `CVD_STATIC_DIR` and `CVD_PORT` override the web build path and port (8787).
+
+With accounts, the web build reads the project from `GET /api/config` and sends the
+session's access token as `Authorization: Bearer` on RPC calls; the SSE stream reads it
+from the `cvd_access_token` cookie, since `EventSource` can't set headers. The server
+verifies tokens against the project's JWKS (`aud` `authenticated`, `iss`, `exp`), maps
+`sub` to the tenant whose transactions set `app.user_id` for RLS, and seeds a new user's
+default statuses and view on their first request. Missing or invalid tokens get 401.
+The web build is served from the same origin, so no CORS is granted; in the Supabase
+dashboard, enable the Google provider and add the deployed origin to the redirect URLs.
 
 `POST /api/rpc/:command` takes the same camelCase JSON args as `invoke` and fails
 with the same `{ kind, message }` body. `GET /api/events` is an SSE stream of

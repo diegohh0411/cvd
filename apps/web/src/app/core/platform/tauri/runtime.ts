@@ -11,6 +11,12 @@ import type { Platform } from '../platform';
 export const transport: Transport = { call: invoke, listen };
 export const platform: Platform = {
   capabilities: { autoApply: true, updater: true, revealInFolder: true, localServer: true },
+  auth: {
+    async init() { return null; },
+    async signInWithGoogle() { throw new Error('Desktop has no accounts'); },
+    async signInWithEmail() { throw new Error('Desktop has no accounts'); },
+    async signOut() {},
+  },
   openUrl, reveal: revealItemInDir,
   openFile: (path) => openPath(path).catch(() => revealItemInDir(path)),
   version: getVersion, checkForUpdates: check, relaunch,

@@ -1,17 +1,22 @@
-//! Dev server: one fixed user until auth lands in #67.
+//! Web server. With `SUPABASE_URL` and `SUPABASE_ANON_KEY` set, every request needs a Supabase
+//! access token and each user gets their own services; without them it runs as one dev user.
 //!
 //! - `DATABASE_URL`: runtime role (no superuser/BYPASSRLS), direct or session-mode connection
 //! - `CVD_MIGRATE_URL`: optional schema-owner URL; migrations run on startup when set
-//! - `CVD_DEV_USER_ID`: an existing `auth.users` id (default: the nil UUID)
+//! - `SUPABASE_URL`, `SUPABASE_ANON_KEY`: the project the web build signs in to
+//! - `CVD_DEV_USER_ID`: without Supabase, an existing `auth.users` id (default: the nil UUID)
+//! - `CVD_HOST`: address to bind (default 127.0.0.1)
 //! - `CVD_STATIC_DIR`: web build to serve (default `apps/web/dist/cvd/browser`)
-//! - `CVD_PORT`: port on 127.0.0.1 (default 8787)
-use std::{net::SocketAddr, path::PathBuf};
+//! - `CVD_PORT`: port (default 8787)
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-use cvd_core::{
-    core,
-    store::{ChangeFeed, Store, UserId},
+use cvd_core::store::{ChangeFeed, Store, UserId};
+use cvd_server::{
+    auth::Verifier,
+    router_with,
+    tenants::{Tenant, Tenants},
+    Access, ClientAuth,
 };
-use cvd_server::{router, Events};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -32,22 +37,30 @@ async fn main() -> Result<(), Error> {
     if let Some(owner) = env("CVD_MIGRATE_URL") {
         Store::migrate_postgres(&owner).await?;
     }
-    let user = UserId(match env("CVD_DEV_USER_ID") {
-        Some(id) => id.parse()?,
-        None => uuid::Uuid::nil(),
-    });
     let store = Store::open_postgres(&url).await?;
-    let tenant = store.for_user(user);
-    // Dev stand-in for sign-up provisioning. Users can delete every status later, so only a
-    // user with neither statuses nor views is fresh; defaults are inserted all-or-nothing.
-    if tenant.list_job_statuses().await?.is_empty() && tenant.list_job_views().await?.is_empty() {
-        store.create_user_defaults(user).await?;
-    }
-
-    let events = Events::default();
-    let state = core::start(tenant, events.emitter()).await?;
     let feed = ChangeFeed::connect(&url).await?;
-    core::forward_changes(feed.subscribe(user), events.emitter());
+    let access = match (env("SUPABASE_URL"), env("SUPABASE_ANON_KEY")) {
+        (Some(supabase_url), Some(supabase_anon_key)) => {
+            tracing::info!(%supabase_url, "accounts enabled");
+            Access::Accounts {
+                verifier: Verifier::supabase(&supabase_url),
+                tenants: Tenants::new(store, Some(feed)),
+                client: ClientAuth {
+                    supabase_url,
+                    supabase_anon_key,
+                },
+            }
+        }
+        (None, None) => {
+            let user = UserId(match env("CVD_DEV_USER_ID") {
+                Some(id) => id.parse()?,
+                None => uuid::Uuid::nil(),
+            });
+            tracing::warn!(user = %user.0, "no Supabase configured; every request is this user");
+            Access::Open(Arc::new(Tenant::start(&store, Some(&feed), user).await?))
+        }
+        _ => return Err("set both SUPABASE_URL and SUPABASE_ANON_KEY, or neither".into()),
+    };
 
     let static_dir = env("CVD_STATIC_DIR")
         .map(PathBuf::from)
@@ -55,21 +68,24 @@ async fn main() -> Result<(), Error> {
     if !static_dir.join("index.html").is_file() {
         tracing::warn!(dir = %static_dir.display(), "no web build found; run `bun run build:web`");
     }
-    let app = router(state, events, Some(&static_dir))
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+    let app =
+        router_with(access, Some(&static_dir)).layer(tower_http::trace::TraceLayer::new_for_http());
 
     let port = env("CVD_PORT")
         .map(|p| p.parse())
         .transpose()?
         .unwrap_or(8787);
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let host: std::net::IpAddr = env("CVD_HOST")
+        .map(|h| h.parse())
+        .transpose()?
+        .unwrap_or([127, 0, 0, 1].into());
+    let addr = SocketAddr::from((host, port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(user = %user.0, "listening on http://{addr}");
+    tracing::info!("listening on http://{addr}");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
-    drop(feed);
     Ok(())
 }
