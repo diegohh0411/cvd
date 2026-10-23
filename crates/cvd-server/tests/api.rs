@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use axum::{
     body::Body,
@@ -51,7 +55,7 @@ async fn rpc(app: &Router, cmd: &str, body: Option<Value>) -> (StatusCode, Value
 
 #[tokio::test]
 async fn calls_commands_with_camel_case_args() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, statuses) = rpc(&app, "list_job_statuses", None).await;
     assert_eq!(status, StatusCode::OK);
     let status_id = statuses[0]["id"].clone();
@@ -76,10 +80,10 @@ async fn calls_commands_with_camel_case_args() {
 
 #[tokio::test]
 async fn errors_use_the_app_error_shape() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, body) = rpc(&app, "get_job", Some(json!({ "id": 999 }))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(body["kind"], "NotFound");
+    assert_eq!(body["kind"], "NotFound", "{body}");
     assert!(body["message"].is_string());
 
     let (status, body) = rpc(&app, "get_job", Some(json!({ "id": "x" }))).await;
@@ -93,7 +97,7 @@ async fn errors_use_the_app_error_shape() {
 
 #[tokio::test]
 async fn rejects_cross_site_and_form_posts() {
-    let (app, state, ..) = app(None).await;
+    let (app, state, _events, _dir) = app(None).await;
     cvd_core::services::set_ui_setting(&state, "ui.k", "kept")
         .await
         .unwrap();
@@ -135,7 +139,7 @@ async fn rejects_cross_site_and_form_posts() {
 
 #[tokio::test]
 async fn desktop_only_commands_explain_themselves() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     for cmd in rpc::DESKTOP_ONLY {
         let (status, body) = rpc(&app, cmd, Some(json!({ "jobId": 1 }))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{cmd}");
@@ -151,7 +155,7 @@ async fn desktop_only_commands_explain_themselves() {
 
 #[tokio::test]
 async fn export_returns_pdf_bytes_without_a_path() {
-    let (app, ..) = app(None).await;
+    let (app, _state, _events, _dir) = app(None).await;
     let (status, body) = rpc(
         &app,
         "export_cv",
@@ -214,7 +218,7 @@ async fn serves_the_web_build_with_spa_fallback() {
     let web = tempfile::tempdir().unwrap();
     std::fs::write(web.path().join("index.html"), "<app-root>").unwrap();
     std::fs::write(web.path().join("main.js"), "boot()").unwrap();
-    let (app, ..) = app(Some(web.path())).await;
+    let (app, _state, _events, _dir) = app(Some(web.path())).await;
     for (path, expected) in [
         ("/main.js", "boot()"),
         ("/", "<app-root>"),
@@ -231,46 +235,99 @@ async fn serves_the_web_build_with_spa_fallback() {
     }
 }
 
-fn names(src: &str, re: impl Fn(&str) -> Option<&str>) -> BTreeSet<String> {
-    src.lines()
-        .filter_map(|l| re(l.trim()))
-        .map(str::to_owned)
-        .collect()
+fn camel(snake: &str) -> String {
+    let mut parts = snake.split('_');
+    let mut out = parts.next().unwrap_or_default().to_owned();
+    for p in parts {
+        let mut c = p.chars();
+        out.extend(c.next().map(|c| c.to_ascii_uppercase()));
+        out.push_str(c.as_str());
+    }
+    out
 }
 
-/// Every desktop command is either served or explicitly desktop-only, and nothing else.
-#[test]
-fn matches_the_desktop_command_set() {
-    let src = include_str!("../../../apps/desktop/src-tauri/src/lib.rs");
-    let handler = &src[src.find("generate_handler![").unwrap()..];
-    let handler = &handler[..handler.find("])").unwrap()];
-    let desktop = names(handler, |l| {
-        l.strip_suffix(',').and_then(|l| l.rsplit("::").next())
-    });
-    let server: BTreeSet<String> = rpc::COMMANDS
-        .iter()
-        .chain(rpc::DESKTOP_ONLY)
-        .map(|c| c.to_string())
-        .collect();
-    assert_eq!(server, desktop);
-}
-
-/// Every command the frontend calls is routable.
-#[test]
-fn covers_the_frontend_commands() {
-    let src = include_str!("../../../apps/web/src/app/core/ipc/commands.ts");
-    let server: BTreeSet<&str> = rpc::COMMANDS
-        .iter()
-        .chain(rpc::DESKTOP_ONLY)
-        .copied()
-        .collect();
-    let called: Vec<&str> = src
+/// `call<T>('name', { a, b: x })` in the frontend, as name -> argument names.
+fn frontend_calls() -> BTreeMap<String, BTreeSet<String>> {
+    let src = [
+        include_str!("../../../apps/web/src/app/core/ipc/commands.ts"),
+        include_str!("../../../apps/web/src/app/core/platform/tauri/runtime.ts"),
+    ]
+    .concat();
+    let calls: BTreeMap<_, _> = src
         .split("call<")
         .skip(1)
-        .filter_map(|s| s.split_once(">('").and_then(|(_, r)| r.split('\'').next()))
+        .filter_map(|s| {
+            let (_, rest) = s.split_once(">('")?;
+            let (name, rest) = rest.split_once('\'')?;
+            let args = match rest.strip_prefix(", {") {
+                Some(r) => r[..r.find('}')?]
+                    .split(',')
+                    .map(|a| a.split(':').next().unwrap_or_default().trim())
+                    .filter(|a| !a.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                None => BTreeSet::new(),
+            };
+            Some((name.to_owned(), args))
+        })
         .collect();
-    assert!(called.len() > 40, "parsed {} calls", called.len());
-    for cmd in called {
-        assert!(server.contains(cmd), "{cmd}");
+    assert!(calls.len() > 40, "parsed {} calls", calls.len());
+    calls
+}
+
+/// Every frontend call names a registered command with the registry's camelCase
+/// argument names. Shared commands expand from the registry on both transports;
+/// the desktop crate holds its hand-written commands to the registry's arguments.
+#[test]
+fn frontend_matches_the_command_registry() {
+    use cvd_core::commands::{DESKTOP_ONLY, HANDWRITTEN, PER_TRANSPORT, SHARED};
+    let calls = frontend_calls();
+    let registered: BTreeSet<&str> = SHARED
+        .iter()
+        .map(|(n, _)| *n)
+        .chain(DESKTOP_ONLY.iter().copied())
+        .chain(PER_TRANSPORT.iter().copied())
+        .collect();
+    for name in calls.keys() {
+        assert!(
+            registered.contains(name.as_str()),
+            "{name} is not registered"
+        );
     }
+    for (name, args) in SHARED.iter().chain(HANDWRITTEN) {
+        let want: BTreeSet<String> = args.iter().map(|a| camel(a)).collect();
+        if let Some(have) = calls.get(*name) {
+            assert_eq!(have, &want, "{name}");
+        }
+    }
+}
+
+/// Every shared and per-transport command routes; none falls through to 404.
+#[tokio::test]
+async fn every_registered_command_is_routable() {
+    let (app, _state, _events, _dir) = app(None).await;
+    for cmd in rpc::commands() {
+        // Commands with arguments stop at argument parsing; skip the arg-less ones with side effects.
+        if matches!(cmd, "start_scan" | "retry_watcher") {
+            continue;
+        }
+        let (status, _) = rpc(&app, cmd, Some(json!({}))).await;
+        assert_ne!(status, StatusCode::NOT_FOUND, "{cmd}");
+    }
+    let (status, _) = rpc(&app, "no_such_command", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// The server takes the desktop's arguments for per-transport commands.
+#[tokio::test]
+async fn per_transport_commands_accept_the_desktop_arguments() {
+    let (app, _state, _events, _dir) = app(None).await;
+    let (_, body) = rpc(
+        &app,
+        "export_cv",
+        Some(json!({ "runId": 1, "selection": { "entries": [], "skills": [] }, "path": "/tmp/x.pdf" })),
+    )
+    .await;
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(!message.contains("invalid arguments"), "{message}");
 }

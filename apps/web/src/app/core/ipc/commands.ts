@@ -1,5 +1,5 @@
-// One typed wrapper per Tauri command (apps/desktop/crates/cvd-core/src/ipc.rs).
-// Argument names are camelCase: Tauri maps them to the snake_case parameters.
+// One typed wrapper per IPC command (registry: crates/cvd-core/src/commands.rs).
+// Argument names are camelCase: both transports map them to the snake_case parameters.
 import { transport } from '../platform/runtime';
 
 import { toAppError } from './errors';

@@ -59,7 +59,7 @@ impl ModelRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct RemoteModel {
     pub provider: String,
     pub id: String,

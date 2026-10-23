@@ -393,14 +393,3 @@ impl Sessions {
             .remove(label);
     }
 }
-
-/// The single command remote pages may call (see `capabilities/apply.json`).
-#[tauri::command]
-pub async fn autofill_bridge(
-    window: WebviewWindow,
-    st: tauri::State<'_, Arc<AppState>>,
-    sessions: tauri::State<'_, Sessions>,
-    msg: Value,
-) -> Result<(), AppError> {
-    handle_bridge(&window, &st, &sessions, msg).await
-}

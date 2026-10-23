@@ -53,14 +53,14 @@ pub enum MatchError {
     Cancelled { run_id: i64 },
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct RankedEntry {
     pub entry: Entry,
     pub score: f64,
     pub bullets: Vec<(Bullet, f64)>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct Ranked {
     pub entries: Vec<RankedEntry>,
     pub skills: Vec<(Skill, f64)>,

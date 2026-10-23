@@ -13,7 +13,7 @@ use crate::store::{StoreError, TenantStore as Store};
 
 const CACHE_TTL: Duration = Duration::from_secs(600);
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct ProviderModels {
     /// The connection id (`openrouter`, `openrouter~2`): what model refs carry.
     pub provider: String,

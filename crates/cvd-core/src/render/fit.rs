@@ -7,7 +7,7 @@ use super::{Compiled, CvDoc, CvItem, CvSection, RenderError, SectionHeading, Sty
 use crate::matcher::Ranked;
 use crate::store::types::{Entry, EntryKind, Profile};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SelectedEntry {
     pub entry_id: i64,
     /// In stored position order.
@@ -16,19 +16,19 @@ pub struct SelectedEntry {
 }
 
 /// Entries in render order (section, then date or explicit order).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Selection {
     pub entries: Vec<SelectedEntry>,
     pub skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub enum Target {
     Entry(i64),
     Bullet(i64),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub enum Override {
     Include(Target),
     Exclude(Target),

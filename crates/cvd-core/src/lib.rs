@@ -1,6 +1,8 @@
 //! Shared domain logic and runtime-independent application services.
 
 pub mod autofill;
+pub mod bindings;
+pub mod commands;
 pub mod company;
 pub mod core;
 pub mod engine;

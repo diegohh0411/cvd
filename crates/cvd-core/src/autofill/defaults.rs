@@ -5,7 +5,7 @@ pub const APPLY_DEFAULTS_KEY: &str = "apply.defaults";
 
 /// Answers that are not in the CV but come up on most application forms.
 /// Every field is optional: empty or `None` means "leave it for the user".
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(default)]
 pub struct ApplyDefaults {
     /// Overrides for the split of `Profile.name`.

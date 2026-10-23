@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS,
+)]
 pub struct Profile {
     pub name: String,
     pub headline: String,
@@ -13,7 +15,9 @@ pub struct Profile {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     Experience,
@@ -22,7 +26,7 @@ pub enum EntryKind {
     Volunteer,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct Bullet {
     pub id: i64,
     pub entry_id: i64,
@@ -30,14 +34,14 @@ pub struct Bullet {
     pub position: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct Skill {
     pub id: i64,
     pub name: String,
     pub category: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct Entry {
     pub id: i64,
     pub kind: EntryKind,
@@ -55,7 +59,7 @@ pub struct Entry {
 }
 
 /// Writable fields of an entry. `id: Some(_)` updates, `None` inserts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct EntryInput {
     pub id: Option<i64>,
     pub kind: EntryKind,
@@ -73,7 +77,7 @@ pub struct EntryInput {
     pub skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct JobDescription {
     pub id: i64,
     pub title: String,
@@ -89,7 +93,9 @@ pub struct JobDescription {
 }
 
 /// Notion's label palette; the UI maps each to light/dark styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusColor {
     Gray,
@@ -104,7 +110,7 @@ pub enum StatusColor {
 }
 
 /// A user-editable application status label (Bookmarked, Applied, ...).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, ts_rs::TS)]
 pub struct JobStatus {
     pub id: i64,
     pub name: String,
@@ -112,7 +118,7 @@ pub struct JobStatus {
     pub position: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewLayout {
     Table,
@@ -120,26 +126,30 @@ pub enum ViewLayout {
 }
 
 /// A saved view of the Jobs page. `filters`/`sorts` are opaque JSON arrays the UI defines.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct JobView {
     pub id: i64,
     pub name: String,
     pub layout: ViewLayout,
+    #[ts(type = "JobFilter[]")]
     pub filters: serde_json::Value,
+    #[ts(type = "JobSort[]")]
     pub sorts: serde_json::Value,
     pub position: i64,
 }
 
 /// Fields of a view to create or save.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct JobViewInput {
     pub name: String,
     pub layout: ViewLayout,
+    #[ts(type = "JobFilter[]")]
     pub filters: serde_json::Value,
+    #[ts(type = "JobSort[]")]
     pub sorts: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
     Running,
@@ -148,7 +158,7 @@ pub enum RunStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct MatchRun {
     pub id: i64,
     pub jd_id: i64,
@@ -159,7 +169,7 @@ pub struct MatchRun {
     pub company_researched_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetType {
     Entry,
@@ -168,7 +178,7 @@ pub enum TargetType {
     Meta,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct ScoreRow {
     pub run_id: i64,
     pub target_type: TargetType,
@@ -178,7 +188,7 @@ pub struct ScoreRow {
     pub score: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Cv {
     pub id: i64,
     pub jd_id: i64,
@@ -200,14 +210,14 @@ pub struct CvInput {
     pub file_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Source {
     pub url: String,
     pub title: String,
 }
 
 /// Researched (or hand-edited) facts about a company.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 pub struct CompanyProfile {
     pub summary: String,
     pub industry: String,
@@ -220,7 +230,7 @@ pub struct CompanyProfile {
     pub sources: Vec<Source>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum CompanyStatus {
     Pending,
@@ -228,7 +238,7 @@ pub enum CompanyStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Company {
     pub id: i64,
     pub name: String,

@@ -11,7 +11,7 @@ import { LocalProviderComponent } from './local-provider.component';
 import { RoleCardComponent } from './role-card.component';
 import { onlineOptions, providerOf, type Role, roleStatus } from './role-options';
 
-const localLists: ProviderModels[] = [{ provider: 'localhost', models: ['kev-4b', 'clef', 'chat-1', 'chat-2'].map(id => ({ provider: 'localhost', id, display_name: id, context_length: null, price_per_mtok_in: null })), error: null }];
+const localLists: ProviderModels[] = [{ provider: 'localhost', label: 'localhost', models: ['kev-4b', 'clef', 'chat-1', 'chat-2'].map(id => ({ provider: 'localhost', id, display_name: id, context_length: null, price_per_mtok_in: null })), error: null }];
 const conn = (id: string, provider: Connection['provider'], label: string): Connection => ({ id, provider, label, last4: '1234' });
 const OPENROUTER = conn('openrouter', 'openrouter', 'OpenRouter');
 const LOCAL = conn('localhost', 'localhost', 'Local server');
@@ -45,7 +45,7 @@ describe('AiModelsPageComponent connections', () => {
 
 describe('role options', () => {
   const remote: ProviderModels[] = [
-    { provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: null }], error: null },
+    { provider: 'openrouter', label: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: null }], error: null },
   ];
 
   it('tells providers apart by id', () => {
@@ -60,7 +60,7 @@ describe('role options', () => {
   it('prefixes online ids with the provider', () => {
     expect(onlineOptions(remote)[0]).toEqual({ id: 'openrouter:deepseek/x', label: 'DeepSeek X', installed: true, detail: '' });
     const subq: ProviderModels[] = [
-      { provider: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
+      { provider: 'subq', label: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
     ];
     expect(onlineOptions(subq)[0]).toEqual({ id: 'subq:subq-snap-preview', label: 'SubQ Snap', installed: true, detail: '$0.05 / M tokens' });
     expect(providerOf('subq:subq-snap-preview')).toBe('subq');
@@ -89,6 +89,7 @@ describe('RoleCardComponent', () => {
     ...localLists,
     {
       provider: 'openrouter',
+      label: 'openrouter',
       models: error ? [] : [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }],
       error,
     },
@@ -164,9 +165,9 @@ describe('RoleCardComponent', () => {
 
   const lists: ProviderModels[] = [
     ...localLists,
-    { provider: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }], error: null },
-    { provider: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
-    { provider: 'typesafe', models: [{ provider: 'typesafe', id: 'jev-latest', display_name: 'Jev (stable)', context_length: 64000, price_per_mtok_in: 0.042 }], error: null },
+    { provider: 'openrouter', label: 'openrouter', models: [{ provider: 'openrouter', id: 'deepseek/x', display_name: 'DeepSeek X', context_length: null, price_per_mtok_in: 0 }], error: null },
+    { provider: 'subq', label: 'subq', models: [{ provider: 'subq', id: 'subq-snap-preview', display_name: 'SubQ Snap', context_length: 393216, price_per_mtok_in: 0.05 }], error: null },
+    { provider: 'typesafe', label: 'typesafe', models: [{ provider: 'typesafe', id: 'jev-latest', display_name: 'Jev (stable)', context_length: 64000, price_per_mtok_in: 0.042 }], error: null },
   ];
 
   it('groups models by provider in one picker', async () => {

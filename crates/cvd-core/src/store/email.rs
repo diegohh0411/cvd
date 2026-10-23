@@ -1,7 +1,8 @@
 //! Shared mail persistence contracts.
 use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(rename = "ScanOutcome")]
 pub enum Outcome {
     Ignored,
     NoChange,
@@ -29,7 +30,8 @@ pub struct NewProcessed {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(rename = "ProcessedEmailRow")]
 pub struct ProcessedEmail {
     pub message_id: String,
     pub run_id: i64,
@@ -52,7 +54,7 @@ pub struct ProcessedEmail {
 }
 
 /// What started a scan run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanSource {
     Watch,
@@ -71,7 +73,7 @@ impl ScanSource {
 }
 
 /// Which inbox rows to list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum InboxFilter {
     All,
