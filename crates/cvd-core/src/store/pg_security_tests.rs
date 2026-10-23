@@ -142,6 +142,12 @@ async fn rls_blocks_unfiltered_reads_and_cross_tenant_writes_and_context_resets(
         .await
         .unwrap();
     assert_eq!(changed.rows_affected(), 0);
+    let deleted = sqlx::query("DELETE FROM settings WHERE user_id = $1")
+        .bind(b.user_id().0)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(deleted.rows_affected(), 0);
     tx.commit().await.unwrap();
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM settings")
         .fetch_one(&pool)
@@ -173,6 +179,23 @@ async fn rls_blocks_unfiltered_reads_and_cross_tenant_writes_and_context_resets(
         .await
         .unwrap();
     assert_eq!(count, 0, "tenant context must not survive rollback");
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.user_id', $1, true)")
+        .bind(a.user_id().0.to_string())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    // WITH CHECK also prevents transferring an owned row to another user.
+    let error = sqlx::query("UPDATE settings SET user_id = $1")
+        .bind(b.user_id().0)
+        .execute(&mut *tx)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.as_database_error().unwrap().code().as_deref(),
+        Some("42501")
+    );
+    tx.rollback().await.unwrap();
     assert_eq!(
         b.get_setting("private").await.unwrap().as_deref(),
         Some("b")
@@ -198,7 +221,95 @@ async fn all_tenant_tables_force_rls_and_unsafe_runtime_roles_are_rejected() {
     .await
     .unwrap();
     assert!(unprotected.is_empty(), "{unprotected:?}");
+    // Check the complete SQLite port, not just whichever tables happen to exist.
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT table_name::text FROM information_schema.columns
+         WHERE table_schema = 'public' AND column_name = 'user_id' ORDER BY table_name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let mut expected = vec![
+        "profile",
+        "entry",
+        "bullet",
+        "skill",
+        "entry_skill",
+        "job_description",
+        "match_run",
+        "match_score",
+        "cv",
+        "settings",
+        "job_status",
+        "secrets",
+        "company",
+        "company_alias",
+        "scan_run",
+        "processed_email",
+        "apply_memory",
+        "job_view",
+    ];
+    expected.sort();
+    assert_eq!(tables, expected);
+    for table in tables {
+        let valid: bool = sqlx::query_scalar(
+            "SELECT a.attnotnull AND a.atttypid = 'uuid'::regtype
+                AND EXISTS (SELECT 1 FROM pg_index i
+                    WHERE i.indrelid = c.oid AND i.indisvalid AND i.indkey[0] = a.attnum)
+                AND EXISTS (SELECT 1 FROM pg_constraint fk
+                    WHERE fk.conrelid = c.oid AND fk.contype = 'f'
+                    AND fk.confrelid = 'auth.users'::regclass
+                    AND fk.conkey = ARRAY[a.attnum] AND fk.confdeltype = 'c')
+                AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid
+                    AND p.polqual IS NOT NULL AND p.polwithcheck IS NOT NULL)
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'user_id'
+             WHERE n.nspname = 'public' AND c.relname = $1",
+        )
+        .bind(&table)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            valid,
+            "{table}: tenant id must be required, indexed, auth-cascaded and protected"
+        );
+    }
+    let sqlite_change_table: Option<String> =
+        sqlx::query_scalar("SELECT to_regclass('public.data_change')::text")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sqlite_change_table, None);
     pool.close().await;
+}
+
+#[tokio::test]
+async fn job_view_names_are_unique_per_user_on_insert_and_update() {
+    let a = postgres_store().await;
+    let b = postgres_store().await;
+    let view = JobViewInput {
+        name: "Pipeline".into(),
+        layout: ViewLayout::Board,
+        filters: serde_json::json!([]),
+        sorts: serde_json::json!([]),
+    };
+    a.create_job_view(&view).await.unwrap();
+    b.create_job_view(&view).await.unwrap();
+    assert!(a.create_job_view(&view).await.is_err());
+    let original = a
+        .list_job_views()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|v| v.name == "All jobs")
+        .unwrap();
+    assert!(a.update_job_view(original.id, &view).await.is_err());
+    assert_eq!(
+        a.get_job_view(original.id).await.unwrap().unwrap().name,
+        "All jobs"
+    );
+    assert_eq!(b.list_job_views().await.unwrap().len(), 2);
 }
 
 #[tokio::test]
