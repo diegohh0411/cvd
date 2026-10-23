@@ -15,7 +15,7 @@ concurrency:
 jobs:
   checks:
     name: Angular build and tests
-    runs-on: self-hosted
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
 

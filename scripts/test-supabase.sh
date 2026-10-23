@@ -4,10 +4,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo="$PWD"
-if command -v podman >/dev/null; then
-  engine=podman
-else
+# Use the runtime the Supabase CLI talks to: Docker when its daemon is up (CI runners
+# also ship Podman, which can't see Docker's containers), otherwise Podman via DOCKER_HOST.
+if docker info >/dev/null 2>&1; then
   engine=docker
+else
+  engine=podman
+  # The Supabase CLI speaks the Docker API; point it at Podman's socket.
+  if [ -z "${DOCKER_HOST:-}" ]; then
+    sock=$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null ||
+      podman info --format '{{.Host.RemoteSocket.Path}}')
+    export DOCKER_HOST="unix://$sock"
+  fi
 fi
 workdir=$(mktemp -d)
 cleanup() {
