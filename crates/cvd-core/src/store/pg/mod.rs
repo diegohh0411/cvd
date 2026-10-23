@@ -2,11 +2,15 @@
 mod apply_memory;
 mod companies;
 mod email;
+mod notify;
 mod queries;
 use super::{Result, StoreError, UserId};
 pub(super) use apply_memory::*;
 pub(super) use companies::*;
 pub(super) use email::*;
+#[cfg(all(test, feature = "postgres-tests"))]
+pub(super) use notify::TABLES as CHANGE_TABLES;
+pub use notify::{ChangeFeed, ChangeReceiver};
 pub(super) use queries::*;
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgPool, Postgres, Row, Transaction};

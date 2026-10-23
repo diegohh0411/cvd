@@ -4,6 +4,7 @@ mod pg;
 mod sqlite;
 pub mod types;
 pub use email::*;
+pub use pg::{ChangeFeed, ChangeReceiver};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use types::*;
@@ -222,3 +223,6 @@ mod tests;
 
 #[cfg(all(test, feature = "postgres-tests"))]
 mod pg_security_tests;
+
+#[cfg(all(test, feature = "postgres-tests"))]
+mod pg_change_feed_tests;

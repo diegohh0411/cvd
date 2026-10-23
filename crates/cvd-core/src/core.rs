@@ -5,7 +5,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use crate::mail::{cycle::AppWatchDeps, watch};
 use crate::services::AppError;
 use crate::state::{AppState, Emitter, EngineSource, DB_CHANGED_EVENT};
-use crate::store::TenantStore as Store;
+use crate::store::{ChangeReceiver, TenantStore as Store};
 
 /// Opens the application's store, restores providers and starts background services.
 /// The caller owns the runtime and keeps it alive for the application's lifetime.
@@ -43,6 +43,15 @@ async fn start_change_feed(state: &AppState) {
             seen = now;
         }
     });
+}
+
+/// Emits one tenant's Postgres change notifications as `db://changed`, matching the SQLite feed.
+pub fn forward_changes(mut changes: ChangeReceiver, emit: Emitter) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(tables) = changes.recv().await {
+            emit(DB_CHANGED_EVENT, serde_json::json!({ "tables": tables }));
+        }
+    })
 }
 
 /// Connects immediately when an account exists, otherwise waits for one.
@@ -112,6 +121,27 @@ mod tests {
         })
         .await
         .expect("change feed did not report the external write");
+    }
+
+    #[tokio::test]
+    async fn forward_changes_emits_db_changed_payloads() {
+        let (changes, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let task = forward_changes(
+            rx,
+            Arc::new(move |event, payload| {
+                let _ = tx.send((event.to_owned(), payload));
+            }),
+        );
+        changes.send(vec!["entry".into(), "bullet".into()]).unwrap();
+        drop(changes);
+        task.await.unwrap();
+        let (event, payload) = events.recv().await.unwrap();
+        assert_eq!(event, DB_CHANGED_EVENT);
+        assert_eq!(
+            payload,
+            serde_json::json!({ "tables": ["entry", "bullet"] })
+        );
     }
 
     #[tokio::test]
