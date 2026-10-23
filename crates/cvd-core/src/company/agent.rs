@@ -58,7 +58,7 @@ pub struct ResearchOutput {
     pub profile: CompanyProfile,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResearchStep {
     Searching { query: String },

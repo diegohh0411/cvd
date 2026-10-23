@@ -86,10 +86,11 @@ impl Drop for ScanGuard {
 }
 
 /// What the sidebar footer shows about the decision engine.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 pub struct EngineStatus {
     pub model_id: Option<String>,
     /// `none` (no model), `idle` (configured), `ready` (engine built), or `error`.
+    #[ts(type = "EngineState")]
     pub state: &'static str,
     pub error: Option<String>,
 }

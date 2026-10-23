@@ -314,7 +314,7 @@ export class RoleCardComponent implements OnInit {
       this.online.set(await api.listRemoteModels(refresh, this.role() === 'research' ? 'chat' : 'decision'));
     } catch (e) {
       const message = messageFor(e);
-      this.online.set(this.slotConnections().map((c) => ({ provider: c.id, models: [], error: message })));
+      this.online.set(this.slotConnections().map((c) => ({ provider: c.id, label: c.label, models: [], error: message })));
     } finally {
       this.loading.set(false);
     }

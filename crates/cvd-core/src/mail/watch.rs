@@ -22,7 +22,7 @@ pub const REIDLE: Duration = Duration::from_secs(10 * 60);
 pub const BACKOFF_MIN: Duration = Duration::from_secs(5);
 pub const BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum WatchState {
     Connecting,
@@ -33,10 +33,11 @@ pub enum WatchState {
     Stopped,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, ts_rs::TS)]
 pub struct WatcherStatus {
     pub state: WatchState,
     pub error: Option<String>,
+    #[ts(type = "AppErrorKind | null")]
     pub error_kind: Option<String>,
     /// RFC 3339 time of the last successful cycle.
     pub last_checked_at: Option<String>,

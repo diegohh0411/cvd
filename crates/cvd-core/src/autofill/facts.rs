@@ -5,7 +5,8 @@ use crate::store::types::{Entry, EntryKind, Profile};
 
 /// One thing cvd knows about the user, in every spelling a form might want.
 /// The harness offers `variants` as candidates; the model picks one or none.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(rename = "ApplyFact")]
 pub struct Fact {
     pub key: &'static str,
     /// Non-empty, deduplicated, preferred spelling first.

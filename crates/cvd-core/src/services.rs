@@ -45,7 +45,7 @@ const TEMPLATE: &str = "Classic ATS";
 const EMPTY_LIBRARY: &str = "Add at least one entry to your library first.";
 
 /// Serialized as `{ kind, message }`.
-#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, ts_rs::TS)]
 #[serde(tag = "kind", content = "message")]
 pub enum AppError {
     #[error("{0}")]
@@ -593,7 +593,7 @@ pub async fn get_ranked(st: &AppState, run_id: i64) -> Res<Ranked> {
 
 // ---- CV ----
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 pub struct FitOutput {
     pub selection: Selection,
     pub pages: usize,
@@ -781,7 +781,7 @@ pub async fn set_active_model(st: &AppState, id: &str) -> Res<()> {
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
 pub struct LocalConnectionView {
     pub base_url: String,
     pub has_key: bool,
@@ -838,7 +838,7 @@ pub async fn test_local_connection(st: &AppState, model: &str, role: &str) -> Re
 // ---- providers ----
 
 /// What the UI may know about a stored key.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 pub struct KeyStatus {
     pub has_key: bool,
     pub last4: Option<String>,
@@ -935,9 +935,11 @@ pub async fn delete_provider_key(st: &AppState, provider: &str) -> Res<()> {
 }
 
 /// A saved key as the UI lists it.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(rename = "Connection")]
 pub struct ConnectionView {
     pub id: String,
+    #[ts(type = "ProviderId")]
     pub provider: String,
     pub label: String,
     pub last4: Option<String>,
@@ -1060,7 +1062,7 @@ pub async fn list_remote_models(
 // ---- Gmail account and scan ----
 
 /// The password never leaves Rust; the view only says whether one is stored.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
 pub struct MailAccountView {
     pub host: String,
     pub port: u16,
@@ -1081,7 +1083,8 @@ fn mail_view(a: &MailAccount, folder: &str) -> MailAccountView {
 }
 
 /// A scan result plus the Gmail link, so the frontend never builds URLs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(rename = "ProcessedEmail")]
 pub struct ProcessedEmailView {
     #[serde(flatten)]
     pub email: ProcessedEmail,
@@ -1093,7 +1096,7 @@ fn scan_view(email: ProcessedEmail) -> ProcessedEmailView {
     ProcessedEmailView { email, gmail_url }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
 pub struct ScanState {
     pub running: bool,
 }

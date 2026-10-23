@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use axum::{
     body::Body,
@@ -231,46 +235,81 @@ async fn serves_the_web_build_with_spa_fallback() {
     }
 }
 
-fn names(src: &str, re: impl Fn(&str) -> Option<&str>) -> BTreeSet<String> {
-    src.lines()
-        .filter_map(|l| re(l.trim()))
-        .map(str::to_owned)
-        .collect()
+fn camel(snake: &str) -> String {
+    let mut parts = snake.split('_');
+    let mut out = parts.next().unwrap_or_default().to_owned();
+    for p in parts {
+        let mut c = p.chars();
+        out.extend(c.next().map(|c| c.to_ascii_uppercase()));
+        out.push_str(c.as_str());
+    }
+    out
 }
 
-/// Every desktop command is either served or explicitly desktop-only, and nothing else.
-#[test]
-fn matches_the_desktop_command_set() {
-    let src = include_str!("../../../apps/desktop/src-tauri/src/lib.rs");
-    let handler = &src[src.find("generate_handler![").unwrap()..];
-    let handler = &handler[..handler.find("])").unwrap()];
-    let desktop = names(handler, |l| {
-        l.strip_suffix(',').and_then(|l| l.rsplit("::").next())
-    });
-    let server: BTreeSet<String> = rpc::COMMANDS
-        .iter()
-        .chain(rpc::DESKTOP_ONLY)
-        .map(|c| c.to_string())
-        .collect();
-    assert_eq!(server, desktop);
-}
-
-/// Every command the frontend calls is routable.
-#[test]
-fn covers_the_frontend_commands() {
+/// `call<T>('name', { a, b })` in the frontend wrappers, as name -> argument names.
+fn frontend_calls() -> BTreeMap<String, BTreeSet<String>> {
     let src = include_str!("../../../apps/web/src/app/core/ipc/commands.ts");
-    let server: BTreeSet<&str> = rpc::COMMANDS
-        .iter()
-        .chain(rpc::DESKTOP_ONLY)
-        .copied()
-        .collect();
-    let called: Vec<&str> = src
+    let calls: BTreeMap<_, _> = src
         .split("call<")
         .skip(1)
-        .filter_map(|s| s.split_once(">('").and_then(|(_, r)| r.split('\'').next()))
+        .filter_map(|s| {
+            let (_, rest) = s.split_once(">('")?;
+            let (name, rest) = rest.split_once('\'')?;
+            let args = match rest.strip_prefix(", {") {
+                Some(r) => r[..r.find('}')?]
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                None => BTreeSet::new(),
+            };
+            Some((name.to_owned(), args))
+        })
         .collect();
-    assert!(called.len() > 40, "parsed {} calls", called.len());
-    for cmd in called {
-        assert!(server.contains(cmd), "{cmd}");
+    assert!(calls.len() > 40, "parsed {} calls", calls.len());
+    calls
+}
+
+/// Every registered command is served, desktop-only, or per-transport, and the
+/// frontend calls each shared one with the registry's camelCase argument names.
+/// Tauri and the server both expand the same registry, so this covers both transports.
+#[test]
+fn frontend_matches_the_command_registry() {
+    use cvd_core::commands::{DESKTOP_ONLY, PER_TRANSPORT, SHARED};
+    let calls = frontend_calls();
+    let registered: BTreeSet<&str> = SHARED
+        .iter()
+        .map(|(n, _)| *n)
+        .chain(DESKTOP_ONLY.iter().copied())
+        .chain(PER_TRANSPORT.iter().copied())
+        .collect();
+    for name in calls.keys() {
+        assert!(
+            registered.contains(name.as_str()),
+            "{name} is not registered"
+        );
     }
+    for (name, args) in SHARED {
+        let want: BTreeSet<String> = args.iter().map(|a| camel(a)).collect();
+        if let Some(have) = calls.get(*name) {
+            assert_eq!(have, &want, "{name}");
+        }
+    }
+}
+
+/// Every shared and per-transport command routes; none falls through to 404.
+#[tokio::test]
+async fn every_registered_command_is_routable() {
+    let (app, ..) = app(None).await;
+    for cmd in rpc::commands() {
+        // Commands with arguments stop at argument parsing; skip the arg-less ones with side effects.
+        if matches!(cmd, "start_scan" | "retry_watcher") {
+            continue;
+        }
+        let (status, _) = rpc(&app, cmd, Some(json!({}))).await;
+        assert_ne!(status, StatusCode::NOT_FOUND, "{cmd}");
+    }
+    let (status, _) = rpc(&app, "no_such_command", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
