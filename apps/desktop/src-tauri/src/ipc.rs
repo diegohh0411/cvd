@@ -20,8 +20,8 @@ type S<'a> = State<'a, std::sync::Arc<AppState>>;
 /// `generate_handler!` list of every command in the registry.
 macro_rules! desktop_commands {
     (
-        desktop_only: [$($desktop:ident),* $(,)?];
-        per_transport: [$($per:ident),* $(,)?];
+        desktop_only: [$($desktop:ident ($($darg:ident),*)),* $(,)?];
+        per_transport: [$($per:ident ($($parg:ident),*)),* $(,)?];
         $st:ident;
         $($name:ident ($($arg:ident : $ty:ty),* $(,)?) -> $ret:ty => $body:expr;)*
     ) => {
@@ -110,4 +110,30 @@ pub async fn autofill_bridge(
     msg: serde_json::Value,
 ) -> Res<()> {
     crate::autofill::window::handle_bridge(&window, &st, &sessions, msg).await
+}
+
+#[cfg(test)]
+mod tests {
+    /// Parameters Tauri injects rather than reading from the payload.
+    const INJECTED: &[&str] = &["st", "app", "window", "sessions"];
+
+    /// Hand-written commands take exactly the arguments the registry lists.
+    #[test]
+    fn handwritten_commands_match_the_registry() {
+        let src = include_str!("ipc.rs");
+        for (name, args) in cvd_core::commands::HANDWRITTEN {
+            let sig = src
+                .split_once(&format!("pub async fn {name}("))
+                .unwrap_or_else(|| panic!("{name} is not defined in ipc.rs"))
+                .1;
+            let params: Vec<&str> = sig[..sig.find(')').unwrap()]
+                .split(',')
+                // `name: Type`; skips generic-argument fragments like `crate::x`.
+                .filter_map(|p| p.split_once(':').filter(|(_, ty)| !ty.starts_with(':')))
+                .map(|(p, _)| p.trim())
+                .filter(|p| !p.is_empty() && !INJECTED.contains(p))
+                .collect();
+            assert_eq!(&params, args, "{name}");
+        }
+    }
 }

@@ -246,9 +246,13 @@ fn camel(snake: &str) -> String {
     out
 }
 
-/// `call<T>('name', { a, b })` in the frontend wrappers, as name -> argument names.
+/// `call<T>('name', { a, b: x })` in the frontend, as name -> argument names.
 fn frontend_calls() -> BTreeMap<String, BTreeSet<String>> {
-    let src = include_str!("../../../apps/web/src/app/core/ipc/commands.ts");
+    let src = [
+        include_str!("../../../apps/web/src/app/core/ipc/commands.ts"),
+        include_str!("../../../apps/web/src/app/core/platform/tauri/runtime.ts"),
+    ]
+    .concat();
     let calls: BTreeMap<_, _> = src
         .split("call<")
         .skip(1)
@@ -258,7 +262,7 @@ fn frontend_calls() -> BTreeMap<String, BTreeSet<String>> {
             let args = match rest.strip_prefix(", {") {
                 Some(r) => r[..r.find('}')?]
                     .split(',')
-                    .map(str::trim)
+                    .map(|a| a.split(':').next().unwrap_or_default().trim())
                     .filter(|a| !a.is_empty())
                     .map(str::to_owned)
                     .collect(),
@@ -271,12 +275,12 @@ fn frontend_calls() -> BTreeMap<String, BTreeSet<String>> {
     calls
 }
 
-/// Every registered command is served, desktop-only, or per-transport, and the
-/// frontend calls each shared one with the registry's camelCase argument names.
-/// Tauri and the server both expand the same registry, so this covers both transports.
+/// Every frontend call names a registered command with the registry's camelCase
+/// argument names. Shared commands expand from the registry on both transports;
+/// the desktop crate holds its hand-written commands to the registry's arguments.
 #[test]
 fn frontend_matches_the_command_registry() {
-    use cvd_core::commands::{DESKTOP_ONLY, PER_TRANSPORT, SHARED};
+    use cvd_core::commands::{DESKTOP_ONLY, HANDWRITTEN, PER_TRANSPORT, SHARED};
     let calls = frontend_calls();
     let registered: BTreeSet<&str> = SHARED
         .iter()
@@ -290,7 +294,7 @@ fn frontend_matches_the_command_registry() {
             "{name} is not registered"
         );
     }
-    for (name, args) in SHARED {
+    for (name, args) in SHARED.iter().chain(HANDWRITTEN) {
         let want: BTreeSet<String> = args.iter().map(|a| camel(a)).collect();
         if let Some(have) = calls.get(*name) {
             assert_eq!(have, &want, "{name}");
@@ -312,4 +316,18 @@ async fn every_registered_command_is_routable() {
     }
     let (status, _) = rpc(&app, "no_such_command", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// The server takes the desktop's arguments for per-transport commands.
+#[tokio::test]
+async fn per_transport_commands_accept_the_desktop_arguments() {
+    let (app, ..) = app(None).await;
+    let (_, body) = rpc(
+        &app,
+        "export_cv",
+        Some(json!({ "runId": 1, "selection": { "entries": [], "skills": [] }, "path": "/tmp/x.pdf" })),
+    )
+    .await;
+    let message = body["message"].as_str().unwrap_or_default();
+    assert!(!message.contains("invalid arguments"), "{message}");
 }

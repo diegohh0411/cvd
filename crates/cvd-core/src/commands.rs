@@ -8,6 +8,7 @@
 // Shape of the table:
 // - `desktop_only`: hand-written in the desktop app; the server refuses them.
 // - `per_transport`: hand-written in each transport because the behaviour differs.
+//   Both list their wire arguments so tests can hold the hand-written code to them.
 // - `st;` then one arm per shared command: `name(arg: Type, ..) -> Ret => body;`
 //   where `body` is a `Result<Ret, AppError>` expression that may `.await` and
 //   sees `st: &AppState`. Callers bring `services` and the types into scope.
@@ -19,14 +20,15 @@ macro_rules! for_each_command {
     ($cb:ident) => {
         $cb! {
             desktop_only: [
-                get_local_connection,
-                save_local_connection,
-                test_local_connection,
-                save_file_bytes,
-                start_apply,
-                autofill_bridge,
+                get_local_connection(),
+                save_local_connection(base_url, key),
+                test_local_connection(model, role),
+                save_file_bytes(bytes, suggested_name),
+                start_apply(job_id),
+                autofill_bridge(msg),
             ];
-            per_transport: [export_cv];
+            // The desktop arguments; the server ignores `path`.
+            per_transport: [export_cv(run_id, selection, path)];
             st;
             get_profile() -> Profile => services::get_profile(st).await;
             save_profile(profile: Profile) -> () => services::save_profile(st, profile).await;
@@ -119,8 +121,8 @@ macro_rules! for_each_command {
 
 macro_rules! command_names {
     (
-        desktop_only: [$($desktop:ident),* $(,)?];
-        per_transport: [$($per:ident),* $(,)?];
+        desktop_only: [$($desktop:ident ($($darg:ident),*)),* $(,)?];
+        per_transport: [$($per:ident ($($parg:ident),*)),* $(,)?];
         $st:ident;
         $($name:ident ($($arg:ident : $ty:ty),* $(,)?) -> $ret:ty => $body:expr;)*
     ) => {
@@ -128,6 +130,11 @@ macro_rules! command_names {
         pub const SHARED: &[(&str, &[&str])] = &[$((stringify!($name), &[$(stringify!($arg)),*])),*];
         pub const DESKTOP_ONLY: &[&str] = &[$(stringify!($desktop)),*];
         pub const PER_TRANSPORT: &[&str] = &[$(stringify!($per)),*];
+        /// Desktop-only and per-transport commands with their snake_case argument names.
+        pub const HANDWRITTEN: &[(&str, &[&str])] = &[
+            $((stringify!($desktop), &[$(stringify!($darg)),*]),)*
+            $((stringify!($per), &[$(stringify!($parg)),*]),)*
+        ];
     };
 }
 for_each_command!(command_names);

@@ -46,8 +46,8 @@ fn json<T: serde::Serialize>(v: T) -> Result<Value, RpcError> {
 /// Expands the shared registry (`cvd_core::for_each_command!`) into [`dispatch_shared`].
 macro_rules! server_commands {
     (
-        desktop_only: [$($desktop:ident),* $(,)?];
-        per_transport: [$($per:ident),* $(,)?];
+        desktop_only: [$($desktop:ident ($($darg:ident),*)),* $(,)?];
+        per_transport: [$($per:ident ($($parg:ident),*)),* $(,)?];
         $st:ident;
         $($name:ident ($($arg:ident : $ty:ty),* $(,)?) -> $ret:ty => $body:expr;)*
     ) => {

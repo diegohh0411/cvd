@@ -69,7 +69,9 @@ mod tests {
         if std::env::var_os("CVD_UPDATE_BINDINGS").is_some() {
             std::fs::write(&path, &want).unwrap();
         }
-        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        let have = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         assert!(
             have == want,
             "{} is stale; run CVD_UPDATE_BINDINGS=1 cargo test -p cvd-core bindings",
