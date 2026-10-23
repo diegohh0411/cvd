@@ -52,38 +52,11 @@ and forced RLS plus composite foreign keys enforce isolation. The provisioning f
 `store.create_user_defaults(user_id)` once after creating a new auth user and
 before exposing their services. It creates the initial statuses and view in one
 transaction. Ordinary store operations never seed or repair defaults. Postgres has no SQLite polling
-change feed; `change_versions` returns an empty map. Hosted invalidation uses
-Supabase private Broadcast channels (see below).
-
-For Supabase, apply `supabase/realtime.sql` as the schema owner after the store
-migrations. This separate, repeatable setup requires Supabase Realtime; plain
-Postgres and SQLite do not depend on it. Disable **Allow public access** in
-Supabase Realtime settings. Remove any pre-existing broad policies on
-`realtime.messages` that would grant clients access to other users' channels or
-allow publishing; Postgres permissive policies combine with OR.
-
-The database sends `invalidate` events on private `user:<auth-user-uuid>` channels
-for committed inserts, updates, and deletes. Payloads contain only `{table}`,
-including for secret changes. No row contents or credentials are broadcast.
-The receive policy checks the authenticated JWT through `auth.uid()`, independently
-of the store's `app.user_id`. Clients have no publishing policy.
-
-The hosted client transport (#64/#65) should subscribe after authentication:
-
-```ts
-await supabase.realtime.setAuth();
-const channel = supabase
-  .channel(`user:${user.id}`, { config: { private: true } })
-  .on('broadcast', { event: 'invalidate' }, ({ payload }) => {
-    // Invalidate cached queries affected by payload.table; refetch via the API.
-  })
-  .subscribe();
-// On logout or user change: await supabase.removeChannel(channel).
-```
-
-Refetch after subscription/reconnection as well: Broadcast is an invalidation
-signal, not a durable replay log. The current browser transport remains pending;
-this setup supplies the database events and channel authorization.
+change feed; `change_versions` returns an empty map. Instead, statement-level
+triggers call `pg_notify('db_changed', …)` and `store::ChangeFeed` listens on one
+direct or session-mode connection (Supavisor transaction mode drops `LISTEN`),
+fanning out per-user `db://changed` events. Supabase Realtime is not used, so auth
+stays in the server.
 
 Run the shared store contracts on SQLite with `cargo test --workspace`. With a
 running Podman machine, run `scripts/test-postgres.sh` to create an isolated
@@ -91,8 +64,7 @@ Postgres 17 database, bootstrap an auth stub and restricted runtime role, and ru
 `cargo test --workspace --features cvd-core/postgres-tests`. The container is removed
 on exit. This also checks unfiltered RLS reads/writes, tenant context cleanup,
 cross-tenant foreign keys, and rejection of unsafe runtime roles. The Postgres CI
-job uses the same script, including Broadcast routing, rollback, and authorization
-checks using Supabase API test doubles (not a live Realtime server). To use an existing **disposable** database, bootstrap the
+job uses the same script. To use an existing **disposable** database, bootstrap the
 auth table/roles as in the script, set `CVD_TEST_POSTGRES_ADMIN_URL` and
 `CVD_TEST_POSTGRES_URL`, and run that Cargo command directly.
 

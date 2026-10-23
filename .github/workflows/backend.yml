@@ -12,7 +12,6 @@ on:
       - "Cargo.lock"
       - "scripts/test-postgres.sh"
       - "scripts/test-supabase.sh"
-      - "supabase/**"
       - ".github/workflows/backend.yml"
 
 concurrency:
