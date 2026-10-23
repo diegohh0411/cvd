@@ -10,6 +10,12 @@ if docker info >/dev/null 2>&1; then
   engine=docker
 else
   engine=podman
+  # The Supabase CLI speaks the Docker API; point it at Podman's socket.
+  if [ -z "${DOCKER_HOST:-}" ]; then
+    sock=$(podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}' 2>/dev/null ||
+      podman info --format '{{.Host.RemoteSocket.Path}}')
+    export DOCKER_HOST="unix://$sock"
+  fi
 fi
 workdir=$(mktemp -d)
 cleanup() {
