@@ -7,9 +7,40 @@ describe('web platform', () => {
   it('disables desktop capabilities and updater checks', async () => {
     expect(Object.values(platform.capabilities)).toEqual([false, false, false, false]);
     expect(await platform.checkForUpdates()).toBeNull();
-    await expect(transport.call('get_profile')).rejects.toThrow('Web transport is not connected');
-    const unlisten = await transport.listen('db://changed', () => {});
-    expect(() => unlisten()).not.toThrow();
+  });
+
+  it('posts camelCase args to the RPC route and returns the JSON result', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[1,2]'));
+    expect(await transport.call('list_runs', { jdId: 3 })).toEqual([1, 2]);
+    expect(fetch).toHaveBeenCalledWith('/api/rpc/list_runs', expect.objectContaining({ method: 'POST', body: '{"jdId":3}' }));
+    fetch.mockResolvedValue(new Response(''));
+    expect(await transport.call('mark_all_read')).toBeNull();
+  });
+
+  it('rejects with the AppError body the server returns', async () => {
+    const error = { kind: 'NotFound', message: 'Job not found.' };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(error), { status: 400 }));
+    await expect(transport.call('get_job', { id: 9 })).rejects.toEqual(error);
+  });
+
+  it('demuxes one event stream to listeners by event name', async () => {
+    const sources: { onmessage: ((m: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal('EventSource', class { onmessage = null; constructor() { sources.push(this); } });
+    try {
+      const changed = vi.fn();
+      const progress = vi.fn();
+      const unlisten = await transport.listen('db://changed', changed);
+      await transport.listen('match://progress', progress);
+      expect(sources).toHaveLength(1);
+      sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: ['entry'] } }) });
+      expect(changed).toHaveBeenCalledWith({ payload: { tables: ['entry'] } });
+      expect(progress).not.toHaveBeenCalled();
+      unlisten();
+      sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: [] } }) });
+      expect(changed).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('exports by downloading the PDF bytes the backend returns', async () => {

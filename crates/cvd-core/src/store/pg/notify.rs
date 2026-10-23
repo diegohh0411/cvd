@@ -12,7 +12,7 @@ const CHANNEL: &str = "db_changed";
 const DEBOUNCE: Duration = Duration::from_millis(250);
 const RETRY: Duration = Duration::from_secs(1);
 /// Tables with change triggers; sent in full after a reconnect may have lost notifications.
-pub(in crate::store) const TABLES: &[&str] = &[
+pub const TABLES: &[&str] = &[
     "profile",
     "entry",
     "bullet",

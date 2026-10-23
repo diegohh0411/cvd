@@ -5,6 +5,7 @@
     "ng": "bun run --cwd apps/web ng",
     "start": "bun run --cwd apps/web start",
     "build": "bun run --cwd apps/web build",
+    "build:web": "bun run --cwd apps/web build --configuration production,web",
     "watch": "bun run --cwd apps/web watch",
     "test": "bun run --cwd apps/web test",
     "tauri": "cd apps/desktop && tauri",

@@ -1,10 +1,41 @@
 import type { Transport } from '../transport';
 import type { Platform } from '../platform';
 
-/** Replaced by the HTTP/event transport in #65. */
+type Handler = (event: { payload: unknown }) => void;
+const handlers = new Map<string, Set<Handler>>();
+let source: EventSource | null = null;
+
+/** One `EventSource` for all listeners; frames are `{ event, payload }`. */
+function connect(): void {
+  if (source) return;
+  source = new EventSource('/api/events');
+  source.onmessage = (msg) => {
+    const { event, payload } = JSON.parse(msg.data) as { event: string; payload: unknown };
+    handlers.get(event)?.forEach((cb) => cb({ payload }));
+  };
+}
+
+/** Talks to cvd-server: `POST /api/rpc/:command` and server-sent events on `/api/events`. */
 export const transport: Transport = {
-  async call(cmd) { throw new Error(`Web transport is not connected: ${cmd}`); },
-  async listen() { return () => {}; },
+  async call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`/api/rpc/${cmd}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args ?? {}),
+    });
+    const body = await res.text();
+    const value = body ? JSON.parse(body) : null;
+    // Error bodies are the same `{ kind, message }` Tauri rejects with.
+    if (!res.ok) throw value ?? new Error(`${cmd} failed: ${res.status}`);
+    return value as T;
+  },
+  async listen<T>(event: string, cb: (event: { payload: T }) => void) {
+    connect();
+    const set = handlers.get(event) ?? new Set<Handler>();
+    handlers.set(event, set);
+    set.add(cb as Handler);
+    return () => { set.delete(cb as Handler); };
+  },
 };
 export const platform: Platform = {
   capabilities: { autoApply: false, updater: false, revealInFolder: false, localServer: false },

@@ -82,6 +82,30 @@ checksums of the previously shipped baseline and change notification migration.
 
 The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 
+### Web server (dev)
+
+`crates/cvd-server` serves the same commands over HTTP for the browser build. It
+runs as one fixed user until auth lands (#67) and binds to 127.0.0.1.
+
+```sh
+bun run build:web
+DATABASE_URL=postgres://cvd_app:…@localhost/cvd \
+CVD_MIGRATE_URL=postgres://postgres:…@localhost/cvd \
+CVD_DEV_USER_ID=<auth.users id> \
+cargo run -p cvd-server   # http://127.0.0.1:8787
+```
+
+`DATABASE_URL` is the restricted runtime role over a direct or session-mode
+connection (the change feed needs `LISTEN`). `CVD_MIGRATE_URL` is optional and runs
+migrations at startup. `CVD_DEV_USER_ID` defaults to the nil UUID and must exist in
+`auth.users`; its default statuses and view are created on first start.
+`CVD_STATIC_DIR` and `CVD_PORT` override the web build path and port (8787).
+
+`POST /api/rpc/:command` takes the same camelCase JSON args as `invoke` and fails
+with the same `{ kind, message }` body. `GET /api/events` is an SSE stream of
+`{ event, payload }`. Desktop-only commands (auto-apply, local server connection,
+native save dialog) return a "not available on the web" error.
+
 ### Local inference
 
 CVD does not install models or start an inference process. Install [llama.cpp](https://github.com/ggml-org/llama.cpp#quick-start) yourself (release binaries or a source build), download a compatible GGUF, and start a server:
