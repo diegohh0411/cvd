@@ -39,6 +39,15 @@ import { GmailCardComponent } from './gmail-card.component';
         <p class="text-muted-foreground text-sm">Connect outside accounts that feed the Jobs page.</p>
       </div>
       <app-gmail-card />
+      @if (account()) {
+        <div class="mt-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 class="font-semibold">Account</h2>
+            <p class="text-muted-foreground text-sm">Signed in as {{ account() }}.</p>
+          </div>
+          <button type="button" class="border-input h-8 rounded-md border px-3 text-sm" (click)="signOut()">Sign out</button>
+        </div>
+      }
       <p class="text-muted-foreground mt-auto pt-6 text-center text-xs">Version {{ version() }}</p>
     </div>
   `,
@@ -49,15 +58,22 @@ export class SettingsPageComponent implements OnInit {
   protected readonly theme = signal<DarkModeOptions>(this.dark.currentTheme());
 
   protected readonly version = signal('…');
+  protected readonly account = signal<string | null>(null);
 
   ngOnInit(): void {
     void platform.version().then((v) => this.version.set(v), () => this.version.set('unknown'));
+    void platform.auth.init().then((a) => this.account.set(a?.signedIn ? (a.email ?? 'your account') : null), () => undefined);
     void api.getUiSetting(BUDGET_SETTING).then((v) => this.budget.set(v === '2' ? '2' : '1'), () => undefined);
   }
 
   setBudget(v: string): void {
     this.budget.set(v);
     void api.setUiSetting(BUDGET_SETTING, v).catch(() => undefined);
+  }
+
+  async signOut(): Promise<void> {
+    await platform.auth.signOut();
+    location.assign('/');
   }
 
   setTheme(v: DarkModeOptions): void {

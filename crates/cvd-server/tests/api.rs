@@ -331,3 +331,138 @@ async fn per_transport_commands_accept_the_desktop_arguments() {
     let message = body["message"].as_str().unwrap_or_default();
     assert!(!message.contains("invalid arguments"), "{message}");
 }
+
+mod accounts {
+    use super::*;
+    use cvd_core::store::{Store, UserId};
+    use cvd_server::{auth::Verifier, router_with, tenants::Tenants, Access, ClientAuth};
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+
+    const ISSUER: &str = "https://test.supabase.co/auth/v1";
+    const SECRET: &[u8] = b"test-secret-that-is-long-enough!";
+
+    async fn app() -> (Router, tempfile::TempDir) {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&format!("sqlite://{}", dir.path().join("cv.db").display()))
+            .await
+            .unwrap();
+        let keys = serde_json::from_value(json!({ "keys": [{
+            "kty": "oct", "kid": "k1", "alg": "HS256",
+            "k": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(SECRET),
+        }]}))
+        .unwrap();
+        let access = Access::Accounts {
+            verifier: Verifier::with_keys(ISSUER, keys),
+            tenants: Tenants::new(store, None),
+            client: ClientAuth {
+                supabase_url: "https://test.supabase.co".into(),
+                supabase_anon_key: "anon".into(),
+            },
+        };
+        (router_with(access, None), dir)
+    }
+
+    fn token(user: uuid::Uuid) -> String {
+        token_expiring(user, chrono::Utc::now().timestamp() + 600)
+    }
+
+    fn token_expiring(user: uuid::Uuid, exp: i64) -> String {
+        let mut header = Header::new(Algorithm::HS256);
+        header.kid = Some("k1".into());
+        let claims = json!({ "sub": user, "aud": "authenticated", "iss": ISSUER, "exp": exp });
+        encode(&header, &claims, &EncodingKey::from_secret(SECRET)).unwrap()
+    }
+
+    async fn send(app: &Router, req: Request<Body>) -> StatusCode {
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    fn call(token: Option<&str>) -> Request<Body> {
+        let mut req =
+            Request::post("/api/rpc/list_job_statuses").header("content-type", "application/json");
+        if let Some(t) = token {
+            req = req.header("authorization", format!("Bearer {t}"));
+        }
+        req.body(Body::empty()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_rpc_and_events_get_401() {
+        let (app, _dir) = app().await;
+        assert_eq!(send(&app, call(None)).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            send(&app, call(Some("garbage"))).await,
+            StatusCode::UNAUTHORIZED
+        );
+        let events = Request::get("/api/events").body(Body::empty()).unwrap();
+        assert_eq!(send(&app, events).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_signed_in_user_reaches_their_services() {
+        let (app, _dir) = app().await;
+        let t = token(UserId::LOCAL.0);
+        assert_eq!(send(&app, call(Some(&t))).await, StatusCode::OK);
+        // EventSource can't set headers, so the stream takes the cookie.
+        let events = Request::get("/api/events")
+            .header("cookie", format!("other=1; cvd_access_token={t}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&app, events).await, StatusCode::OK);
+        // RPC never authenticates by cookie.
+        let cookie_call = Request::post("/api/rpc/list_job_statuses")
+            .header("content-type", "application/json")
+            .header("cookie", format!("cvd_access_token={t}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&app, cookie_call).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn the_event_stream_ends_when_its_token_expires() {
+        let (app, _dir) = app().await;
+        // Inside the verifier's clock-skew leeway, so accepted, but already past `exp`.
+        let t = token_expiring(UserId::LOCAL.0, chrono::Utc::now().timestamp() - 5);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/events")
+                    .header("authorization", format!("Bearer {t}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = tokio::time::timeout(Duration::from_secs(5), res.into_body().collect())
+            .await
+            .expect("stream should close at the token's expiry");
+        assert!(body.is_ok());
+    }
+
+    #[tokio::test]
+    async fn another_user_never_falls_back_to_the_local_data() {
+        let (app, _dir) = app().await;
+        // SQLite only holds the local user, so a different `sub` must fail, not share it.
+        let t = token(uuid::Uuid::new_v4());
+        assert_eq!(
+            send(&app, call(Some(&t))).await,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn config_tells_the_browser_where_to_sign_in() {
+        let (app, _dir) = app().await;
+        let res = app
+            .clone()
+            .oneshot(Request::get("/api/config").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body: Value =
+            serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(body["auth"]["supabaseUrl"], "https://test.supabase.co");
+        assert_eq!(body["auth"]["supabaseAnonKey"], "anon");
+    }
+}

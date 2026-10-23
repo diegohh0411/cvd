@@ -10,13 +10,18 @@ import { ProfileStore } from './core/stores/profile.store';
 import { UpdateService } from './core/update.service';
 import { FirstRunDialogComponent } from './features/onboarding/first-run-dialog.component';
 import { FirstRunService } from './features/onboarding/first-run.service';
+import { SignInComponent } from './features/auth/sign-in.component';
+import { platform } from './core/platform/runtime';
 import * as api from './core/ipc/commands';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterLink, RouterOutlet, ZardSonnerComponent, FirstRunDialogComponent],
+  imports: [RouterLink, RouterOutlet, ZardSonnerComponent, FirstRunDialogComponent, SignInComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (session() === 'signedOut') {
+      <app-sign-in />
+    } @else if (session() === 'ready') {
     @if (localMigration()) {
       <div class="border-b bg-muted p-4 text-sm" role="status">
         Local models now run in a server you start yourself. Your old local model selections were cleared.
@@ -26,11 +31,14 @@ import * as api from './core/ipc/commands';
       </div>
     }
     <router-outlet />
-    <z-sonner />
     <app-first-run-dialog />
+    }
+    <z-sonner />
   `,
 })
 export class AppComponent implements OnInit {
+  /** Hosted builds show sign-in until there's a session; desktop is always ready. */
+  protected readonly session = signal<'pending' | 'signedOut' | 'ready'>('pending');
   protected readonly localMigration = signal(false);
   protected async dismissMigration(): Promise<void> {
     await api.setUiSetting('ui.local_server_migration', '0');
@@ -46,11 +54,17 @@ export class AppComponent implements OnInit {
   constructor() {
     inject(ZardDarkMode).init();
     effect(() => {
-      if (this.profile.isEmpty()) this.firstRun.open();
+      if (this.session() === 'ready' && this.profile.isEmpty()) this.firstRun.open();
     });
   }
 
-  ngOnInit(): void {
+  async ngOnInit(): Promise<void> {
+    const auth = await platform.auth.init().catch(() => null);
+    if (auth && !auth.signedIn) {
+      this.session.set('signedOut');
+      return;
+    }
+    this.session.set('ready');
     void api.getUiSetting('ui.local_server_migration').then(v => this.localMigration.set(v === '1')).catch(() => undefined);
     void this.profile.load();
     void this.library.load();

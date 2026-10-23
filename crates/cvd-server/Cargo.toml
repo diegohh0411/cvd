@@ -7,16 +7,23 @@ license-file.workspace = true
 [dependencies]
 cvd-core = { path = "../cvd-core" }
 axum = "0.8"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = "1"
+uuid = { version = "1", features = ["serde"] }
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+thiserror = "2"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+chrono = "0.4.45"
+base64 = "0.22"
+uuid = "1"

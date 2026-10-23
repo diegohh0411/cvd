@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { platform, transport } from './runtime';
 
+/** Answers `/api/config` as a server without accounts, everything else with `body`. */
+const server = (body: string, init?: ResponseInit) => async (url: unknown) =>
+  url === '/api/config' ? new Response('{"auth":null}') : new Response(body, init);
+
 afterEach(() => vi.restoreAllMocks());
 
 describe('web platform', () => {
@@ -10,24 +14,35 @@ describe('web platform', () => {
   });
 
   it('posts camelCase args to the RPC route and returns the JSON result', async () => {
-    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[1,2]'));
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(server('[1,2]'));
     expect(await transport.call('list_runs', { jdId: 3 })).toEqual([1, 2]);
     expect(fetch).toHaveBeenCalledWith('/api/rpc/list_runs', expect.objectContaining({ method: 'POST', body: '{"jdId":3}' }));
-    fetch.mockResolvedValue(new Response(''));
+    fetch.mockImplementation(server(''));
     expect(await transport.call('mark_all_read')).toBeNull();
+  });
+
+  it('asks the server whether it has accounts before calling', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(server('null'));
+    await transport.call('list_jobs');
+    // No accounts: no Authorization header.
+    const rpc = fetch.mock.calls.find(([url]) => url === '/api/rpc/list_jobs');
+    expect(rpc?.[1]?.headers).toEqual({ 'Content-Type': 'application/json' });
   });
 
   it('rejects with the AppError body the server returns', async () => {
     const error = { kind: 'NotFound', message: 'Job not found.' };
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(error), { status: 400 }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(server(JSON.stringify(error), { status: 400 }));
     await expect(transport.call('get_job', { id: 9 })).rejects.toEqual(error);
   });
 
   it('waits for the server to subscribe, demuxes by event, and refreshes after a reconnect', async () => {
     type Listener = (m: { data: string }) => void;
     const sources: { onmessage: Listener | null; ready: Listener[] }[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(server('null'));
     vi.stubGlobal('EventSource', class {
+      static CLOSED = 2;
       onmessage: Listener | null = null;
+      onerror: (() => void) | null = null;
       ready: Listener[] = [];
       constructor() { sources.push(this); }
       addEventListener(type: string, cb: Listener) { if (type === 'ready') this.ready.push(cb); }
@@ -37,7 +52,7 @@ describe('web platform', () => {
       const progress = vi.fn();
       let subscribed = false;
       const pending = transport.listen('db://changed', changed).then((u) => { subscribed = true; return u; });
-      await Promise.resolve();
+      await vi.waitFor(() => expect(sources).toHaveLength(1));
       expect(subscribed).toBe(false);
       const ready = (tables: string[]) => sources[0].ready.forEach((cb) => cb({ data: JSON.stringify({ tables }) }));
       ready(['entry', 'match_run']);
@@ -57,7 +72,17 @@ describe('web platform', () => {
       unlisten();
       sources[0].onmessage!({ data: JSON.stringify({ event: 'db://changed', payload: { tables: [] } }) });
       expect(changed).toHaveBeenCalledTimes(2);
+
+      // An error response (e.g. 401) closes the source for good; we open a fresh one.
+      vi.useFakeTimers();
+      const closed = sources[0] as unknown as { readyState: number; onerror: (this: unknown) => void };
+      closed.readyState = 2;
+      closed.onerror.call(closed);
+      await vi.advanceTimersByTimeAsync(3000);
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(sources).toHaveLength(2));
     } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
