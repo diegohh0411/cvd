@@ -4,7 +4,7 @@ mod pg;
 mod sqlite;
 pub mod types;
 pub use email::*;
-pub use pg::{ChangeFeed, ChangeReceiver};
+pub use pg::{ChangeFeed, ChangeReceiver, CHANGE_TABLES};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use types::*;

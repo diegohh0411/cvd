@@ -12,11 +12,17 @@ use crate::store::{ChangeReceiver, TenantStore as Store};
 pub async fn bootstrap(data_dir: &Path, emit: Emitter) -> Result<Arc<AppState>, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let url = format!("sqlite://{}", data_dir.join("cv.db").display());
-    let store = Store::open(&url).await?;
+    let state = start(Store::open(&url).await?, emit).await?;
+    start_change_feed(&state).await;
+    Ok(state)
+}
+
+/// Builds one tenant's state, restores its providers and starts its mail watcher.
+/// Live updates are the caller's: SQLite polls, Postgres uses `forward_changes`.
+pub async fn start(store: Store, emit: Emitter) -> Result<Arc<AppState>, AppError> {
     let state = Arc::new(AppState::new(store, EngineSource::Http, emit));
     state.reload_providers().await?;
     start_mail_watcher(state.clone());
-    start_change_feed(&state).await;
     Ok(state)
 }
 

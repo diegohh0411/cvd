@@ -121,6 +121,8 @@ export class WorkspaceStore {
     const destroyRef = inject(DestroyRef);
     void untilDestroyed(destroyRef, onTablesChanged(['job_description'], () => void this.reloadJob())).catch(() => undefined);
     void untilDestroyed(destroyRef, onTablesChanged(['company', 'company_alias'], () => void this.loadCompany())).catch(() => undefined);
+    // Progress events can be missed (e.g. a web reconnect); the run row is the source of truth.
+    void untilDestroyed(destroyRef, onTablesChanged(['match_run'], () => void this.syncRun())).catch(() => undefined);
     destroyRef.onDestroy(() => {
       if (this.fitTimer) clearTimeout(this.fitTimer);
       void this.unlisten?.then((u) => u());
@@ -145,6 +147,17 @@ export class WorkspaceStore {
     } catch (e) {
       this.loadError.set(toAppError(e));
     }
+  }
+
+  /** Catches up when a running run finished without us seeing its final progress event. */
+  private async syncRun(): Promise<void> {
+    const job = this.job();
+    const current = this.run();
+    if (!job || current?.status !== 'running') return;
+    const latest = (await api.listRuns(job.id).catch(() => []))[0];
+    if (!latest || latest.id !== current.id || latest.status === 'running' || this.run()?.status !== 'running') return;
+    this.run.set(latest);
+    if (latest.status === 'done') await this.loadResults();
   }
 
   /** Subscribes before any run starts so no progress is lost (Review Focus #2). */
