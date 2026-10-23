@@ -11,6 +11,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "scripts/test-postgres.sh"
+      - "scripts/test-supabase.sh"
+      - "supabase/**"
       - ".github/workflows/backend.yml"
 
 concurrency:
@@ -46,3 +48,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test workspace with Postgres store contracts (Podman or Docker)
         run: scripts/test-postgres.sh
+
+  supabase:
+    name: Fresh Supabase schema and tenant isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.0
+      - name: Test store contracts against a fresh Supabase database
+        run: scripts/test-supabase.sh

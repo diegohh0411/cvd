@@ -96,6 +96,18 @@ checks using Supabase API test doubles (not a live Realtime server). To use an e
 auth table/roles as in the script, set `CVD_TEST_POSTGRES_ADMIN_URL` and
 `CVD_TEST_POSTGRES_URL`, and run that Cargo command directly.
 
+Run `scripts/test-supabase.sh` with the Supabase CLI and a Docker-compatible runtime
+to verify the embedded Postgres migrations against a fresh Supabase database with
+its real `auth.users` schema. With Podman, set `DOCKER_HOST` to its Docker-compatible
+socket before running the script. The runner creates a temporary CLI project,
+starts only the database, provisions a restricted server role, and runs the store
+contracts, including RLS reads, inserts, updates, deletes, and tenant reassignment.
+It removes its containers and volumes on exit. CI runs this separately from the
+plain Postgres suite. Migrations stay in `crates/cvd-core/migrations/postgres` and
+are applied by SQLx; there is no second copy under `supabase/migrations`.
+Job view names are unique per user; the follow-up migration preserves the
+checksums of the previously shipped baseline and change notification migration.
+
 The Cargo workspace contains shared domain logic in `crates/cvd-core`, the stdio server in `crates/cvd-mcp`, and the Tauri shell in `apps/desktop/src-tauri`. Templates, fonts, and migrations are embedded in core.
 
 ### Local inference

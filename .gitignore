@@ -56,3 +56,7 @@ apps/desktop/src-tauri/binaries
 
 # Cargo workspace build output
 /target/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/

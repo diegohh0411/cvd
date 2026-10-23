@@ -46,5 +46,5 @@ cargo test --workspace --features cvd-core/postgres-tests "$@"
 
 # Exercise the Supabase integration against API test doubles after store migration.
 for sql_file in supabase/tests/bootstrap.sql supabase/realtime.sql supabase/realtime.sql supabase/tests/realtime.sql; do
-  podman exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d cvd < "$sql_file"
+  "$engine" exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d cvd < "$sql_file"
 done
