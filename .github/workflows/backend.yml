@@ -44,5 +44,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test workspace with Postgres store contracts (Podman)
+      - name: Test workspace with Postgres store contracts (Podman or Docker)
         run: scripts/test-postgres.sh
