@@ -9,7 +9,7 @@ use super::{
     TypeSafeProvider, SUBQ, TYPESAFE, TYPESAFE_BASE,
 };
 use crate::engine::DecisionEngine;
-use crate::store::{Store, StoreError};
+use crate::store::{StoreError, TenantStore as Store};
 
 const CACHE_TTL: Duration = Duration::from_secs(600);
 

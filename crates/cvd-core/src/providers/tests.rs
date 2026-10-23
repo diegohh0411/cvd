@@ -70,15 +70,19 @@ async fn openrouter_401_is_unauthorized() {
     assert_eq!(err, ProviderError::Unauthorized);
 }
 
-async fn keyed_store() -> crate::store::Store {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+async fn keyed_store() -> crate::store::TenantStore {
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     s.set_secret("openrouter", "k").await.unwrap();
     s
 }
 
 #[tokio::test]
 async fn registry_hides_keyless_provider() {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1")
         .await
         .unwrap();
@@ -122,8 +126,10 @@ async fn remote_models_cached() {
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
 
-async fn keyed_subq_store() -> crate::store::Store {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+async fn keyed_subq_store() -> crate::store::TenantStore {
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     s.set_secret(SUBQ, "sq").await.unwrap();
     s
 }
@@ -236,7 +242,9 @@ async fn registry_routes_subq_decisions() {
 
 #[tokio::test]
 async fn registry_hides_keyless_subq() {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1")
         .await
         .unwrap();
@@ -381,7 +389,9 @@ async fn registry_routes_typesafe_decisions() {
         )
         .mount(&server)
         .await;
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     s.set_secret(TYPESAFE, "ts").await.unwrap();
     let reg = ProviderRegistry::load_with(
         &s,
@@ -409,7 +419,9 @@ async fn registry_routes_typesafe_decisions() {
 
 #[tokio::test]
 async fn registry_hides_keyless_typesafe() {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     let reg = ProviderRegistry::load(&s, "http://127.0.0.1:1", "http://127.0.0.1:1")
         .await
         .unwrap();
@@ -440,7 +452,9 @@ fn connection_ids() {
 
 #[tokio::test]
 async fn registry_builds_one_provider_per_connection() {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     s.set_secret("openrouter", "k1").await.unwrap();
     s.set_secret("openrouter~2", "k2").await.unwrap();
     save_rows(
@@ -477,7 +491,9 @@ async fn registry_builds_one_provider_per_connection() {
 
 #[tokio::test]
 async fn connection_row_without_a_key_is_ignored() {
-    let s = crate::store::Store::open("sqlite::memory:").await.unwrap();
+    let s = crate::store::TenantStore::open("sqlite::memory:")
+        .await
+        .unwrap();
     save_rows(
         &s,
         &[Connection {

@@ -14,7 +14,7 @@ use crate::engine::{Answer, FakeDecisionEngine};
 use crate::providers::ChatEndpoint;
 use crate::services::AppError;
 use crate::state::Emitter;
-use crate::store::{ScanSource, Store};
+use crate::store::{ScanSource, TenantStore as Store};
 
 pub(crate) struct FakeMail {
     pub headers: Vec<MailHeader>,

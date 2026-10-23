@@ -11,7 +11,7 @@ use super::scan::{
     PROGRESS_EVENT,
 };
 use crate::services::AppError;
-use crate::store::{Outcome, ProcessedEmail, ScanSource, Store};
+use crate::store::{Outcome, ProcessedEmail, ScanSource, TenantStore as Store};
 
 /// Settings key holding the highest job id already re-checked.
 pub const RECHECK_KEY: &str = "mail_recheck_job_id";

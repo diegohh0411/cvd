@@ -14,7 +14,7 @@ use crate::engine::DecisionEngine;
 use crate::providers::ChatEndpoint;
 use crate::services::AppError;
 use crate::state::{AppState, Emitter, ScanGuard};
-use crate::store::{ScanSource, Store};
+use crate::store::{ScanSource, TenantStore as Store};
 
 #[derive(Debug)]
 pub enum CycleError {

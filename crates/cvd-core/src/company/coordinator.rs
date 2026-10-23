@@ -13,7 +13,7 @@ use super::agent::{ResearchError, ResearchInput, ResearchOutput, ResearchStep};
 use super::{backoff, format_ts, is_job_board, need, normalize_name, Need};
 use crate::state::Emitter;
 use crate::store::types::Company;
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 pub const RESEARCH_EVENT: &str = "company://research";
 

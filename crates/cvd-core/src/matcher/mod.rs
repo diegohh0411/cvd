@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::{decide_checked, wire_request, Answer, DecisionEngine, EngineError, Question};
 use crate::store::types::*;
-use crate::store::{Store, StoreError};
+use crate::store::{StoreError, TenantStore as Store};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatchConfig {

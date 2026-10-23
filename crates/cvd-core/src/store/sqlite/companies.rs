@@ -2,7 +2,7 @@
 use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
 
-use super::types::{Company, CompanyProfile, CompanyStatus};
+use super::super::types::{Company, CompanyProfile, CompanyStatus};
 use super::{Result, Store, StoreError};
 
 fn parse_company_status(s: &str) -> Result<CompanyStatus> {

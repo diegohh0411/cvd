@@ -14,7 +14,7 @@ use crate::providers::ChatEndpoint;
 use crate::services::AppError;
 use crate::state::{Emitter, JOB_UPDATED_EVENT};
 use crate::store::types::{JobDescription, JobStatus};
-use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, Store};
+use crate::store::{NewProcessed, Outcome, ScanSource, ScanStatus, TenantStore as Store};
 
 pub const SCAN_DAYS: i64 = 30;
 /// Most emails fetched, classified and summarised at the same time.

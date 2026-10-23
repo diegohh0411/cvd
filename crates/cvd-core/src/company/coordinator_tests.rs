@@ -9,7 +9,7 @@ use super::agent::{ResearchError, ResearchInput, ResearchOutput, ResearchStep};
 use super::coordinator::*;
 use super::{format_ts, normalize_name};
 use crate::store::types::{CompanyProfile, CompanyStatus};
-use crate::store::Store;
+use crate::store::TenantStore as Store;
 
 type Events = Arc<Mutex<Vec<(String, Value)>>>;
 

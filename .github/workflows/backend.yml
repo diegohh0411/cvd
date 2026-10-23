@@ -10,6 +10,7 @@ on:
       - "bun.lock"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "scripts/test-postgres.sh"
       - ".github/workflows/backend.yml"
 
 concurrency:
@@ -25,8 +26,23 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Keep SQL behind the store API
+        run: |
+          if rg 'sqlx::' crates apps/desktop/src-tauri/src --glob '*.rs' --glob '!**/store/**'; then
+            exit 1
+          fi
+
       - name: Build
         run: cargo check --workspace --all-targets
 
       - name: Test
         run: cargo test --workspace
+
+  postgres:
+    name: Postgres store contracts
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test workspace with Postgres store contracts (Podman or Docker)
+        run: scripts/test-postgres.sh

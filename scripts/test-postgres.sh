@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Run the same store contracts against isolated Postgres, using Podman (or Docker).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+if command -v podman >/dev/null; then
+  engine=podman
+elif command -v docker >/dev/null; then
+  engine=docker
+else
+  echo "test-postgres.sh needs podman or docker" >&2
+  exit 1
+fi
+container="cvd-postgres-test-$$"
+"$engine" run -d --name "$container" --rm \
+  -e POSTGRES_PASSWORD=cvd-test -e POSTGRES_DB=cvd \
+  -p 127.0.0.1::5432 docker.io/library/postgres:17-alpine >/dev/null
+trap '"$engine" rm -f "$container" >/dev/null' EXIT
+ready=false
+for _ in {1..30}; do
+  if "$engine" exec "$container" pg_isready -U postgres >/dev/null 2>&1; then
+    ready=true
+    break
+  fi
+  sleep 1
+done
+if [ "$ready" != true ]; then
+  "$engine" logs "$container"
+  exit 1
+fi
+"$engine" exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d cvd <<'SQL'
+CREATE SCHEMA auth;
+CREATE TABLE auth.users(id uuid PRIMARY KEY);
+-- Match Supabase, where extensions can already live outside public.
+CREATE SCHEMA extensions;
+CREATE EXTENSION citext WITH SCHEMA extensions;
+CREATE ROLE cvd_app LOGIN PASSWORD 'cvd-test';
+GRANT USAGE ON SCHEMA public, extensions TO cvd_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cvd_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE ON SEQUENCES TO cvd_app;
+SQL
+port=$("$engine" port "$container" 5432/tcp)
+port=${port##*:}
+export CVD_TEST_POSTGRES_ADMIN_URL="postgres://postgres:cvd-test@127.0.0.1:$port/cvd"
+export CVD_TEST_POSTGRES_URL="postgres://cvd_app:cvd-test@127.0.0.1:$port/cvd"
+cargo test --workspace --features cvd-core/postgres-tests "$@"
+
+# Exercise the Supabase integration against API test doubles after store migration.
+for sql_file in supabase/tests/bootstrap.sql supabase/realtime.sql supabase/realtime.sql supabase/tests/realtime.sql; do
+  podman exec -i "$container" psql -v ON_ERROR_STOP=1 -U postgres -d cvd < "$sql_file"
+done
