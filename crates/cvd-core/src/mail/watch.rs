@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Notify;
+use tokio::task::AbortHandle;
 
 use super::cycle::CycleError;
 use super::imap::MailError;
@@ -59,6 +60,8 @@ pub struct WatcherControl {
     tx: UnboundedSender<Control>,
     rx: Mutex<Option<UnboundedReceiver<Control>>>,
     status: Arc<Mutex<WatcherStatus>>,
+    /// The running task, so `shutdown` can end it; it holds the state alive otherwise.
+    task: Mutex<Option<AbortHandle>>,
 }
 
 impl Default for WatcherControl {
@@ -68,6 +71,7 @@ impl Default for WatcherControl {
             tx,
             rx: Mutex::new(Some(rx)),
             status: Arc::default(),
+            task: Mutex::default(),
         }
     }
 }
@@ -89,6 +93,18 @@ impl WatcherControl {
     /// The receiving end, handed to `run_watcher` once.
     pub fn take_receiver(&self) -> Option<UnboundedReceiver<Control>> {
         lock(&self.rx).take()
+    }
+
+    /// Records the task running `run_watcher`.
+    pub fn attach(&self, task: AbortHandle) {
+        *lock(&self.task) = Some(task);
+    }
+
+    /// Ends the watcher task for good, e.g. when the server unloads an idle user.
+    pub fn shutdown(&self) {
+        if let Some(task) = lock(&self.task).take() {
+            task.abort();
+        }
     }
 }
 

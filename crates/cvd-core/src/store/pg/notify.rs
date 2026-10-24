@@ -71,9 +71,12 @@ impl ChangeFeed {
     pub fn subscribe(&self, user: UserId) -> ChangeReceiver {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut subscribers = self.subscribers.lock().unwrap();
-        let senders = subscribers.entry(user).or_default();
-        senders.retain(|s| !s.is_closed());
-        senders.push(tx);
+        // Users the server unloaded leave closed senders behind; drop them all here.
+        subscribers.retain(|_, senders| {
+            senders.retain(|s| !s.is_closed());
+            !senders.is_empty()
+        });
+        subscribers.entry(user).or_default().push(tx);
         rx
     }
     #[cfg(test)]

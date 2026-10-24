@@ -8,13 +8,15 @@
 //! - `CVD_HOST`: address to bind (default 127.0.0.1)
 //! - `CVD_STATIC_DIR`: web build to serve (default `apps/web/dist/cvd/browser`)
 //! - `CVD_PORT`: port (default 8787)
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+//! - `CVD_MAX_USERS`: most users loaded at once (default 500)
+//! - `CVD_IDLE_MINUTES`: unload a user this long after their last request (default 15)
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use cvd_core::store::{ChangeFeed, Store, UserId};
 use cvd_server::{
     auth::Verifier,
     router_with,
-    tenants::{Tenant, Tenants},
+    tenants::{Residency, Tenant, Tenants},
     Access, ClientAuth,
 };
 
@@ -41,10 +43,23 @@ async fn main() -> Result<(), Error> {
     let feed = ChangeFeed::connect(&url).await?;
     let access = match (env("SUPABASE_URL"), env("SUPABASE_ANON_KEY")) {
         (Some(supabase_url), Some(supabase_anon_key)) => {
-            tracing::info!(%supabase_url, "accounts enabled");
+            let defaults = Residency::default();
+            let residency = Residency {
+                max_users: env("CVD_MAX_USERS")
+                    .map(|n| n.parse())
+                    .transpose()?
+                    .unwrap_or(defaults.max_users),
+                idle_after: env("CVD_IDLE_MINUTES")
+                    .map(|m| m.parse().map(|m: u64| Duration::from_secs(m * 60)))
+                    .transpose()?
+                    .unwrap_or(defaults.idle_after),
+            };
+            tracing::info!(%supabase_url, ?residency, "accounts enabled");
+            let tenants = Arc::new(Tenants::new(store, Some(feed), residency));
+            tenants.spawn_sweeper(Duration::from_secs(60));
             Access::Accounts {
                 verifier: Verifier::supabase(&supabase_url),
-                tenants: Tenants::new(store, Some(feed)),
+                tenants,
                 client: ClientAuth {
                     supabase_url,
                     supabase_anon_key,

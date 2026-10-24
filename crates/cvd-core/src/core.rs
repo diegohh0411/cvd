@@ -65,7 +65,7 @@ fn start_mail_watcher(state: Arc<AppState>) {
     let Some(rx) = state.watcher.take_receiver() else {
         return;
     };
-    tokio::spawn(watch::run_watcher(
+    let task = tokio::spawn(watch::run_watcher(
         Arc::new(AppWatchDeps {
             state: state.clone(),
         }),
@@ -73,6 +73,7 @@ fn start_mail_watcher(state: Arc<AppState>) {
         state.watcher.status_handle(),
         state.emitter(),
     ));
+    state.watcher.attach(task.abort_handle());
     state.watcher.send(watch::Control::Restart);
 }
 

@@ -112,6 +112,15 @@ default statuses and view on their first request. Missing or invalid tokens get 
 The web build is served from the same origin, so no CORS is granted; in the Supabase
 dashboard, enable the Google provider and add the deployed origin to the redirect URLs.
 
+Each signed-in user gets their own services (engine, match runs, scan slot, Gmail
+watcher, company research), loaded on their first request. A user unloads after
+`CVD_IDLE_MINUTES` (15) without requests, unless an event stream is open or a match,
+scan or research is running; their Gmail watcher runs only while they're loaded. At most
+`CVD_MAX_USERS` (500) are loaded at once: past that, the least recently used idle user
+unloads, and when every loaded user is busy new users get 503. `start_match`,
+`refresh_company` and `start_scan` are rate limited per user and return 429 with
+`Retry-After` when exceeded.
+
 `POST /api/rpc/:command` takes the same camelCase JSON args as `invoke` and fails
 with the same `{ kind, message }` body. `GET /api/events` is an SSE stream of
 `{ event, payload }`. Desktop-only commands (auto-apply, local server connection,

@@ -340,6 +340,11 @@ impl AppState {
     pub fn is_running(&self, run_id: i64) -> bool {
         lock(&self.runs).contains_key(&run_id)
     }
+
+    /// True while a match run, Gmail scan or company research is in flight.
+    pub fn busy(&self) -> bool {
+        !lock(&self.runs).is_empty() || self.scan_running() || !self.coordinator.is_idle()
+    }
 }
 
 pub fn set_engine_error(slot: &Mutex<Option<String>>, error: Option<String>) {
