@@ -21,7 +21,8 @@ use crate::{limits::RateLimits, Events};
 pub struct Tenant {
     pub state: Arc<AppState>,
     pub events: Events,
-    pub limits: RateLimits,
+    /// Shared with `Tenants`, which keeps them after the user unloads.
+    pub limits: Arc<RateLimits>,
     /// Forwards this user's database changes to `events`.
     forward: Option<AbortHandle>,
 }
@@ -31,7 +32,7 @@ impl Tenant {
         Self {
             state,
             events,
-            limits: RateLimits::default(),
+            limits: Arc::default(),
             forward: None,
         }
     }
@@ -56,6 +57,11 @@ impl Tenant {
     /// Nothing would notice it unloading: no open event stream and nothing running.
     fn idle(&self) -> bool {
         self.events.listeners() == 0 && !self.state.busy()
+    }
+
+    /// Like `idle`, but also stops new background scans, so check it last.
+    fn retire(&self) -> bool {
+        self.events.listeners() == 0 && self.state.try_retire()
     }
 }
 
@@ -128,7 +134,7 @@ struct Slot {
 }
 
 impl Slot {
-    /// Safe to drop: nobody is starting or using it and it is idle (or failed to start).
+    /// Nobody is starting or using it and it is idle (or failed to start).
     fn evictable(&self) -> bool {
         Arc::strong_count(&self.tenant) == 1
             && self
@@ -136,12 +142,20 @@ impl Slot {
                 .get()
                 .is_none_or(|t| Arc::strong_count(t) == 1 && t.idle())
     }
+
+    /// `evictable`, and its watcher can no longer start a scan. Call with the slots lock
+    /// held and remove the slot when true, since nothing else will un-retire it.
+    fn retire(&self) -> bool {
+        self.evictable() && self.tenant.get().is_none_or(|t| t.retire())
+    }
 }
 
 pub struct Tenants {
     start: Starter,
     residency: Residency,
     slots: Mutex<HashMap<UserId, Slot>>,
+    /// Outlives the user's slot, so unloading doesn't refill their buckets.
+    limits: Mutex<HashMap<UserId, Arc<RateLimits>>>,
 }
 
 impl Tenants {
@@ -162,6 +176,7 @@ impl Tenants {
             start,
             residency,
             slots: Mutex::default(),
+            limits: Mutex::default(),
         }
     }
 
@@ -191,17 +206,32 @@ impl Tenants {
         // Stopping its tasks happens outside the lock.
         drop(unloaded);
         let tenant = cell
-            .get_or_try_init(|| (self.start)(user).map_ok(Arc::new))
+            .get_or_try_init(|| {
+                (self.start)(user).map_ok(|mut t| {
+                    t.limits = self.limits_for(user);
+                    Arc::new(t)
+                })
+            })
             .await?;
         Ok(tenant.clone())
     }
 
+    fn limits_for(&self, user: UserId) -> Arc<RateLimits> {
+        let mut limits = self.limits.lock().unwrap_or_else(|e| e.into_inner());
+        limits.entry(user).or_default().clone()
+    }
+
     fn evict_lru(slots: &mut HashMap<UserId, Slot>) -> Option<Slot> {
-        let user = *slots
+        let mut candidates: Vec<_> = slots
             .iter()
             .filter(|(_, s)| s.evictable())
-            .min_by_key(|(_, s)| s.last_used)?
-            .0;
+            .map(|(u, s)| (s.last_used, *u))
+            .collect();
+        candidates.sort_by_key(|(at, _)| *at);
+        let user = candidates
+            .into_iter()
+            .map(|(_, u)| u)
+            .find(|u| slots[u].retire())?;
         slots.remove(&user)
     }
 
@@ -213,11 +243,16 @@ impl Tenants {
             let now = Instant::now();
             let stale: Vec<UserId> = slots
                 .iter()
-                .filter(|(_, s)| now.duration_since(s.last_used) >= cutoff && s.evictable())
+                .filter(|(_, s)| now.duration_since(s.last_used) >= cutoff && s.retire())
                 .map(|(u, _)| *u)
                 .collect();
             stale.iter().filter_map(|u| slots.remove(u)).collect()
         };
+        // Unloaded users' buckets go once they've refilled; loaded users share theirs.
+        self.limits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, l| Arc::strong_count(l) > 1 || !l.is_full());
         unloaded.len()
     }
 

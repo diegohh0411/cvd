@@ -12,6 +12,9 @@ pub struct Limit {
     pub refill: Duration,
 }
 
+/// Commands that do another's work and so spend its tokens.
+const SAME_AS: &[(&str, &str)] = &[("rescore", "start_match")];
+
 /// The limited commands. Anything not listed is unlimited.
 pub const LIMITS: &[(&str, Limit)] = &[
     (
@@ -68,6 +71,10 @@ impl RateLimits {
     }
 
     fn check_at(&self, command: &str, now: Instant) -> Result<(), Duration> {
+        let command = SAME_AS
+            .iter()
+            .find(|(c, _)| *c == command)
+            .map_or(command, |(_, same)| same);
         let Some((name, limit)) = self.limits.iter().find(|(n, _)| *n == command) else {
             return Ok(());
         };
@@ -86,6 +93,25 @@ impl RateLimits {
         } else {
             Err(Duration::from_secs_f64((1.0 - bucket.tokens) * refill))
         }
+    }
+
+    /// Every bucket has refilled, so forgetting them forgives nothing.
+    pub fn is_full(&self) -> bool {
+        self.is_full_at(Instant::now())
+    }
+
+    fn is_full_at(&self, now: Instant) -> bool {
+        let buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        buckets.iter().all(|(name, b)| {
+            self.limits
+                .iter()
+                .find(|(n, _)| n == name)
+                .is_none_or(|(_, l)| {
+                    let earned =
+                        now.saturating_duration_since(b.at).as_secs_f64() / l.refill.as_secs_f64();
+                    b.tokens + earned >= l.burst as f64
+                })
+        })
     }
 }
 
@@ -128,6 +154,26 @@ mod tests {
         assert!(limits.check_at("start_match", later).is_ok());
         assert!(limits.check_at("start_match", later).is_ok());
         assert!(limits.check_at("start_match", later).is_err());
+    }
+
+    #[test]
+    fn rescore_spends_start_match_tokens() {
+        let limits = RateLimits::new(TEST);
+        let t0 = Instant::now();
+        assert!(limits.check_at("rescore", t0).is_ok());
+        assert!(limits.check_at("start_match", t0).is_ok());
+        assert!(limits.check_at("rescore", t0).is_err());
+        assert!(limits.check_at("start_match", t0).is_err());
+    }
+
+    #[test]
+    fn full_once_every_bucket_has_refilled() {
+        let limits = RateLimits::new(TEST);
+        let t0 = Instant::now();
+        assert!(limits.is_full_at(t0));
+        limits.check_at("start_match", t0).unwrap();
+        assert!(!limits.is_full_at(t0 + Duration::from_secs(9)));
+        assert!(limits.is_full_at(t0 + Duration::from_secs(10)));
     }
 
     #[test]

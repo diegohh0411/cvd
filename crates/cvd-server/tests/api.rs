@@ -630,6 +630,44 @@ mod residency {
         freed(&states).await;
     }
 
+    #[tokio::test]
+    async fn a_running_scan_keeps_its_user_and_retiring_blocks_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 10);
+        let u = user();
+        let state = tenants.get(u).await.unwrap().state.clone();
+        let scan = state.begin_scan().unwrap();
+        assert_eq!(tenants.sweep(), 0);
+        drop(scan);
+        assert_eq!(tenants.sweep(), 1);
+        // The unloaded state's watcher can't start another scan before it's aborted.
+        assert!(state.begin_scan().is_none());
+    }
+
+    #[tokio::test]
+    async fn unloading_does_not_refill_rate_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 1);
+        let app = app_with(tenants.clone());
+        let (a, b) = (user(), user());
+        let scan = |u: UserId| {
+            Request::post("/api/rpc/start_scan")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token(u.0)))
+                .body(Body::empty())
+                .unwrap()
+        };
+        // No Gmail account, so each call fails, but it still spends a token.
+        for _ in 0..3 {
+            assert_eq!(send(&app, scan(a)).await, StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(send(&app, scan(a)).await, StatusCode::TOO_MANY_REQUESTS);
+        // `b` takes the only slot, unloading `a`; `a` comes back still limited.
+        assert_eq!(send(&app, call(Some(&token(b.0)))).await, StatusCode::OK);
+        tenants.sweep();
+        assert_eq!(send(&app, scan(a)).await, StatusCode::TOO_MANY_REQUESTS);
+    }
+
     /// Unloaded states free once their aborted tasks are dropped.
     async fn freed(states: &[Weak<AppState>]) {
         tokio::time::timeout(Duration::from_secs(5), async {
