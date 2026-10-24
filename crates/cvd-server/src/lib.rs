@@ -1,5 +1,6 @@
 //! HTTP front for the core services: RPC, server-sent events and the web build.
 pub mod auth;
+pub mod limits;
 pub mod rpc;
 pub mod tenants;
 
@@ -28,7 +29,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use auth::{AuthError, Verifier};
 use rpc::RpcError;
-use tenants::{Tenant, Tenants};
+use tenants::{Tenant, TenantError, Tenants};
 
 /// One emitted event, as sent on `/api/events`.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -56,6 +57,11 @@ impl Events {
             });
         })
     }
+
+    /// Open event streams.
+    pub fn listeners(&self) -> usize {
+        self.0.receiver_count()
+    }
 }
 
 /// What the browser needs to sign in; public values only.
@@ -74,7 +80,7 @@ pub enum Access {
     /// Requests carry a Supabase access token; each user gets their own services.
     Accounts {
         verifier: Verifier,
-        tenants: Tenants,
+        tenants: Arc<Tenants>,
         client: ClientAuth,
     },
 }
@@ -112,9 +118,20 @@ impl Access {
             };
             (status, Json(AppError::Io(e.to_string()))).into_response()
         })?;
-        let tenant = tenants.get(session.user).await.map_err(|e| {
-            tracing::error!(user = %session.user.0, error = %e, "couldn't start user services");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response()
+        let tenant = tenants.get(session.user).await.map_err(|e| match e {
+            TenantError::Full => {
+                tracing::warn!(user = %session.user.0, "no room to load another user");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    [(header::RETRY_AFTER, "60")],
+                    Json(AppError::Io(e.to_string())),
+                )
+                    .into_response()
+            }
+            TenantError::Start(e) => {
+                tracing::error!(user = %session.user.0, error = %e, "couldn't start user services");
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(e)).into_response()
+            }
         })?;
         Ok((tenant, Some(session.expires_at)))
     }
@@ -147,7 +164,10 @@ struct Ctx {
 
 /// A single-user router; see [`router_with`].
 pub fn router(state: Arc<AppState>, events: Events, static_dir: Option<&Path>) -> Router {
-    router_with(Access::Open(Arc::new(Tenant { state, events })), static_dir)
+    router_with(
+        Access::Open(Arc::new(Tenant::new(state, events))),
+        static_dir,
+    )
 }
 
 /// `static_dir` is the web build (`apps/web/dist/cvd/browser`); unknown paths serve its index.
@@ -205,6 +225,18 @@ async fn call(
         Ok((t, _)) => t,
         Err(res) => return res,
     };
+    if let Err(wait) = tenant.limits.check(&command) {
+        // Round up: a client retrying after a truncated wait would just get 429 again.
+        let secs = (wait.as_secs_f64().ceil() as u64).max(1);
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, secs.to_string())],
+            Json(AppError::Io(format!(
+                "Too many {command} calls; try again in {secs} s."
+            ))),
+        )
+            .into_response();
+    }
     let args = if body.is_empty() {
         Ok(Value::Null)
     } else {

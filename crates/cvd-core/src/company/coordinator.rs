@@ -110,6 +110,14 @@ impl ResearchCoordinator {
         outcome.await
     }
 
+    /// True when no research run is in flight.
+    pub fn is_idle(&self) -> bool {
+        self.inflight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    }
+
     /// Cancels the running research for `company_id`; false when none runs.
     pub fn cancel(&self, company_id: i64) -> bool {
         match self

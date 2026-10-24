@@ -1,7 +1,7 @@
 //! Shared application state behind the Tauri commands.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use tokio_util::sync::CancellationToken;
@@ -67,20 +67,25 @@ pub struct AppState {
     skips: Skips,
     /// Company research runs (single-flight per company, one at a time).
     pub coordinator: Arc<ResearchCoordinator>,
-    /// Set while a Gmail scan runs; see `begin_scan`.
-    scan_running: Arc<AtomicBool>,
+    /// `SLOT_FREE`, `SLOT_SCANNING` or `SLOT_RETIRED`; see `begin_scan` and `try_retire`.
+    scan_slot: Arc<AtomicU8>,
     /// Woken whenever the scan slot frees.
     scan_freed: Arc<tokio::sync::Notify>,
     /// The Gmail watcher task's controls and status.
     pub watcher: crate::mail::watch::WatcherControl,
 }
 
+const SLOT_FREE: u8 = 0;
+const SLOT_SCANNING: u8 = 1;
+/// Retired by `try_retire`: no scan starts again.
+const SLOT_RETIRED: u8 = 2;
+
 /// Holds the single Gmail scan slot; the slot frees when the guard drops.
-pub struct ScanGuard(Arc<AtomicBool>, Arc<tokio::sync::Notify>);
+pub struct ScanGuard(Arc<AtomicU8>, Arc<tokio::sync::Notify>);
 
 impl Drop for ScanGuard {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
+        self.0.store(SLOT_FREE, Ordering::SeqCst);
         self.1.notify_waiters();
     }
 }
@@ -118,7 +123,7 @@ impl AppState {
             exa_base: EXA_BASE.into(),
             research_fn: None,
             skips: Skips::default(),
-            scan_running: Arc::default(),
+            scan_slot: Arc::default(),
             scan_freed: Arc::default(),
             watcher: Default::default(),
         }
@@ -303,12 +308,32 @@ impl AppState {
         self.runs.clone()
     }
 
-    /// Claims the Gmail scan slot; `None` while another scan holds it.
+    /// Claims the Gmail scan slot; `None` while another scan holds it or after `try_retire`.
     pub fn begin_scan(&self) -> Option<ScanGuard> {
-        self.scan_running
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        self.scan_slot
+            .compare_exchange(SLOT_FREE, SLOT_SCANNING, Ordering::SeqCst, Ordering::SeqCst)
             .ok()
-            .map(|_| ScanGuard(self.scan_running.clone(), self.scan_freed.clone()))
+            .map(|_| ScanGuard(self.scan_slot.clone(), self.scan_freed.clone()))
+    }
+
+    /// Stops new scans if nothing is in flight, so the state can be dropped and its
+    /// watcher aborted without cutting a scan short. False (and no change) when busy.
+    /// Match runs and research only start from requests, which the caller rules out.
+    pub fn try_retire(&self) -> bool {
+        if self
+            .scan_slot
+            .compare_exchange(SLOT_FREE, SLOT_RETIRED, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+        if self.busy() {
+            self.scan_slot.store(SLOT_FREE, Ordering::SeqCst);
+            // A scan refused meanwhile is waiting for the slot to free.
+            self.scan_freed.notify_waiters();
+            return false;
+        }
+        true
     }
 
     /// Notified each time the scan slot frees. Create the `notified()` future
@@ -318,7 +343,7 @@ impl AppState {
     }
 
     pub fn scan_running(&self) -> bool {
-        self.scan_running.load(Ordering::SeqCst)
+        self.scan_slot.load(Ordering::SeqCst) == SLOT_SCANNING
     }
 
     /// Registers a fresh token for `run_id`; `None` if it is already running.
@@ -339,6 +364,11 @@ impl AppState {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_running(&self, run_id: i64) -> bool {
         lock(&self.runs).contains_key(&run_id)
+    }
+
+    /// True while a match run, Gmail scan or company research is in flight.
+    pub fn busy(&self) -> bool {
+        !lock(&self.runs).is_empty() || self.scan_running() || !self.coordinator.is_idle()
     }
 }
 
@@ -434,5 +464,48 @@ mod scan_slot_tests {
         drop(first);
         assert!(!st.scan_running());
         assert!(st.begin_scan().is_some());
+    }
+
+    #[tokio::test]
+    async fn retiring_waits_for_a_scan_and_then_blocks_new_ones() {
+        let store = Store::open("sqlite::memory:").await.unwrap();
+        let st = AppState::new(
+            store,
+            EngineSource::Fixed(Arc::new(FakeDecisionEngine::new(|_, _, _| {
+                crate::engine::Answer::Noul { p: 0.0 }
+            }))),
+            Arc::new(|_, _| {}),
+        );
+
+        let scan = st.begin_scan().unwrap();
+        assert!(!st.try_retire(), "a running scan keeps the state");
+        drop(scan);
+        assert!(st.try_retire());
+        assert!(st.begin_scan().is_none(), "no scan starts once retired");
+        assert!(!st.scan_running());
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_retire_frees_the_slot_and_wakes_waiting_scans() {
+        let store = Store::open("sqlite::memory:").await.unwrap();
+        let st = AppState::new(
+            store,
+            EngineSource::Fixed(Arc::new(FakeDecisionEngine::new(|_, _, _| {
+                crate::engine::Answer::Noul { p: 0.0 }
+            }))),
+            Arc::new(|_, _| {}),
+        );
+        let _run = st.register_run(1).unwrap();
+        // The watcher arms this before a cycle; a scan refused during the retire waits on it.
+        let freed = st.scan_freed();
+        let notified = freed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        assert!(!st.try_retire(), "a match run keeps the state");
+        tokio::time::timeout(std::time::Duration::from_secs(1), notified)
+            .await
+            .expect("the waiting scan is woken");
+        assert!(st.begin_scan().is_some(), "and can then claim the slot");
     }
 }

@@ -342,11 +342,16 @@ mod accounts {
     const SECRET: &[u8] = b"test-secret-that-is-long-enough!";
 
     async fn app() -> (Router, tempfile::TempDir) {
-        use base64::Engine;
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&format!("sqlite://{}", dir.path().join("cv.db").display()))
             .await
             .unwrap();
+        let tenants = Arc::new(Tenants::new(store, None, Default::default()));
+        (app_with(tenants), dir)
+    }
+
+    pub(super) fn app_with(tenants: Arc<Tenants>) -> Router {
+        use base64::Engine;
         let keys = serde_json::from_value(json!({ "keys": [{
             "kty": "oct", "kid": "k1", "alg": "HS256",
             "k": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(SECRET),
@@ -354,16 +359,16 @@ mod accounts {
         .unwrap();
         let access = Access::Accounts {
             verifier: Verifier::with_keys(ISSUER, keys),
-            tenants: Tenants::new(store, None),
+            tenants,
             client: ClientAuth {
                 supabase_url: "https://test.supabase.co".into(),
                 supabase_anon_key: "anon".into(),
             },
         };
-        (router_with(access, None), dir)
+        router_with(access, None)
     }
 
-    fn token(user: uuid::Uuid) -> String {
+    pub(super) fn token(user: uuid::Uuid) -> String {
         token_expiring(user, chrono::Utc::now().timestamp() + 600)
     }
 
@@ -374,11 +379,11 @@ mod accounts {
         encode(&header, &claims, &EncodingKey::from_secret(SECRET)).unwrap()
     }
 
-    async fn send(app: &Router, req: Request<Body>) -> StatusCode {
+    pub(super) async fn send(app: &Router, req: Request<Body>) -> StatusCode {
         app.clone().oneshot(req).await.unwrap().status()
     }
 
-    fn call(token: Option<&str>) -> Request<Body> {
+    pub(super) fn call(token: Option<&str>) -> Request<Body> {
         let mut req =
             Request::post("/api/rpc/list_job_statuses").header("content-type", "application/json");
         if let Some(t) = token {
@@ -465,4 +470,244 @@ mod accounts {
         assert_eq!(body["auth"]["supabaseUrl"], "https://test.supabase.co");
         assert_eq!(body["auth"]["supabaseAnonKey"], "anon");
     }
+}
+
+/// Each user's services are their own, unload when idle, and stay within `max_users`.
+mod residency {
+    use super::accounts::{app_with, call, send, token};
+    use super::*;
+    use cvd_core::store::UserId;
+    use cvd_server::tenants::{Residency, Starter, Tenant, TenantError, Tenants};
+    use std::sync::Weak;
+
+    /// Every user gets their own SQLite file; the services don't know the difference.
+    fn starter(dir: &tempfile::TempDir) -> Starter {
+        let dir = dir.path().to_owned();
+        Arc::new(move |user: UserId| {
+            let path = dir.join(format!("{}.db", user.0));
+            Box::pin(async move {
+                let store = TenantStore::open(&format!("sqlite://{}", path.display())).await?;
+                let events = Events::default();
+                Ok(Tenant::new(
+                    core::start(store, events.emitter()).await?,
+                    events,
+                ))
+            })
+        })
+    }
+
+    fn tenants(dir: &tempfile::TempDir, max_users: usize) -> Arc<Tenants> {
+        Arc::new(Tenants::with_starter(
+            starter(dir),
+            Residency {
+                max_users,
+                idle_after: Duration::ZERO,
+            },
+        ))
+    }
+
+    fn user() -> UserId {
+        UserId(uuid::Uuid::new_v4())
+    }
+
+    #[tokio::test]
+    async fn cancelling_one_users_run_leaves_anothers_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 10);
+        let app = app_with(tenants.clone());
+        let (a, b) = (user(), user());
+        // Both users' first runs get id 1 in their own databases.
+        let run_a = tenants.get(a).await.unwrap().state.register_run(1).unwrap();
+        let run_b = tenants.get(b).await.unwrap().state.register_run(1).unwrap();
+
+        let cancel = Request::post("/api/rpc/cancel_match")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {}", token(a.0)))
+            .body(Body::from(json!({ "runId": 1 }).to_string()))
+            .unwrap();
+        assert_eq!(send(&app, cancel).await, StatusCode::OK);
+        assert!(run_a.is_cancelled());
+        assert!(!run_b.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn idle_users_unload_but_busy_or_listening_ones_stay() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 10);
+        let app = app_with(tenants.clone());
+        let (idle, busy, listening) = (user(), user(), user());
+        for u in [idle, busy, listening] {
+            assert_eq!(send(&app, call(Some(&token(u.0)))).await, StatusCode::OK);
+        }
+        let _run = tenants
+            .get(busy)
+            .await
+            .unwrap()
+            .state
+            .register_run(7)
+            .unwrap();
+        let events = app
+            .clone()
+            .oneshot(
+                Request::get("/api/events")
+                    .header("authorization", format!("Bearer {}", token(listening.0)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(tenants.resident(), 3);
+        assert_eq!(tenants.sweep(), 1);
+        assert_eq!(tenants.resident(), 2);
+
+        // The run finishing and the stream closing make both unloadable.
+        tenants.get(busy).await.unwrap().state.cancel_run(7);
+        cvd_core::state::remove_run(&tenants.get(busy).await.unwrap().state.runs(), 7);
+        drop(events);
+        assert_eq!(tenants.sweep(), 2);
+        assert_eq!(tenants.resident(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_full_server_unloads_the_least_recently_used_idle_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 2);
+        let app = app_with(tenants.clone());
+        let (busy, idle, newcomer, late) = (user(), user(), user(), user());
+        let _run = tenants
+            .get(busy)
+            .await
+            .unwrap()
+            .state
+            .register_run(1)
+            .unwrap();
+        let idle_state = Arc::downgrade(&tenants.get(idle).await.unwrap().state);
+
+        // `busy` is older but running, so `idle` makes room.
+        assert_eq!(
+            send(&app, call(Some(&token(newcomer.0)))).await,
+            StatusCode::OK
+        );
+        assert_eq!(tenants.resident(), 2);
+        assert!(tenants.get(busy).await.is_ok());
+        freed(&[idle_state]).await;
+
+        // With every loaded user busy there is no room.
+        let _run2 = tenants
+            .get(newcomer)
+            .await
+            .unwrap()
+            .state
+            .register_run(1)
+            .unwrap();
+        assert!(matches!(tenants.get(late).await, Err(TenantError::Full)));
+        let res = app
+            .clone()
+            .oneshot(call(Some(&token(late.0))))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(res.headers()["retry-after"], "60");
+    }
+
+    /// Load test: many users pass through a small server and memory stays bounded,
+    /// since unloaded users' services (mail watcher included) are actually freed.
+    #[tokio::test]
+    async fn many_users_stay_within_the_resident_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 8);
+        let app = app_with(tenants.clone());
+        let mut states: Vec<Weak<AppState>> = Vec::new();
+        for _ in 0..64 {
+            let u = user();
+            assert_eq!(send(&app, call(Some(&token(u.0)))).await, StatusCode::OK);
+            states.push(Arc::downgrade(&tenants.get(u).await.unwrap().state));
+            assert!(tenants.resident() <= 8);
+        }
+        freed(&states[..56]).await;
+        assert!(states[56..].iter().all(|s| s.strong_count() > 0));
+        tenants.sweep();
+        freed(&states).await;
+    }
+
+    #[tokio::test]
+    async fn a_running_scan_keeps_its_user_and_retiring_blocks_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 10);
+        let u = user();
+        let state = tenants.get(u).await.unwrap().state.clone();
+        let scan = state.begin_scan().unwrap();
+        assert_eq!(tenants.sweep(), 0);
+        drop(scan);
+        assert_eq!(tenants.sweep(), 1);
+        // The unloaded state's watcher can't start another scan before it's aborted.
+        assert!(state.begin_scan().is_none());
+    }
+
+    #[tokio::test]
+    async fn unloading_does_not_refill_rate_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let tenants = tenants(&dir, 1);
+        let app = app_with(tenants.clone());
+        let (a, b) = (user(), user());
+        let scan = |u: UserId| {
+            Request::post("/api/rpc/start_scan")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token(u.0)))
+                .body(Body::empty())
+                .unwrap()
+        };
+        // No Gmail account, so each call fails, but it still spends a token.
+        for _ in 0..3 {
+            assert_eq!(send(&app, scan(a)).await, StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(send(&app, scan(a)).await, StatusCode::TOO_MANY_REQUESTS);
+        // `b` takes the only slot, unloading `a`; `a` comes back still limited.
+        assert_eq!(send(&app, call(Some(&token(b.0)))).await, StatusCode::OK);
+        tenants.sweep();
+        assert_eq!(send(&app, scan(a)).await, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    /// Unloaded states free once their aborted tasks are dropped.
+    async fn freed(states: &[Weak<AppState>]) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while states.iter().any(|s| s.strong_count() > 0) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("unloaded users' services should be freed");
+    }
+}
+
+#[tokio::test]
+async fn expensive_commands_are_rate_limited() {
+    let (app, _state, _events, _dir) = app(None).await;
+    // `start_scan` allows a burst of 3; it fails without a Gmail account, which still counts.
+    for _ in 0..3 {
+        let (status, _) = rpc(&app, "start_scan", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let res = app
+        .clone()
+        .oneshot(
+            Request::post("/api/rpc/start_scan")
+                .header("content-type", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        res.headers()["retry-after"]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            > 0
+    );
+    // Other commands are unaffected.
+    let (status, _) = rpc(&app, "list_job_statuses", None).await;
+    assert_eq!(status, StatusCode::OK);
 }
