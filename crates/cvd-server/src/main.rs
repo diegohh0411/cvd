@@ -54,6 +54,9 @@ async fn main() -> Result<(), Error> {
                     .transpose()?
                     .unwrap_or(defaults.idle_after),
             };
+            if residency.max_users == 0 {
+                return Err("CVD_MAX_USERS must be at least 1".into());
+            }
             tracing::info!(%supabase_url, ?residency, "accounts enabled");
             let tenants = Arc::new(Tenants::new(store, Some(feed), residency));
             tenants.spawn_sweeper(Duration::from_secs(60));

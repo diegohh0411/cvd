@@ -226,7 +226,8 @@ async fn call(
         Err(res) => return res,
     };
     if let Err(wait) = tenant.limits.check(&command) {
-        let secs = wait.as_secs().max(1);
+        // Round up: a client retrying after a truncated wait would just get 429 again.
+        let secs = (wait.as_secs_f64().ceil() as u64).max(1);
         return (
             StatusCode::TOO_MANY_REQUESTS,
             [(header::RETRY_AFTER, secs.to_string())],
